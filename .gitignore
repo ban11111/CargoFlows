@@ -1,6 +1,7 @@
 .cache
 .pnpm-store/
 .superpowers/
+.worktrees/
 .DS_Store
 
 # Environment files
