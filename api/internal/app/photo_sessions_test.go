@@ -16,8 +16,9 @@ import (
 func TestCreatePhotoSessionResolvesSOPVersionPublicID(t *testing.T) {
 	db := newTestDB(t)
 	version := createTestSOPVersion(t, db, "22222222-2222-4222-8222-222222222222")
+	sku := createSKUForSOPVersion(t, db, version, "SESSION-RESOLVE")
 
-	response := performCreatePhotoSession(t, db, 42, version.PublicID)
+	response := performCreatePhotoSession(t, db, sku.ID, version.PublicID)
 	if response.Code != http.StatusCreated {
 		t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, response.Code, response.Body.String())
 	}
@@ -35,10 +36,10 @@ func TestCreatePhotoSessionAssignsUniquePublicIDs(t *testing.T) {
 	db := newTestDB(t)
 	version := createTestSOPVersion(t, db, "33333333-3333-4333-8333-333333333333")
 
-	for _, skuID := range []uint{42, 43} {
-		response := performCreatePhotoSession(t, db, skuID, version.PublicID)
+	for _, sku := range []models.SKU{createSKUForSOPVersion(t, db, version, "SESSION-ONE"), createSKUForSOPVersion(t, db, version, "SESSION-TWO")} {
+		response := performCreatePhotoSession(t, db, sku.ID, version.PublicID)
 		if response.Code != http.StatusCreated {
-			t.Fatalf("expected status %d for SKU %d, got %d: %s", http.StatusCreated, skuID, response.Code, response.Body.String())
+			t.Fatalf("expected status %d for SKU %d, got %d: %s", http.StatusCreated, sku.ID, response.Code, response.Body.String())
 		}
 	}
 

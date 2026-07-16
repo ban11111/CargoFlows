@@ -17,14 +17,15 @@ import (
 func TestCreatePhotoSessionRequiresPublishedVersion(t *testing.T) {
 	db := newTestDB(t)
 	version := createCaptureVersionFixture(t, db, models.SOPVersionDraft, "44444444-4444-4444-8444-444444444444")
+	sku := createSKUForSOPVersion(t, db, version, "PUBLISH-SKU")
 
-	response := performCreatePhotoSession(t, db, 42, version.PublicID)
+	response := performCreatePhotoSession(t, db, sku.ID, version.PublicID)
 	assertErrorResponse(t, response, http.StatusConflict, "version_not_published")
 
 	if err := db.Model(&version).Update("status", models.SOPVersionPublished).Error; err != nil {
 		t.Fatal(err)
 	}
-	response = performCreatePhotoSession(t, db, 42, version.PublicID)
+	response = performCreatePhotoSession(t, db, sku.ID, version.PublicID)
 	if response.Code != http.StatusCreated {
 		t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, response.Code, response.Body.String())
 	}
@@ -46,8 +47,32 @@ func TestCreatePhotoSessionRequiresPublishedVersion(t *testing.T) {
 func TestCreatePhotoSessionRejectsArchivedVersion(t *testing.T) {
 	db := newTestDB(t)
 	version := createCaptureVersionFixture(t, db, models.SOPVersionArchived, "55555555-5555-4555-8555-555555555555")
-	response := performCreatePhotoSession(t, db, 42, version.PublicID)
+	sku := createSKUForSOPVersion(t, db, version, "ARCHIVED-SKU")
+	response := performCreatePhotoSession(t, db, sku.ID, version.PublicID)
 	assertErrorResponse(t, response, http.StatusConflict, "version_not_published")
+}
+
+func TestCreatePhotoSessionRejectsMissingSKUWithoutWriting(t *testing.T) {
+	db := newTestDB(t)
+	version := createCaptureVersionFixture(t, db, models.SOPVersionPublished, "13131313-1313-4313-8313-131313131313")
+
+	response := performCreatePhotoSession(t, db, 999999, version.PublicID)
+	assertErrorResponse(t, response, http.StatusNotFound, "sku_not_found")
+	assertPhotoSessionCount(t, db, 0)
+}
+
+func TestCreatePhotoSessionRejectsSKUCaptureSOPCategoryMismatchWithoutWriting(t *testing.T) {
+	db := newTestDB(t)
+	version := createCaptureVersionFixture(t, db, models.SOPVersionPublished, "14141414-1414-4414-8414-141414141414")
+	otherCategory := models.Category{Name: "Other Category", NameEN: "Other Category"}
+	if err := db.Create(&otherCategory).Error; err != nil {
+		t.Fatal(err)
+	}
+	sku := createSKUFixture(t, db, otherCategory.ID, "OTHER-SKU")
+
+	response := performCreatePhotoSession(t, db, sku.ID, version.PublicID)
+	assertErrorResponse(t, response, http.StatusConflict, "sku_sop_category_mismatch")
+	assertPhotoSessionCount(t, db, 0)
 }
 
 func TestCompleteAssetRejectsViewFromAnotherVersion(t *testing.T) {
@@ -66,6 +91,31 @@ func TestCompleteAssetRejectsViewFromAnotherVersion(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("expected no asset on mismatch, got %d", count)
+	}
+}
+
+func TestCompleteAssetRejectsMalformedCapturedAtWithoutWriting(t *testing.T) {
+	db := newTestDB(t)
+	version := createCaptureVersionFixture(t, db, models.SOPVersionPublished, "15151515-1515-4515-8515-151515151515")
+	view := createCaptureViewFixture(t, db, version.ID, "16161616-1616-4616-8616-161616161616", "正面", "Front")
+	session := createPhotoSessionFixture(t, db, version.ID, "17171717-1717-4717-8717-171717171717")
+
+	response := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(response)
+	context.Request = httptest.NewRequest(http.MethodPost, "/assets/complete", strings.NewReader(fmt.Sprintf(
+		`{"photo_session_id":%q,"sop_view_id":%q,"object_key":"capture.jpg","original_url":"http://example.test/capture.jpg","captured_at":"not-a-date"}`,
+		session.PublicID, view.PublicID,
+	)))
+	context.Request.Header.Set("Content-Type", "application/json")
+	(&Server{db: db}).completeAssetUpload(context)
+
+	assertErrorResponse(t, response, http.StatusBadRequest, "invalid_request")
+	var count int64
+	if err := db.Model(&models.Asset{}).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no assets, got %d", count)
 	}
 }
 
@@ -191,6 +241,39 @@ func createPhotoSessionFixture(t *testing.T, db *gorm.DB, versionID uint, public
 		t.Fatal(err)
 	}
 	return session
+}
+
+func createSKUFixture(t *testing.T, db *gorm.DB, categoryID uint, code string) models.SKU {
+	t.Helper()
+	product := models.Product{CategoryID: categoryID, Name: code + " Product"}
+	if err := db.Create(&product).Error; err != nil {
+		t.Fatal(err)
+	}
+	sku := models.SKU{ProductID: product.ID, Code: code}
+	if err := db.Create(&sku).Error; err != nil {
+		t.Fatal(err)
+	}
+	return sku
+}
+
+func createSKUForSOPVersion(t *testing.T, db *gorm.DB, version models.SOPVersion, code string) models.SKU {
+	t.Helper()
+	var parent models.CaptureSOP
+	if err := db.First(&parent, version.CaptureSOPID).Error; err != nil {
+		t.Fatal(err)
+	}
+	return createSKUFixture(t, db, parent.CategoryID, code)
+}
+
+func assertPhotoSessionCount(t *testing.T, db *gorm.DB, want int64) {
+	t.Helper()
+	var count int64
+	if err := db.Model(&models.PhotoSession{}).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != want {
+		t.Fatalf("expected %d photo sessions, got %d", want, count)
+	}
 }
 
 func performCompleteAsset(t *testing.T, db *gorm.DB, sessionID, viewID string) *httptest.ResponseRecorder {

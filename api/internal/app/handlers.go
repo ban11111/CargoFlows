@@ -280,6 +280,8 @@ type photoSessionResponse struct {
 var (
 	errCaptureVersionNotFound = errors.New("SOP version not found")
 	errVersionNotPublished    = errors.New("SOP version is not published")
+	errSKUNotFound            = errors.New("SKU not found")
+	errSKUCategoryMismatch    = errors.New("SKU category does not match the capture SOP category")
 	errPhotoSessionNotFound   = errors.New("photo session not found")
 	errSOPViewNotFound        = errors.New("SOP view not found")
 	errViewVersionMismatch    = errors.New("SOP view does not belong to the session version")
@@ -304,6 +306,22 @@ func (s *Server) createPhotoSession(c *gin.Context) {
 		}
 		if version.Status != models.SOPVersionPublished {
 			return errVersionNotPublished
+		}
+		var captureSOP models.CaptureSOP
+		if err := tx.Select("id", "category_id").First(&captureSOP, version.CaptureSOPID).Error; err != nil {
+			return err
+		}
+		var sku models.SKU
+		if err := tx.Model(&models.SKU{}).Select("skus.*").
+			Joins("JOIN products ON products.id = skus.product_id").
+			Preload("Product").Where("skus.id = ?", req.SKUID).First(&sku).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errSKUNotFound
+			}
+			return err
+		}
+		if sku.Product.CategoryID != captureSOP.CategoryID {
+			return errSKUCategoryMismatch
 		}
 		selectedVersionPublicID = version.PublicID
 		session = models.PhotoSession{
@@ -385,16 +403,19 @@ func (s *Server) completeAssetUpload(c *gin.Context) {
 		respondSOPBadRequest(c, errOr(err, "photo_session_id, sop_view_id, object_key, and original_url are required; identifiers must be UUIDs"))
 		return
 	}
+	capturedAt := time.Now()
+	if req.CapturedAt != "" {
+		parsed, err := time.Parse(time.RFC3339, req.CapturedAt)
+		if err != nil {
+			respondSOPBadRequest(c, errors.New("captured_at must be an RFC3339 timestamp"))
+			return
+		}
+		capturedAt = parsed
+	}
 	session, view, err := s.resolveCaptureBinding(c, req.PhotoSessionID, req.SOPViewID)
 	if err != nil {
 		respondCaptureError(c, err)
 		return
-	}
-	capturedAt := time.Now()
-	if req.CapturedAt != "" {
-		if parsed, err := time.Parse(time.RFC3339, req.CapturedAt); err == nil {
-			capturedAt = parsed
-		}
 	}
 	asset := models.Asset{
 		SKUID:          session.SKUID,
@@ -442,6 +463,10 @@ func respondCaptureError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"code": "view_version_mismatch", "message": err.Error()})
 	case errors.Is(err, errCaptureVersionNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"code": "version_not_found", "message": err.Error()})
+	case errors.Is(err, errSKUNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"code": "sku_not_found", "message": err.Error()})
+	case errors.Is(err, errSKUCategoryMismatch):
+		c.JSON(http.StatusConflict, gin.H{"code": "sku_sop_category_mismatch", "message": err.Error()})
 	case errors.Is(err, errPhotoSessionNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"code": "photo_session_not_found", "message": err.Error()})
 	case errors.Is(err, errSOPViewNotFound):
