@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type loginRequest struct {
@@ -301,7 +302,7 @@ func (s *Server) createPhotoSession(c *gin.Context) {
 	var selectedVersionPublicID string
 	err := s.db.WithContext(c).Transaction(func(tx *gorm.DB) error {
 		var version models.SOPVersion
-		if err := tx.Where("public_id = ?", req.SOPVersionID).First(&version).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("public_id = ?", req.SOPVersionID).First(&version).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return errCaptureVersionNotFound
 			}

@@ -11,7 +11,43 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
+
+func TestCreatePhotoSessionLocksVersionBeforeValidatingPublishedStatus(t *testing.T) {
+	db := newTestDB(t)
+	version := createTestSOPVersion(t, db, "12111111-1111-4111-8111-111111111111")
+	sku := createSKUForSOPVersion(t, db, version, "SESSION-LOCK")
+
+	var versionQueryObserved, updateLockObserved bool
+	callbackName := "test:observe-version-lock"
+	if err := db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table != "sop_versions" {
+			return
+		}
+		versionQueryObserved = true
+		lockingClause, ok := tx.Statement.Clauses["FOR"]
+		if !ok {
+			return
+		}
+		locking, ok := lockingClause.Expression.(clause.Locking)
+		updateLockObserved = ok && locking.Strength == "UPDATE"
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Query().Remove(callbackName) })
+
+	response := performCreatePhotoSession(t, db, sku.ID, version.PublicID)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, response.Code, response.Body.String())
+	}
+	if !versionQueryObserved {
+		t.Fatal("expected SOP version query to be observed")
+	}
+	if !updateLockObserved {
+		t.Fatal("expected SOP version to be selected with an UPDATE lock")
+	}
+}
 
 func TestCreatePhotoSessionResolvesSOPVersionPublicID(t *testing.T) {
 	db := newTestDB(t)
