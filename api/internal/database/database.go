@@ -2,6 +2,8 @@ package database
 
 import (
 	"fmt"
+	"log"
+	"os"
 	"time"
 
 	"cargoflow/api/internal/models"
@@ -15,8 +17,18 @@ import (
 
 func Open(dsn string) (*gorm.DB, error) {
 	return gorm.Open(mysql.Open(dsn), &gorm.Config{
-		Logger:                                   logger.Default.LogMode(logger.Warn),
+		Logger:                                   newProductionLogger(log.New(os.Stdout, "\r\n", log.LstdFlags)),
 		DisableForeignKeyConstraintWhenMigrating: true,
+	})
+}
+
+func newProductionLogger(writer logger.Writer) logger.Interface {
+	return logger.New(writer, logger.Config{
+		SlowThreshold:             200 * time.Millisecond,
+		Colorful:                  true,
+		IgnoreRecordNotFoundError: false,
+		ParameterizedQueries:      true,
+		LogLevel:                  logger.Warn,
 	})
 }
 

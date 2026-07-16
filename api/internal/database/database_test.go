@@ -1,7 +1,11 @@
 package database
 
 import (
+	"bytes"
+	"context"
+	"log"
 	"reflect"
+	"strings"
 	"testing"
 
 	"cargoflow/api/internal/models"
@@ -10,6 +14,28 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestProductionLoggerRemovesSecretQueryParameters(t *testing.T) {
+	var output bytes.Buffer
+	configured := newProductionLogger(log.New(&output, "", 0))
+	filter, ok := configured.(interface {
+		ParamsFilter(context.Context, string, ...interface{}) (string, []interface{})
+	})
+	if !ok {
+		t.Fatal("production logger does not expose a parameter filter")
+	}
+
+	const ciphertext = "ciphertext-secret-value"
+	const nonce = "nonce-secret-value"
+	sql, params := filter.ParamsFilter(t.Context(), "UPDATE open_ai_provider_settings SET encrypted_api_key=?, encryption_nonce=?", ciphertext, nonce)
+	if len(params) != 0 {
+		t.Fatalf("filtered params = %#v, want none", params)
+	}
+	configured.Warn(t.Context(), "query: %s params: %v", sql, params)
+	if got := output.String(); strings.Contains(got, ciphertext) || strings.Contains(got, nonce) {
+		t.Fatalf("logger emitted secret query parameters: %q", got)
+	}
+}
 
 func openTestDB(t *testing.T) *gorm.DB {
 	t.Helper()

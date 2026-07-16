@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"cargoflow/api/internal/models"
 	"cargoflow/api/internal/secrets"
@@ -163,6 +164,17 @@ func TestDisableChangesStatusAndAuditMetadataOnly(t *testing.T) {
 	if _, err := service.Configure(t.Context(), 1, "sk-proj-original-secret-WXYZ"); err != nil {
 		t.Fatal(err)
 	}
+	imageVerifiedAt := time.Now().UTC().Add(-2 * time.Hour)
+	lastUsedAt := time.Now().UTC().Add(-time.Hour)
+	previousUpdatedAt := time.Now().UTC().Add(-24 * time.Hour)
+	if err := db.Model(&models.OpenAIProviderSetting{}).Where("provider = ?", "openai").Updates(map[string]any{
+		"encryption_key_version":       "key-version-9",
+		"image_capability_verified_at": imageVerifiedAt,
+		"last_used_at":                 lastUsedAt,
+		"updated_at":                   previousUpdatedAt,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
 	var before models.OpenAIProviderSetting
 	if err := db.First(&before).Error; err != nil {
 		t.Fatal(err)
@@ -178,13 +190,38 @@ func TestDisableChangesStatusAndAuditMetadataOnly(t *testing.T) {
 	if err := db.First(&after).Error; err != nil {
 		t.Fatal(err)
 	}
-	if after.Status != "disabled" || after.UpdatedByID != 9 || after.CreatedByID != before.CreatedByID ||
+	if after.Status != "disabled" || after.UpdatedByID != 9 || !after.UpdatedAt.After(before.UpdatedAt) ||
+		after.ID != before.ID || after.Provider != before.Provider || after.CreatedByID != before.CreatedByID || !after.CreatedAt.Equal(before.CreatedAt) ||
 		!bytes.Equal(after.EncryptedAPIKey, before.EncryptedAPIKey) || !bytes.Equal(after.EncryptionNonce, before.EncryptionNonce) ||
-		after.KeyFingerprint != before.KeyFingerprint || !after.VerifiedAt.Equal(*before.VerifiedAt) {
+		after.EncryptionKeyVersion != before.EncryptionKeyVersion || after.KeyFingerprint != before.KeyFingerprint ||
+		!after.VerifiedAt.Equal(*before.VerifiedAt) || !after.ImageCapabilityVerifiedAt.Equal(*before.ImageCapabilityVerifiedAt) ||
+		!after.LastUsedAt.Equal(*before.LastUsedAt) {
 		t.Fatalf("disable changed credential fields: before=%#v after=%#v", before, after)
 	}
 	if _, err := service.DecryptActiveKey(t.Context()); !errors.Is(err, ErrProviderNotActive) {
 		t.Fatalf("decrypt disabled error = %v", err)
+	}
+}
+
+func TestDecryptActiveKeyRejectsWrongMasterKey(t *testing.T) {
+	db := providerTestDB(t)
+	verifier := &fakeVerifier{result: ProviderVerification{Authenticated: true}}
+	service := providerService(t, db, verifier)
+	const apiKey = "sk-proj-original-secret-WXYZ"
+	if _, err := service.Configure(t.Context(), 1, apiKey); err != nil {
+		t.Fatal(err)
+	}
+
+	wrongBox, err := secrets.NewAESGCM(bytes.Repeat([]byte{0x72}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := NewProviderSettingsService(db, wrongBox, verifier).DecryptActiveKey(t.Context())
+	if err == nil {
+		t.Fatal("wrong master key decrypted stored credential")
+	}
+	if len(plain) != 0 || bytes.Contains(plain, []byte(apiKey)) {
+		t.Fatalf("wrong master key returned plaintext: %q", plain)
 	}
 }
 
