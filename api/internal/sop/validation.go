@@ -25,6 +25,16 @@ var aspectRatioPattern = regexp.MustCompile(`^[1-9][0-9]*:[1-9][0-9]*$`)
 
 func ValidateVersion(version models.SOPVersion) []ValidationError {
 	validationErrors := make([]ValidationError, 0)
+	if version.SchemaVersion != "1.0" {
+		validationErrors = append(validationErrors, validationError(
+			"schema_version_invalid", "schema_version", "架构版本必须为 1.0。", "Schema version must be 1.0.",
+		))
+	}
+	if version.CoordinateSystem != "pcs_object_v1" {
+		validationErrors = append(validationErrors, validationError(
+			"coordinate_system_invalid", "coordinate_system.id", "坐标系必须为 pcs_object_v1。", "Coordinate system must be pcs_object_v1.",
+		))
+	}
 	if strings.TrimSpace(version.NameZH) == "" {
 		validationErrors = append(validationErrors, validationError("name_zh_required", "name.zh-CN", "中文名称不能为空。", "Chinese name is required."))
 	}

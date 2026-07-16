@@ -35,6 +35,29 @@ func TestValidateVersionAcceptsValidVersion(t *testing.T) {
 	}
 }
 
+func TestValidateVersionRejectsUnsupportedSchemaAndCoordinateSystem(t *testing.T) {
+	cases := []struct {
+		name             string
+		schemaVersion    string
+		coordinateSystem string
+	}{
+		{name: "empty", schemaVersion: "", coordinateSystem: ""},
+		{name: "wrong", schemaVersion: "2.0", coordinateSystem: "world_v1"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			version := validVersion()
+			version.SchemaVersion = tc.schemaVersion
+			version.CoordinateSystem = tc.coordinateSystem
+
+			errors := ValidateVersion(version)
+			assertValidationError(t, errors, "schema_version_invalid", "schema_version")
+			assertValidationError(t, errors, "coordinate_system_invalid", "coordinate_system.id")
+		})
+	}
+}
+
 func TestValidateVersionEnforcesReferenceFront(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -152,4 +175,21 @@ func validationCodes(errors []ValidationError) map[string]bool {
 		codes[item.Code] = true
 	}
 	return codes
+}
+
+func assertValidationError(t *testing.T, errors []ValidationError, code, path string) {
+	t.Helper()
+	for _, item := range errors {
+		if item.Code != code {
+			continue
+		}
+		if item.Path != path {
+			t.Fatalf("%s path = %q, want %q", code, item.Path, path)
+		}
+		if item.Message.ZHCN == "" || item.Message.EN == "" {
+			t.Fatalf("%s message is not bilingual: %#v", code, item.Message)
+		}
+		return
+	}
+	t.Fatalf("missing %s in %#v", code, errors)
 }
