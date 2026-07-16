@@ -18,4 +18,26 @@ targets:
         INFOPLIST_FILE: CargoFlow/Info.plist
     info:
       path: CargoFlow/Info.plist
+      properties:
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        NSCameraUsageDescription: CargoFlow needs camera access to capture required product views.
+  CargoFlowTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - CargoFlowTests
+    dependencies:
+      - target: CargoFlow
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
 
+schemes:
+  CargoFlow:
+    build:
+      targets:
+        CargoFlow: all
+    test:
+      targets:
+        - CargoFlowTests

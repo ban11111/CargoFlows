@@ -11,22 +11,29 @@ enum APIError: Error {
 final class APIClient {
     static let shared = APIClient()
 
-    var baseURL = URL(string: "http://127.0.0.1:8080/api/v1/")!
+    var baseURL: URL
     var token: String?
+    private let session: URLSession
 
     private let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
         decoder.dateDecodingStrategy = .iso8601
         return decoder
     }()
 
     private let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
-        encoder.keyEncodingStrategy = .convertToSnakeCase
         encoder.dateEncodingStrategy = .iso8601
         return encoder
     }()
+
+    init(
+        baseURL: URL = URL(string: "http://127.0.0.1:8080/api/v1/")!,
+        session: URLSession = .shared
+    ) {
+        self.baseURL = baseURL
+        self.session = session
+    }
 
     func login(email: String, password: String) async throws -> LoginResponse {
         try await request("auth/login", method: "POST", body: LoginRequest(email: email, password: password))
@@ -45,29 +52,35 @@ final class APIClient {
         return try await request("skus/\(skuID)/inventory-adjustments", method: "POST", body: body)
     }
 
-    func listSOPTemplates(category: String? = nil) async throws -> ListResponse<SOPTemplate> {
-        var path = "sop-templates"
-        if let category, !category.isEmpty {
-            path += "?category=\(category.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? category)"
-        }
-        return try await request(path)
+    func listPublishedSOPs(categoryID: Int) async throws -> ListResponse<CaptureSOPSummary> {
+        try await request("capture-sops?category_id=\(categoryID)")
     }
 
-    func createPhotoSession(skuID: Int, sopTemplateID: Int) async throws -> PhotoSession {
-        try await request("photo-sessions", method: "POST", body: PhotoSessionRequest(skuID: skuID, sopTemplateID: sopTemplateID))
+    func getSOPVersion(id: String) async throws -> SOPVersion {
+        try await request("sop-versions/\(encodedPathSegment(id))")
+    }
+
+    func createPhotoSession(skuID: Int, sopVersionID: String) async throws -> PhotoSession {
+        try await request("photo-sessions", method: "POST", body: PhotoSessionRequest(skuID: skuID, sopVersionID: sopVersionID))
     }
 
     func uploadImage(
         _ imageData: Data,
         skuID: Int,
-        sopViewID: Int,
-        photoSessionID: Int,
+        sopViewID: String,
+        photoSessionID: String,
         fileName: String
     ) async throws -> AssetReceipt {
+        _ = skuID
         let ticket: UploadURLResponse = try await request(
             "assets/upload-url",
             method: "POST",
-            body: UploadURLRequest(fileName: fileName, contentType: "image/jpeg", skuID: skuID, sopViewID: sopViewID)
+            body: UploadURLRequest(
+                fileName: fileName,
+                contentType: "image/jpeg",
+                photoSessionID: photoSessionID,
+                sopViewID: sopViewID
+            )
         )
 
         guard let uploadURL = URL(string: ticket.uploadURL) else {
@@ -79,7 +92,7 @@ final class APIClient {
             uploadRequest.setValue(value, forHTTPHeaderField: name)
         }
 
-        let (_, response) = try await URLSession.shared.upload(for: uploadRequest, from: imageData)
+        let (_, response) = try await session.upload(for: uploadRequest, from: imageData)
         guard let http = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
         }
@@ -91,7 +104,6 @@ final class APIClient {
             "assets/complete",
             method: "POST",
             body: CompleteAssetRequest(
-                skuID: skuID,
                 photoSessionID: photoSessionID,
                 sopViewID: sopViewID,
                 objectKey: ticket.objectKey,
@@ -127,8 +139,14 @@ final class APIClient {
         return request
     }
 
+    private func encodedPathSegment(_ value: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+
     private func send<Response: Decodable>(_ request: URLRequest) async throws -> Response {
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
         }

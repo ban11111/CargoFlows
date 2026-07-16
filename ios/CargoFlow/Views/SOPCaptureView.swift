@@ -8,16 +8,20 @@ struct SOPCaptureView: View {
 
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var language: LanguageStore
-    @State private var templates: [SOPTemplate] = []
-    @State private var capturedImages: [Int: UIImage] = [:]
+    @State private var sops: [CaptureSOPSummary] = []
+    @State private var capturedImages: [String: UIImage] = [:]
     @State private var photoSession: PhotoSession?
     @State private var selectedView: SOPView?
     @State private var isSourcePickerPresented = false
-    @State private var uploadingViewID: Int?
+    @State private var uploadingViewID: String?
     @State private var isUploadErrorPresented = false
 
     private var views: [SOPView] {
-        templates.first?.views?.sorted(by: { $0.sortOrder < $1.sortOrder }) ?? []
+        selectedVersion?.views.sorted(by: { $0.sequence < $1.sequence }) ?? []
+    }
+
+    private var selectedVersion: SOPVersion? {
+        sops.lazy.flatMap(\.versions).first
     }
 
     private var canFinish: Bool {
@@ -65,7 +69,8 @@ struct SOPCaptureView: View {
                 }
             }
             .task {
-                templates = (try? await APIClient.shared.listSOPTemplates(category: sku.product.category).data) ?? []
+                guard let categoryID = sku.product.catalogCategory?.id else { return }
+                sops = (try? await APIClient.shared.listPublishedSOPs(categoryID: categoryID).data) ?? []
             }
             .sheet(isPresented: $isSourcePickerPresented) {
                 CaptureSourceView(view: selectedView) { image in
@@ -113,10 +118,10 @@ struct SOPCaptureView: View {
         if let photoSession {
             return photoSession
         }
-        guard let templateID = templates.first?.id else {
+        guard let versionID = selectedVersion?.id else {
             throw APIError.invalidResponse
         }
-        let session = try await APIClient.shared.createPhotoSession(skuID: sku.id, sopTemplateID: templateID)
+        let session = try await APIClient.shared.createPhotoSession(skuID: sku.id, sopVersionID: versionID)
         photoSession = session
         return session
     }
@@ -145,9 +150,9 @@ private struct CaptureViewRow: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(view.name)
+                Text(view.displayName(for: language.language))
                     .foregroundStyle(.primary)
-                Text(view.prompt)
+                Text(view.displayInstruction(for: language.language))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -190,9 +195,9 @@ private struct CaptureSourceView: View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(view?.name ?? language.t("view"))
+                    Text(view?.displayName(for: language.language) ?? language.t("view"))
                         .font(.title2.bold())
-                    Text(view?.prompt ?? "")
+                    Text(view?.displayInstruction(for: language.language) ?? "")
                         .foregroundStyle(.secondary)
                 }
 
