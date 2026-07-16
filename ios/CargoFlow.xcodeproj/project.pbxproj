@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0C1C76E2A0D1FD57E0B20CAE /* SOPCaptureLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EBB9E4D9ECEC4094EAA4967 /* SOPCaptureLogicTests.swift */; };
 		31114C679DA8AB5B4DE05431 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DEEC0F699589DF72D5E1FDD /* LoginView.swift */; };
 		4711555F3AEDF057814B13A9 /* CargoFlowApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F70D31AE04C6BDDD4DBC7C /* CargoFlowApp.swift */; };
 		48616596AF03C520D8C7E44A /* SOPDTOTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4A2C46A39E75F3C83B117F0 /* SOPDTOTests.swift */; };
@@ -39,6 +40,7 @@
 		021344742BEBA83C299EBC30 /* InventoryAdjustmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InventoryAdjustmentView.swift; sourceTree = "<group>"; };
 		1CF659B396047E7018A1B364 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		1F04FDF97C5195E31F4F3BE9 /* CargoFlow.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = CargoFlow.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		2EBB9E4D9ECEC4094EAA4967 /* SOPCaptureLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SOPCaptureLogicTests.swift; sourceTree = "<group>"; };
 		344A9C2CD95C0FF0D835018D /* CargoFlowTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CargoFlowTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		3866A4F7DB0CDDA70FADE273 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		3A63C5DFE8C84FA814CFD6B1 /* SessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStore.swift; sourceTree = "<group>"; };
@@ -134,6 +136,7 @@
 		F6838384FDB749CEE81D327D /* CargoFlowTests */ = {
 			isa = PBXGroup;
 			children = (
+				2EBB9E4D9ECEC4094EAA4967 /* SOPCaptureLogicTests.swift */,
 				F4A2C46A39E75F3C83B117F0 /* SOPDTOTests.swift */,
 			);
 			path = CargoFlowTests;
@@ -235,6 +238,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0C1C76E2A0D1FD57E0B20CAE /* SOPCaptureLogicTests.swift in Sources */,
 				48616596AF03C520D8C7E44A /* SOPDTOTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
