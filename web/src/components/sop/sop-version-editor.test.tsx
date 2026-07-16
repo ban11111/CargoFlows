@@ -337,22 +337,6 @@ describe("SOPVersionEditor", () => {
     expect(window.confirm).toHaveBeenCalledTimes(1);
   });
 
-  it("restores the editor on cancelled browser back and permits confirmed back", async () => {
-    window.history.replaceState({}, "", "/sop-templates");
-    window.history.pushState({}, "", `/sop-templates/${sopID}/versions/${versionID}`);
-    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
-    renderEditor();
-    fireEvent.change(screen.getByLabelText("SOP 中文名称"), { target: { value: "未保存" } });
-
-    window.history.back();
-    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(window.location.pathname).toContain(`/versions/${versionID}`));
-
-    window.history.back();
-    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(window.location.pathname).toBe("/sop-templates"));
-  });
-
   it("does not guard clean, external, download, new-tab, or modifier navigation", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     const { container } = renderEditorWithBackLink(() => undefined);
@@ -362,8 +346,10 @@ describe("SOPVersionEditor", () => {
     fireEvent.change(screen.getByLabelText("SOP 中文名称"), { target: { value: "未保存" } });
     const external = document.createElement("a"); external.href = "https://example.com"; external.target = "_blank"; external.textContent = "external"; container.append(external);
     const download = document.createElement("a"); download.href = "/export"; download.download = "sop.json"; download.textContent = "download"; container.append(download);
+    const hash = document.createElement("a"); hash.href = `${window.location.pathname}#validation`; hash.textContent = "hash"; container.append(hash);
     fireEvent.click(external);
     fireEvent.click(download);
+    fireEvent.click(hash);
     fireEvent.click(screen.getByRole("link", { name: "返回 SOP 列表" }), { metaKey: true });
     expect(confirm).not.toHaveBeenCalled();
   });

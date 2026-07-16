@@ -1,50 +1,51 @@
 "use client";
 
-import { useEffect, useId } from "react";
+import { useEffect, useRef } from "react";
 
-const sentinelKey = "__cargoFlowUnsavedNavigationGuard";
+interface NavigationDestinationLike {
+  url: string;
+}
+
+interface NavigateEventLike extends Event {
+  destination?: NavigationDestinationLike;
+}
+
+interface NavigationLike {
+  addEventListener(type: "navigate", listener: EventListener): void;
+  removeEventListener(type: "navigate", listener: EventListener): void;
+}
+
+function currentNavigation(): NavigationLike | undefined {
+  return (window as Window & { navigation?: NavigationLike }).navigation;
+}
+
+function comparableURL(url: URL) {
+  return `${url.origin}${url.pathname}${url.search}`;
+}
+
+function isSamePage(destination: URL) {
+  return comparableURL(destination) === comparableURL(new URL(window.location.href));
+}
 
 export function useUnsavedNavigationGuard(active: boolean, message: string) {
-  const marker = useId();
+  const messageRef = useRef(message);
+
+  useEffect(() => {
+    messageRef.current = message;
+  }, [message]);
 
   useEffect(() => {
     if (!active) return;
 
-    let sentinelActive = true;
-    let restoringSentinel = false;
-    let allowingNextPop = false;
-    let disarmingSentinel = false;
+    // Navigation API can cancel traversals without rewriting the user's stack.
+    // Unsupported browsers retain link + beforeunload protection; popstate is intentionally not simulated.
+    const navigation = currentNavigation();
     let bypassNextClick = false;
-    let disposed = false;
-
-    const state = typeof window.history.state === "object" && window.history.state !== null ? window.history.state : {};
-    window.history.pushState({ ...state, [sentinelKey]: marker }, "", window.location.href);
-
-    const hasCurrentSentinel = () => window.history.state?.[sentinelKey] === marker;
+    let allowedNavigationURL: string | null = null;
 
     function beforeUnload(event: BeforeUnloadEvent) {
       event.preventDefault();
       event.returnValue = "";
-    }
-
-    function stopClick(event: MouseEvent) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-    }
-
-    function disarmSentinel(continuation?: () => void) {
-      if (!sentinelActive || !hasCurrentSentinel()) {
-        sentinelActive = false;
-        continuation?.();
-        return;
-      }
-      disarmingSentinel = true;
-      window.addEventListener("popstate", () => {
-        disarmingSentinel = false;
-        sentinelActive = false;
-        if (!disposed) continuation?.();
-      }, { once: true });
-      window.history.back();
     }
 
     function clickGuard(event: MouseEvent) {
@@ -57,48 +58,43 @@ export function useUnsavedNavigationGuard(active: boolean, message: string) {
       const anchor = target instanceof Element ? target.closest<HTMLAnchorElement>("a[href]") : null;
       if (!anchor || anchor.hasAttribute("download") || (anchor.target && anchor.target !== "_self")) return;
       const destination = new URL(anchor.href, window.location.href);
-      if (destination.origin !== window.location.origin) return;
-      if (destination.pathname === window.location.pathname && destination.search === window.location.search) return;
+      if (destination.origin !== window.location.origin || isSamePage(destination)) return;
 
-      stopClick(event);
-      if (!window.confirm(message)) return;
-      disarmSentinel(() => {
-        bypassNextClick = true;
-        anchor.click();
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (!window.confirm(messageRef.current)) return;
+
+      const confirmedURL = navigation ? comparableURL(destination) : null;
+      allowedNavigationURL = confirmedURL;
+      bypassNextClick = true;
+      anchor.click();
+      queueMicrotask(() => {
+        if (allowedNavigationURL === confirmedURL) allowedNavigationURL = null;
       });
     }
 
-    function popGuard() {
-      if (disarmingSentinel) return;
-      if (restoringSentinel) {
-        restoringSentinel = false;
+    function navigationGuard(rawEvent: Event) {
+      const event = rawEvent as NavigateEventLike;
+      if (!event.destination) return;
+      const destination = new URL(event.destination.url, window.location.href);
+      if (destination.origin !== window.location.origin || isSamePage(destination)) return;
+
+      const comparableDestination = comparableURL(destination);
+      if (allowedNavigationURL === comparableDestination) {
+        allowedNavigationURL = null;
         return;
       }
-      if (allowingNextPop) {
-        allowingNextPop = false;
-        sentinelActive = false;
-        return;
-      }
-      if (window.confirm(message)) {
-        allowingNextPop = true;
-        sentinelActive = false;
-        window.history.back();
-        return;
-      }
-      restoringSentinel = true;
-      window.history.forward();
+      if (!window.confirm(messageRef.current)) event.preventDefault();
     }
 
     window.addEventListener("beforeunload", beforeUnload);
     document.addEventListener("click", clickGuard, true);
-    window.addEventListener("popstate", popGuard);
+    navigation?.addEventListener("navigate", navigationGuard);
 
     return () => {
-      disposed = true;
       window.removeEventListener("beforeunload", beforeUnload);
       document.removeEventListener("click", clickGuard, true);
-      window.removeEventListener("popstate", popGuard);
-      if (sentinelActive && hasCurrentSentinel()) window.history.back();
+      navigation?.removeEventListener("navigate", navigationGuard);
     };
-  }, [active, marker, message]);
+  }, [active]);
 }
