@@ -57,6 +57,9 @@ func TestTemplateCreateGetListAndNormalizesSlots(t *testing.T) {
 	if created.Template.PublicID == "" || created.Version.PublicID == "" || created.Version.Status != models.AITemplateDraft {
 		t.Fatalf("unexpected created template: %#v", created)
 	}
+	if created.Template.Status != models.AIContentTemplateActive || created.Version.DraftGuard == nil {
+		t.Fatalf("unexpected lifecycle guards: %#v", created)
+	}
 	got, err := service.Get(t.Context(), created.Template.PublicID)
 	if err != nil {
 		t.Fatal(err)
@@ -101,8 +104,42 @@ func TestPublishReturnsAllValidationIssuesAndLeavesDraft(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Status != models.AITemplateDraft || got.Versions[0].Status != models.AITemplateDraft || got.Versions[0].PublishedAt != nil {
+	if got.Status != models.AIContentTemplateActive || got.Versions[0].Status != models.AITemplateDraft || got.Versions[0].PublishedAt != nil {
 		t.Fatalf("invalid publication changed lifecycle: %#v", got)
+	}
+}
+
+func TestUpdateDraftPersistsDuplicateKeysAndPublishReturnsAllIssues(t *testing.T) {
+	service := NewTemplateService(templateTestDB(t))
+	created, err := service.Create(t.Context(), validTemplateInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	update := validTemplateInput().Version
+	update.NameZH = "Lazada 详情"
+	update.NameEN = ""
+	update.Slots = []SlotInput{
+		{SlotKey: "hero", Kind: "image", NameZH: "主图", NameEN: "Hero", PromptFragment: "Create {{product.name}}", Constraints: json.RawMessage(`{}`), GenerationConfig: json.RawMessage(`{"size":"1024x1024"}`), LayoutConfig: json.RawMessage(`{}`)},
+		{SlotKey: "hero", Kind: "image", NameZH: "", NameEN: "Hero duplicate", PromptFragment: "", Constraints: json.RawMessage(`{}`), GenerationConfig: json.RawMessage(`{"size":"1024x1024"}`), LayoutConfig: json.RawMessage(`{}`)},
+	}
+	updated, err := service.UpdateDraft(t.Context(), created.Version.PublicID, update)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.Slots) != 2 || updated.Slots[0].SlotKey != "hero" || updated.Slots[1].SlotKey != "hero" {
+		t.Fatalf("duplicate draft slots were not persisted: %#v", updated.Slots)
+	}
+	issues, err := service.Publish(t.Context(), created.Version.PublicID, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertIssueCodes(t, issues, "name_en_required", "slot_key_duplicate", "slot_name_zh_required", "prompt_required")
+	got, err := service.Get(t.Context(), created.Template.PublicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != models.AIContentTemplateActive || got.Versions[0].Status != models.AITemplateDraft || got.Versions[0].DraftGuard == nil {
+		t.Fatalf("invalid publish changed draft state: %#v", got)
 	}
 }
 
@@ -116,7 +153,27 @@ func TestValidateTemplateVersionReportsDuplicateKeysKindsSequencesAndJSON(t *tes
 	assertIssueCodes(t, issues, "slot_key_duplicate", "slot_kind_invalid", "slot_sequence_invalid", "constraints_object_required", "generation_config_object_required")
 }
 
-func TestPublishFreezesVersionCopyCreatesFreshDraftAndArchiveClosesPublished(t *testing.T) {
+func TestTemplateVariablesUseExactV1Allowlist(t *testing.T) {
+	accepted := []string{
+		"locale", "target_platform", "candidate_count", "product.name", "product.brand", "product.category",
+		"product.description", "sku.code", "sku.color", "sku.size", "sku.platform_title", "sop.name_zh",
+		"sop.name_en", "sop.required_views", "style.name", "style.description", "style.instructions",
+	}
+	for _, variable := range accepted {
+		t.Run("accept_"+variable, func(t *testing.T) {
+			if issues := validatePrompt("Use {{"+variable+"}}", "prompt", true); len(issues) != 0 {
+				t.Fatalf("documented variable %q rejected: %#v", variable, issues)
+			}
+		})
+	}
+	for _, variable := range []string{"product.password_hash", "sku.nonexistent", "unknown.value", "secrets.api_key"} {
+		t.Run("reject_"+variable, func(t *testing.T) {
+			assertIssueCodes(t, validatePrompt("Use {{"+variable+"}}", "prompt", true), "template_variable_unknown")
+		})
+	}
+}
+
+func TestPublishFreezesVersionCopyCreatesFreshDraftAndArchiveRecalculatesParent(t *testing.T) {
 	db := templateTestDB(t)
 	service := NewTemplateService(db)
 	created, err := service.Create(t.Context(), validTemplateInput())
@@ -126,6 +183,13 @@ func TestPublishFreezesVersionCopyCreatesFreshDraftAndArchiveClosesPublished(t *
 	issues, err := service.Publish(t.Context(), created.Version.PublicID, 7)
 	if err != nil || len(issues) != 0 {
 		t.Fatalf("publish issues = %#v, err = %v", issues, err)
+	}
+	firstPublished, err := service.Get(t.Context(), created.Template.PublicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstPublished.Status != models.AIContentTemplateActive || firstPublished.Versions[0].DraftGuard != nil {
+		t.Fatalf("publish changed logical status or retained guard: %#v", firstPublished)
 	}
 	if _, err := service.UpdateDraft(t.Context(), created.Version.PublicID, validTemplateInput().Version); !errors.Is(err, ErrTemplateVersionImmutable) {
 		t.Fatalf("update published error = %v", err)
@@ -141,11 +205,54 @@ func TestPublishFreezesVersionCopyCreatesFreshDraftAndArchiveClosesPublished(t *
 	if _, err := service.CopyVersion(t.Context(), created.Template.PublicID, created.Version.PublicID, 8); !errors.Is(err, ErrTemplateDraftExists) {
 		t.Fatalf("second copy error = %v", err)
 	}
+	issues, err = service.Publish(t.Context(), copied.PublicID, 8)
+	if err != nil || len(issues) != 0 {
+		t.Fatalf("publish copy issues = %#v, err = %v", issues, err)
+	}
 	if err := service.Archive(t.Context(), created.Version.PublicID); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.Archive(t.Context(), copied.PublicID); !errors.Is(err, ErrTemplateVersionImmutable) {
-		t.Fatalf("archive draft error = %v", err)
+	afterFirstArchive, err := service.Get(t.Context(), created.Template.PublicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterFirstArchive.Status != models.AIContentTemplateActive || afterFirstArchive.Versions[0].Status != models.AITemplateArchived || afterFirstArchive.Versions[0].ArchivedAt == nil || afterFirstArchive.Versions[1].Status != models.AITemplatePublished {
+		t.Fatalf("first archive states = %#v", afterFirstArchive)
+	}
+	selectable, err := service.List(t.Context(), false)
+	if err != nil || len(selectable) != 1 || len(selectable[0].Versions) != 1 || selectable[0].Versions[0].PublicID != copied.PublicID {
+		t.Fatalf("selectable after first archive = %#v, err = %v", selectable, err)
+	}
+	if err := service.Archive(t.Context(), copied.PublicID); err != nil {
+		t.Fatal(err)
+	}
+	afterLastArchive, err := service.Get(t.Context(), created.Template.PublicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterLastArchive.Status != models.AIContentTemplateArchived || afterLastArchive.Versions[1].Status != models.AITemplateArchived || afterLastArchive.Versions[1].ArchivedAt == nil {
+		t.Fatalf("last archive states = %#v", afterLastArchive)
+	}
+	selectable, err = service.List(t.Context(), false)
+	if err != nil || len(selectable) != 0 {
+		t.Fatalf("selectable after last archive = %#v, err = %v", selectable, err)
+	}
+}
+
+func TestDatabaseRejectsSecondDraftForLogicalTemplate(t *testing.T) {
+	db := templateTestDB(t)
+	created, err := NewTemplateService(db).Create(t.Context(), validTemplateInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard := templateDraftGuard
+	second := models.AIContentTemplateVersion{
+		PublicID: "00000000-0000-0000-0000-000000000002", AIContentTemplateID: created.Template.ID,
+		VersionNumber: 2, Status: models.AITemplateDraft, DraftGuard: &guard, DefaultLocale: "zh-CN",
+		PromptCompilerVersion: "v1", CreatedByID: 2,
+	}
+	if err := db.Create(&second).Error; err == nil {
+		t.Fatal("database accepted a second draft for one logical template")
 	}
 }
 

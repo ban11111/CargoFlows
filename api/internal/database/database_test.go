@@ -64,6 +64,12 @@ func TestMigrateCreatesAIFoundationTables(t *testing.T) {
 	if db.Migrator().HasColumn(&models.AIJob{}, "input_asset_ids") {
 		t.Fatal("legacy input_asset_ids compatibility field must not be persisted")
 	}
+	if !db.Migrator().HasColumn(&models.AIContentTemplateVersion{}, "draft_guard") {
+		t.Fatal("missing AI template version draft guard")
+	}
+	if !db.Migrator().HasIndex(&models.AIContentTemplateVersion{}, "idx_ai_template_draft_guard") {
+		t.Fatal("missing unique AI template draft guard index")
+	}
 }
 
 func TestSeedCreatesPublishedPhoneCaseCaptureSOPFromExactPresets(t *testing.T) {

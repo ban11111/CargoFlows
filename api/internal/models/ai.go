@@ -10,6 +10,13 @@ const (
 	AITemplateArchived  AITemplateStatus = "archived"
 )
 
+type AIContentTemplateStatus string
+
+const (
+	AIContentTemplateActive   AIContentTemplateStatus = "active"
+	AIContentTemplateArchived AIContentTemplateStatus = "archived"
+)
+
 type AIContentSlotKind string
 
 const (
@@ -84,7 +91,7 @@ type AIContentTemplate struct {
 	NameZH         string                     `gorm:"size:180;not null" json:"name_zh"`
 	NameEN         string                     `gorm:"size:180;not null" json:"name_en"`
 	TargetPlatform string                     `gorm:"size:80;index;not null" json:"target_platform"`
-	Status         AITemplateStatus           `gorm:"size:32;index;not null;default:draft" json:"status"`
+	Status         AIContentTemplateStatus    `gorm:"size:32;index;not null;default:active" json:"status"`
 	CreatedByID    uint                       `gorm:"index;not null" json:"-"`
 	CreatedAt      time.Time                  `json:"created_at"`
 	UpdatedAt      time.Time                  `json:"updated_at"`
@@ -94,9 +101,10 @@ type AIContentTemplate struct {
 type AIContentTemplateVersion struct {
 	ID                    uint             `gorm:"primaryKey" json:"-"`
 	PublicID              string           `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
-	AIContentTemplateID   uint             `gorm:"uniqueIndex:idx_ai_template_version;not null" json:"-"`
-	VersionNumber         int              `gorm:"uniqueIndex:idx_ai_template_version;not null" json:"version_number"`
+	AIContentTemplateID   uint             `gorm:"uniqueIndex:idx_ai_template_version,priority:1;uniqueIndex:idx_ai_template_draft_guard,priority:1;not null" json:"-"`
+	VersionNumber         int              `gorm:"uniqueIndex:idx_ai_template_version,priority:2;not null" json:"version_number"`
 	Status                AITemplateStatus `gorm:"size:32;index;not null;default:draft" json:"status"`
+	DraftGuard            *string          `gorm:"size:16;uniqueIndex:idx_ai_template_draft_guard,priority:2" json:"-"`
 	DefaultLocale         string           `gorm:"size:32;not null;default:zh-CN" json:"default_locale"`
 	PromptCompilerVersion string           `gorm:"size:64;not null" json:"prompt_compiler_version"`
 	PlatformPrompt        string           `gorm:"type:text;not null" json:"platform_prompt"`
@@ -112,8 +120,8 @@ type AIContentTemplateVersion struct {
 type AIContentSlot struct {
 	ID                         uint              `gorm:"primaryKey" json:"-"`
 	PublicID                   string            `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
-	AIContentTemplateVersionID uint              `gorm:"uniqueIndex:idx_ai_slot_key;index;not null" json:"-"`
-	SlotKey                    string            `gorm:"size:80;uniqueIndex:idx_ai_slot_key;not null" json:"slot_key"`
+	AIContentTemplateVersionID uint              `gorm:"index:idx_ai_slot_key,priority:1;index;not null" json:"-"`
+	SlotKey                    string            `gorm:"size:80;index:idx_ai_slot_key,priority:2;not null" json:"slot_key"`
 	Kind                       AIContentSlotKind `gorm:"size:32;index;not null" json:"kind"`
 	NameZH                     string            `gorm:"size:180;not null" json:"name_zh"`
 	NameEN                     string            `gorm:"size:180;not null" json:"name_en"`

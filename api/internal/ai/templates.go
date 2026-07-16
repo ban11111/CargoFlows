@@ -19,6 +19,7 @@ import (
 const (
 	defaultTemplateLocale        = "zh-CN"
 	defaultPromptCompilerVersion = "v1"
+	templateDraftGuard           = "draft"
 )
 
 var (
@@ -85,7 +86,7 @@ func (s *TemplateService) Create(ctx context.Context, input CreateTemplateInput)
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		created.Template = models.AIContentTemplate{
 			PublicID: uuid.NewString(), NameZH: strings.TrimSpace(input.NameZH), NameEN: strings.TrimSpace(input.NameEN),
-			TargetPlatform: strings.TrimSpace(input.TargetPlatform), Status: models.AITemplateDraft, CreatedByID: input.CreatedByID,
+			TargetPlatform: strings.TrimSpace(input.TargetPlatform), Status: models.AIContentTemplateActive, CreatedByID: input.CreatedByID,
 		}
 		if err := tx.Create(&created.Template).Error; err != nil {
 			return err
@@ -212,11 +213,11 @@ func (s *TemplateService) Publish(ctx context.Context, versionPublicID string, a
 		}
 		now := time.Now().UTC()
 		if err := tx.Model(version).Updates(map[string]any{
-			"status": models.AITemplatePublished, "published_by_id": actorID, "published_at": now,
+			"status": models.AITemplatePublished, "draft_guard": nil, "published_by_id": actorID, "published_at": now,
 		}).Error; err != nil {
 			return err
 		}
-		return tx.Model(&parent).Update("status", models.AITemplatePublished).Error
+		return tx.Model(&parent).Update("status", models.AIContentTemplateActive).Error
 	})
 	return issues, err
 }
@@ -253,10 +254,13 @@ func (s *TemplateService) CopyVersion(ctx context.Context, templatePublicID, sou
 		}
 		row := models.AIContentTemplateVersion{
 			PublicID: uuid.NewString(), AIContentTemplateID: parent.ID, VersionNumber: maxVersion + 1,
-			Status: models.AITemplateDraft, DefaultLocale: source.DefaultLocale,
+			Status: models.AITemplateDraft, DraftGuard: draftGuardValue(), DefaultLocale: source.DefaultLocale,
 			PromptCompilerVersion: source.PromptCompilerVersion, PlatformPrompt: source.PlatformPrompt, CreatedByID: actorID,
 		}
 		if err := tx.Create(&row).Error; err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "idx_ai_template_draft_guard") || strings.Contains(strings.ToLower(err.Error()), "unique constraint") {
+				return ErrTemplateDraftExists
+			}
 			return err
 		}
 		for _, sourceSlot := range source.Slots {
@@ -281,10 +285,20 @@ func (s *TemplateService) Archive(ctx context.Context, versionPublicID string) e
 			return ErrTemplateVersionImmutable
 		}
 		now := time.Now().UTC()
-		if err := tx.Model(version).Updates(map[string]any{"status": models.AITemplateArchived, "archived_at": now}).Error; err != nil {
+		if err := tx.Model(version).Updates(map[string]any{"status": models.AITemplateArchived, "draft_guard": nil, "archived_at": now}).Error; err != nil {
 			return err
 		}
-		return tx.Model(&models.AIContentTemplate{}).Where("id = ?", version.AIContentTemplateID).Update("status", models.AITemplateArchived).Error
+		var publishedCount int64
+		if err := tx.Model(&models.AIContentTemplateVersion{}).
+			Where("ai_content_template_id = ? AND status = ?", version.AIContentTemplateID, models.AITemplatePublished).
+			Count(&publishedCount).Error; err != nil {
+			return err
+		}
+		parentStatus := models.AIContentTemplateArchived
+		if publishedCount != 0 {
+			parentStatus = models.AIContentTemplateActive
+		}
+		return tx.Model(&models.AIContentTemplate{}).Where("id = ?", version.AIContentTemplateID).Update("status", parentStatus).Error
 	})
 }
 
@@ -354,7 +368,7 @@ func ValidateTemplateVersion(version models.AIContentTemplateVersion, slots []mo
 func newTemplateVersion(templateID uint, versionNumber int, actorID uint, input UpdateTemplateVersionInput) models.AIContentTemplateVersion {
 	return models.AIContentTemplateVersion{
 		PublicID: uuid.NewString(), AIContentTemplateID: templateID, VersionNumber: versionNumber,
-		Status: models.AITemplateDraft, DefaultLocale: normalizedDefault(input.DefaultLocale, defaultTemplateLocale),
+		Status: models.AITemplateDraft, DraftGuard: draftGuardValue(), DefaultLocale: normalizedDefault(input.DefaultLocale, defaultTemplateLocale),
 		PromptCompilerVersion: normalizedDefault(input.PromptCompilerVersion, defaultPromptCompilerVersion),
 		PlatformPrompt:        strings.TrimSpace(input.PlatformPrompt), CreatedByID: actorID,
 	}
@@ -450,13 +464,23 @@ func validatePrompt(prompt, path string, required bool) []ValidationIssue {
 	return issues
 }
 
+var supportedTemplateVariables = map[string]struct{}{
+	"locale": {}, "target_platform": {}, "candidate_count": {},
+	"product.name": {}, "product.brand": {}, "product.category": {}, "product.description": {}, "product.product_type": {},
+	"sku.code": {}, "sku.color": {}, "sku.size": {}, "sku.platform_title": {}, "sku.attributes": {},
+	"sop.name_zh": {}, "sop.name_en": {}, "sop.version": {}, "sop.coordinate_system": {}, "sop.required_views": {}, "sop.views": {},
+	"style.name": {}, "style.description": {}, "style.instructions": {}, "style.preferences": {},
+	"approved_assets": {}, "approved_assets.metadata": {},
+}
+
 func knownTemplateVariable(variable string) bool {
-	for _, prefix := range []string{"product.", "sku.", "category.", "platform.", "locale.", "assets.", "approved_assets.", "sop."} {
-		if strings.HasPrefix(variable, prefix) && len(variable) > len(prefix) {
-			return true
-		}
-	}
-	return variable == "target_platform" || variable == "locale"
+	_, ok := supportedTemplateVariables[variable]
+	return ok
+}
+
+func draftGuardValue() *string {
+	guard := templateDraftGuard
+	return &guard
 }
 
 func looksLikeSecret(value string) bool {
