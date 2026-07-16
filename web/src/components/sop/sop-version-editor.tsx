@@ -2,7 +2,7 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Archive, CheckCircle2, ClipboardPlus, Copy, LoaderCircle, Plus, Send, TriangleAlert } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { SOPViewEditor } from "@/components/sop/sop-view-editor";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +29,7 @@ const labels = {
     immutablePublished: "已发布版本不可修改", immutableArchived: "已归档版本不可修改", draft: "草稿", published: "已发布", archived: "已归档",
     nameZh: "SOP 中文名称", nameEn: "SOP English name", descriptionZh: "中文说明", descriptionEn: "English description",
     validationFailed: "请修正以下问题后再发布", validationPassed: "验证通过，正在发布版本。", requestFailed: "请求失败，请检查输入后重试。",
+    dirtyNotice: "请先保存所有未保存的修改，再执行发布、排序或新增视图。",
     preset: { back: "背面", left: "左侧", bottom: "底部", right: "右侧", top: "顶部", detail_label: "标签细节", packaging_front: "包装正面" },
   },
   en: {
@@ -36,6 +37,7 @@ const labels = {
     immutablePublished: "Published versions cannot be changed", immutableArchived: "Archived versions cannot be changed", draft: "Draft", published: "Published", archived: "Archived",
     nameZh: "SOP Chinese name", nameEn: "SOP English name", descriptionZh: "Chinese description", descriptionEn: "English description",
     validationFailed: "Fix the following issues before publishing", validationPassed: "Validation passed. Publishing version.", requestFailed: "Request failed. Check the input and try again.",
+    dirtyNotice: "Save every unsaved change before publishing, reordering, or adding views.",
     preset: { back: "Back", left: "Left", bottom: "Bottom", right: "Right", top: "Top", detail_label: "Label detail", packaging_front: "Packaging front" },
   },
 } as const;
@@ -48,7 +50,21 @@ export function SOPVersionEditor({ initialVersion, onVersionChange }: SOPVersion
   const [errors, setErrors] = useState<ServerError[]>([]);
   const [clientErrors, setClientErrors] = useState<Array<{ path: string; message: string }>>([]);
   const [busy, setBusy] = useState<string>();
+  const [metadataDirty, setMetadataDirty] = useState(false);
+  const [dirtyViewIDs, setDirtyViewIDs] = useState<Set<string>>(() => new Set());
   const immutable = version.status !== "draft";
+  const dirty = metadataDirty || dirtyViewIDs.size > 0;
+  const aggregateLocked = dirty || Boolean(busy);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const protectUnsaved = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", protectUnsaved);
+    return () => window.removeEventListener("beforeunload", protectUnsaved);
+  }, [dirty]);
 
   const allErrors = useMemo(() => [
     ...errors.map((error) => ({ path: error.path, message: localizedText(language, error.message) })),
@@ -57,11 +73,20 @@ export function SOPVersionEditor({ initialVersion, onVersionChange }: SOPVersion
 
   function replaceVersion(next: SOPVersion) {
     setVersion(next);
+    setMetadataDirty(false);
+    setDirtyViewIDs(new Set());
     setErrors([]);
     setClientErrors([]);
     onVersionChange?.(next);
     void queryClient.invalidateQueries({ queryKey: ["capture-sops"] });
+    queryClient.setQueryData(["sop-version", next.public_id], next);
     void queryClient.invalidateQueries({ queryKey: ["sop-version", next.public_id] });
+  }
+
+  function syncConfirmedVersion(next: SOPVersion) {
+    queryClient.setQueryData(["sop-version", next.public_id], next);
+    void queryClient.invalidateQueries({ queryKey: ["sop-version", next.public_id] });
+    void queryClient.invalidateQueries({ queryKey: ["capture-sops"] });
   }
 
   function readServerErrors(error: unknown) {
@@ -85,6 +110,7 @@ export function SOPVersionEditor({ initialVersion, onVersionChange }: SOPVersion
 
   function updateView(index: number, view: SOPView) {
     setVersion((current) => ({ ...current, views: current.views.map((value, valueIndex) => valueIndex === index ? view : value) }));
+    setDirtyViewIDs((current) => new Set(current).add(view.public_id));
   }
 
   async function saveMetadata() {
@@ -94,9 +120,15 @@ export function SOPVersionEditor({ initialVersion, onVersionChange }: SOPVersion
       setClientErrors(metadataIssues.map((issue) => ({ path: issue.path.join("."), message: issue.message })));
       return;
     }
-    await run("metadata", async () => replaceVersion(await apiRequest<SOPVersion>(`/sop-versions/${version.public_id}`, {
-      method: "PATCH", body: JSON.stringify({ name: version.name, description: version.description }),
-    })));
+    await run("metadata", async () => {
+      const confirmed = await apiRequest<SOPVersion>(`/sop-versions/${version.public_id}`, {
+        method: "PATCH", body: JSON.stringify({ name: version.name, description: version.description }),
+      });
+      const merged = { ...version, name: confirmed.name, description: confirmed.description, updated_at: confirmed.updated_at };
+      setVersion(merged);
+      setMetadataDirty(false);
+      if (dirtyViewIDs.size === 0) syncConfirmedVersion(merged);
+    });
   }
 
   async function saveView(index: number) {
@@ -107,9 +139,19 @@ export function SOPVersionEditor({ initialVersion, onVersionChange }: SOPVersion
       return;
     }
     const { role, view_kind, name, instruction, required, pose, composition } = parsed.data;
-    await run(`view-${view.public_id}`, async () => replaceVersion(await apiRequest<SOPVersion>(`/sop-versions/${version.public_id}/views/${view.public_id}`, {
-      method: "PATCH", body: JSON.stringify({ role, view_kind, name, instruction, required, pose, composition }),
-    })));
+    await run(`view-${view.public_id}`, async () => {
+      const confirmed = await apiRequest<SOPVersion>(`/sop-versions/${version.public_id}/views/${view.public_id}`, {
+        method: "PATCH", body: JSON.stringify({ role, view_kind, name, instruction, required, pose, composition }),
+      });
+      const confirmedView = confirmed.views.find((item) => item.public_id === view.public_id);
+      if (!confirmedView) throw new Error("saved view missing from response");
+      const merged = { ...version, updated_at: confirmed.updated_at, views: version.views.map((item) => item.public_id === view.public_id ? confirmedView : item) };
+      const remaining = new Set(dirtyViewIDs);
+      remaining.delete(view.public_id);
+      setVersion(merged);
+      setDirtyViewIDs(remaining);
+      if (!metadataDirty && remaining.size === 0) syncConfirmedVersion(merged);
+    });
   }
 
   async function addPreset(presetKey: SOPPresetKey) {
@@ -171,8 +213,9 @@ export function SOPVersionEditor({ initialVersion, onVersionChange }: SOPVersion
       const image = await apiRequest<SOPView["reference_images"][number]>(`/sop-versions/${version.public_id}/views/${view.public_id}/reference-images`, {
         method: "POST", body: JSON.stringify({ object_key: upload.object_key, thumbnail_url: upload.asset_url, caption }),
       });
-      updateView(viewIndex, { ...view, reference_images: [...view.reference_images, image] });
-      void queryClient.invalidateQueries({ queryKey: ["sop-version", version.public_id] });
+      const next = { ...version, views: version.views.map((item, index) => index === viewIndex ? { ...view, reference_images: [...view.reference_images, image] } : item) };
+      setVersion(next);
+      syncConfirmedVersion(next);
     });
   }
 
@@ -181,7 +224,9 @@ export function SOPVersionEditor({ initialVersion, onVersionChange }: SOPVersion
     const view = version.views[viewIndex];
     await run(`reference-${view.public_id}`, async () => {
       await apiRequest<void>(`/sop-versions/${version.public_id}/views/${view.public_id}/reference-images/${imageID}`, { method: "DELETE" });
-      updateView(viewIndex, { ...view, reference_images: view.reference_images.filter((image) => image.public_id !== imageID).map((image, index) => ({ ...image, sort_order: index + 1 })) });
+      const next = { ...version, views: version.views.map((item, index) => index === viewIndex ? { ...view, reference_images: view.reference_images.filter((image) => image.public_id !== imageID).map((image, imageIndex) => ({ ...image, sort_order: imageIndex + 1 })) } : item) };
+      setVersion(next);
+      syncConfirmedVersion(next);
     });
   }
 
@@ -204,32 +249,33 @@ export function SOPVersionEditor({ initialVersion, onVersionChange }: SOPVersion
       <header className="flex flex-col gap-3 border-b border-border pb-4 xl:flex-row xl:items-center xl:justify-between">
         <div><div className="flex items-center gap-2"><h1 className="text-2xl font-semibold tracking-tight">{c.title}</h1><Badge variant={version.status === "draft" ? "warning" : version.status === "published" ? "success" : "neutral"}>{statusLabel}</Badge><span className="font-mono text-xs tabular-nums text-muted-foreground">V{version.version_number}</span></div><p className="mt-1 text-sm text-muted-foreground">pcs_object_v1 · {version.views.length} {language === "zh" ? "个拍摄视图" : "capture views"}</p></div>
         <div className="flex flex-wrap gap-2">
-          <Button className="min-h-11" disabled={immutable || Boolean(busy)} onClick={validateAndPublish}><Send className="h-4 w-4" />{busy === "publish" ? <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : null}{c.publish}</Button>
+          <Button className="min-h-11" disabled={immutable || aggregateLocked} onClick={validateAndPublish}><Send className="h-4 w-4" />{busy === "publish" ? <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : null}{c.publish}</Button>
           <Button className="min-h-11" disabled={version.status !== "published" || Boolean(busy)} onClick={copyVersion} variant="secondary"><Copy className="h-4 w-4" />{c.copy}</Button>
           <Button className="min-h-11" disabled={version.status !== "published" || Boolean(busy)} onClick={archiveVersion} variant="danger"><Archive className="h-4 w-4" />{c.archive}</Button>
         </div>
       </header>
 
       {immutable ? <div className={`rounded-md border px-4 py-3 text-sm ${version.status === "published" ? "border-primary/30 bg-primary/5 text-primary" : "border-border bg-muted text-foreground"}`} role="status">{version.status === "published" ? c.immutablePublished : c.immutableArchived}</div> : null}
+      {dirty ? <div className="rounded-md border border-warning/30 bg-[#fff4df] px-4 py-3 text-sm text-warning" role="status">{c.dirtyNotice}</div> : null}
 
       {allErrors.length ? <div className="rounded-md border border-danger/30 bg-danger/5 p-4" role="alert"><p className="flex items-center gap-2 font-semibold text-danger"><TriangleAlert className="h-4 w-4" />{c.validationFailed}</p><ul className="mt-2 list-disc space-y-1 pl-5 text-sm">{allErrors.map((error, index) => <li key={`${error.path}-${index}`}><a className="underline decoration-danger/40 underline-offset-2" href={pathToHref(error.path, version)}>{error.message}<span className="ml-2 font-mono text-xs text-muted-foreground">{error.path}</span></a></li>)}</ul></div> : null}
 
       <Card><CardContent className="grid gap-4 p-4 md:grid-cols-2">
-        <Field id="sop-name-zh" label={c.nameZh}><Input aria-label={c.nameZh} className="h-11" id="sop-name-zh" onChange={(e) => setVersion({ ...version, name: { ...version.name, "zh-CN": e.target.value } })} readOnly={immutable} value={version.name["zh-CN"]} /></Field>
-        <Field id="sop-name-en" label={c.nameEn}><Input aria-label={c.nameEn} className="h-11" id="sop-name-en" onChange={(e) => setVersion({ ...version, name: { ...version.name, en: e.target.value } })} readOnly={immutable} value={version.name.en} /></Field>
-        <Field id="sop-description-zh" label={c.descriptionZh}><Textarea id="sop-description-zh" onChange={(e) => setVersion({ ...version, description: { ...version.description, "zh-CN": e.target.value } })} readOnly={immutable} value={version.description["zh-CN"]} /></Field>
-        <Field id="sop-description-en" label={c.descriptionEn}><Textarea id="sop-description-en" onChange={(e) => setVersion({ ...version, description: { ...version.description, en: e.target.value } })} readOnly={immutable} value={version.description.en} /></Field>
-        <div className="flex justify-end md:col-span-2"><Button className="min-h-11" disabled={immutable || Boolean(busy)} onClick={saveMetadata} variant="secondary"><CheckCircle2 className="h-4 w-4" />{c.saveMeta}</Button></div>
+        <Field id="sop-name-zh" label={c.nameZh}><Input aria-label={c.nameZh} className="h-11" disabled={Boolean(busy)} id="sop-name-zh" onChange={(e) => { setMetadataDirty(true); setVersion({ ...version, name: { ...version.name, "zh-CN": e.target.value } }); }} readOnly={immutable} value={version.name["zh-CN"]} /></Field>
+        <Field id="sop-name-en" label={c.nameEn}><Input aria-label={c.nameEn} className="h-11" disabled={Boolean(busy)} id="sop-name-en" onChange={(e) => { setMetadataDirty(true); setVersion({ ...version, name: { ...version.name, en: e.target.value } }); }} readOnly={immutable} value={version.name.en} /></Field>
+        <Field id="sop-description-zh" label={c.descriptionZh}><Textarea disabled={Boolean(busy)} id="sop-description-zh" onChange={(e) => { setMetadataDirty(true); setVersion({ ...version, description: { ...version.description, "zh-CN": e.target.value } }); }} readOnly={immutable} value={version.description["zh-CN"]} /></Field>
+        <Field id="sop-description-en" label={c.descriptionEn}><Textarea disabled={Boolean(busy)} id="sop-description-en" onChange={(e) => { setMetadataDirty(true); setVersion({ ...version, description: { ...version.description, en: e.target.value } }); }} readOnly={immutable} value={version.description.en} /></Field>
+        <div className="flex justify-end md:col-span-2"><Button className="min-h-11" disabled={immutable || Boolean(busy) || !metadataDirty} onClick={saveMetadata} variant="secondary"><CheckCircle2 className="h-4 w-4" />{c.saveMeta}</Button></div>
       </CardContent></Card>
 
       <section aria-label={language === "zh" ? "拍摄顺序视图轨" : "Capture sequence view rail"} className="grid gap-2 rounded-lg border border-border bg-card p-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
         {version.views.map((view) => <a className="flex min-h-11 min-w-0 items-center gap-2 rounded-md border border-border px-2 text-sm outline-none hover:border-primary focus-visible:ring-2 focus-visible:ring-primary" href={`#view-${view.public_id}`} key={view.public_id}><span className="font-mono font-semibold tabular-nums">{String(view.sequence).padStart(2, "0")}</span><span className="truncate">{localizedText(language, view.name)}</span><span className="ml-auto text-xs text-muted-foreground">{view.role === "reference_front" ? language === "zh" ? "锁定" : "Locked" : view.required ? language === "zh" ? "必拍" : "Required" : language === "zh" ? "选拍" : "Optional"}</span></a>)}
       </section>
 
-      <section className="rounded-lg border border-border bg-card p-3"><div className="flex flex-wrap items-center gap-2"><span className="mr-2 flex items-center gap-2 text-sm font-semibold"><ClipboardPlus className="h-4 w-4 text-primary" />{c.addView}</span>{addableSOPPresetKeys.map((preset) => <Button aria-label={`${language === "zh" ? "添加" : "Add "}${c.preset[preset]}`} className="min-h-11" disabled={immutable || Boolean(busy)} key={preset} onClick={() => addPreset(preset)} size="sm" variant="secondary"><Plus className="h-3.5 w-3.5" />{c.preset[preset]}</Button>)}<Button aria-label={c.addView} className="sr-only" disabled={immutable || Boolean(busy)} onClick={() => addPreset("detail_label")}>{c.addView}</Button></div></section>
+      <section className="rounded-lg border border-border bg-card p-3"><div className="flex flex-wrap items-center gap-2"><span className="mr-2 flex items-center gap-2 text-sm font-semibold"><ClipboardPlus className="h-4 w-4 text-primary" />{c.addView}</span>{addableSOPPresetKeys.map((preset) => <Button aria-label={`${language === "zh" ? "添加" : "Add "}${c.preset[preset]}`} className="min-h-11" disabled={immutable || aggregateLocked} key={preset} onClick={() => addPreset(preset)} size="sm" variant="secondary"><Plus className="h-3.5 w-3.5" />{c.preset[preset]}</Button>)}<Button aria-label={c.addView} className="sr-only" disabled={immutable || aggregateLocked} onClick={() => addPreset("detail_label")}>{c.addView}</Button></div></section>
 
       <div className="grid gap-4">
-        {version.views.map((view, index) => <SOPViewEditor busy={busy === `view-${view.public_id}` || busy === `reference-${view.public_id}`} errorPaths={new Set(allErrors.filter((error) => error.path.startsWith(`views[${index}]`)).map((error) => error.path))} immutable={immutable} key={view.public_id} language={language} locked={view.role === "reference_front"} onChange={(next) => updateView(index, next)} onDelete={() => deleteView(view)} onMove={(direction) => moveView(index, direction)} onReferenceDelete={(imageID) => deleteReference(index, imageID)} onReferenceMove={(imageID, direction) => moveReference(index, imageID, direction)} onReferenceUpload={(file, caption) => uploadReference(index, file, caption)} onSave={() => saveView(index)} view={view} />)}
+        {version.views.map((view, index) => <SOPViewEditor aggregateLocked={aggregateLocked} busy={Boolean(busy)} errorPaths={new Set(allErrors.filter((error) => error.path.startsWith(`views[${index}]`)).map((error) => error.path))} immutable={immutable} key={view.public_id} language={language} locked={view.role === "reference_front"} moveDownDisabled={view.role === "reference_front" || index === version.views.length - 1} moveUpDisabled={view.role === "reference_front" || index <= 1} onChange={(next) => updateView(index, next)} onDelete={() => deleteView(view)} onMove={(direction) => moveView(index, direction)} onReferenceDelete={(imageID) => deleteReference(index, imageID)} onReferenceMove={(imageID, direction) => moveReference(index, imageID, direction)} onReferenceUpload={(file, caption) => uploadReference(index, file, caption)} onSave={() => saveView(index)} saveDisabled={!dirtyViewIDs.has(view.public_id)} view={view} />)}
       </div>
     </div>
   );

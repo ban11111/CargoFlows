@@ -22,6 +22,10 @@ interface SOPViewEditorProps {
   locked: boolean;
   immutable?: boolean;
   busy?: boolean;
+  aggregateLocked?: boolean;
+  moveUpDisabled?: boolean;
+  moveDownDisabled?: boolean;
+  saveDisabled?: boolean;
   errorPaths?: ReadonlySet<string>;
   onChange: (view: SOPView) => void;
   onDelete: () => void;
@@ -50,7 +54,7 @@ const copy = {
 } as const;
 
 export function SOPViewEditor({
-  view, language, locked, immutable = false, busy = false, errorPaths = new Set(), onChange, onDelete, onSave,
+  view, language, locked, immutable = false, busy = false, aggregateLocked = false, moveUpDisabled = false, moveDownDisabled = false, saveDisabled = false, errorPaths = new Set(), onChange, onDelete, onSave,
   onMove, onReferenceUpload, onReferenceDelete, onReferenceMove,
 }: SOPViewEditorProps) {
   const c = copy[language];
@@ -110,9 +114,9 @@ export function SOPViewEditor({
             {locked ? <Badge variant="neutral"><LockKeyhole className="h-3 w-3" />{language === "zh" ? "锁定基准" : "Locked reference"}</Badge> : null}
           </div>
           <div className="flex gap-2">
-            <Button aria-label={`${controlName}${c.moveUp}`} className="min-h-11 min-w-11" disabled={allDisabled || locked} onClick={() => onMove?.(-1)} size="icon" type="button" variant="ghost"><ArrowUp className="h-4 w-4" /></Button>
-            <Button aria-label={`${controlName}${c.moveDown}`} className="min-h-11 min-w-11" disabled={allDisabled} onClick={() => onMove?.(1)} size="icon" type="button" variant="ghost"><ArrowDown className="h-4 w-4" /></Button>
-            <Button aria-label={`${c.delete}${displayName}`} className="min-h-11 min-w-11" disabled={allDisabled || locked} onClick={onDelete} size="icon" type="button" variant="ghost"><Trash2 className="h-4 w-4" /></Button>
+            <Button aria-label={`${controlName}${c.moveUp}`} className="min-h-11 min-w-11" disabled={allDisabled || aggregateLocked || moveUpDisabled} onClick={() => onMove?.(-1)} size="icon" type="button" variant="ghost"><ArrowUp className="h-4 w-4" /></Button>
+            <Button aria-label={`${controlName}${c.moveDown}`} className="min-h-11 min-w-11" disabled={allDisabled || aggregateLocked || moveDownDisabled} onClick={() => onMove?.(1)} size="icon" type="button" variant="ghost"><ArrowDown className="h-4 w-4" /></Button>
+            <Button aria-label={`${c.delete}${displayName}`} className="min-h-11 min-w-11" disabled={allDisabled || aggregateLocked || locked} onClick={onDelete} size="icon" type="button" variant="ghost"><Trash2 className="h-4 w-4" /></Button>
           </div>
         </div>
         {locked ? <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground"><LockKeyhole className="h-3.5 w-3.5" />{c.locked}</p> : null}
@@ -166,9 +170,9 @@ export function SOPViewEditor({
         <section aria-labelledby={`${view.public_id}-references`} className="rounded-md bg-muted p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-xs font-semibold" id={`${view.public_id}-references`}>{c.references}</h3>
-            <label className={`inline-flex min-h-11 items-center gap-2 rounded-md border border-border bg-card px-3 text-sm font-medium ${allDisabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}>
+            <label className={`inline-flex min-h-11 items-center gap-2 rounded-md border border-border bg-card px-3 text-sm font-medium ${allDisabled || aggregateLocked ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}>
               <ImagePlus className="h-4 w-4" />{c.addReference}
-              <input accept="image/*" aria-label={`${language === "zh" ? "为" : "Add reference image for "}${displayName}${language === "zh" ? "添加参考图" : ""}`} className="sr-only" disabled={allDisabled} onChange={(event: ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (file) onReferenceUpload?.(file, referenceCaption); event.target.value = ""; }} type="file" />
+              <input accept="image/*" aria-label={`${language === "zh" ? "为" : "Add reference image for "}${displayName}${language === "zh" ? "添加参考图" : ""}`} className="sr-only" disabled={allDisabled || aggregateLocked} onChange={(event: ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (file) onReferenceUpload?.(file, referenceCaption); event.target.value = ""; }} type="file" />
             </label>
           </div>
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -184,16 +188,16 @@ export function SOPViewEditor({
               {view.reference_images.map((image, index) => <li className="flex gap-3 rounded-md border border-border bg-card p-2" key={image.public_id}>
                 <Image alt={localizedText(language, image.caption) || `${displayName} ${c.references} ${index + 1}`} className="h-20 w-20 rounded object-cover" height={80} src={image.thumbnail_url} unoptimized width={80} />
                 <div className="min-w-0 flex-1"><p className="truncate text-xs">{localizedText(language, image.caption) || image.object_key}</p><div className="mt-2 flex gap-1">
-                  <Button aria-label={`${c.referenceUp} ${index + 1}`} disabled={allDisabled || index === 0} onClick={() => onReferenceMove?.(image.public_id, -1)} size="icon" type="button" variant="ghost"><ArrowUp className="h-4 w-4" /></Button>
-                  <Button aria-label={`${c.referenceDown} ${index + 1}`} disabled={allDisabled || index === view.reference_images.length - 1} onClick={() => onReferenceMove?.(image.public_id, 1)} size="icon" type="button" variant="ghost"><ArrowDown className="h-4 w-4" /></Button>
-                  <Button aria-label={`${c.removeReference} ${index + 1}`} disabled={allDisabled} onClick={() => onReferenceDelete?.(image.public_id)} size="icon" type="button" variant="ghost"><Trash2 className="h-4 w-4" /></Button>
+                  <Button aria-label={`${c.referenceUp} ${index + 1}`} className="min-h-11 min-w-11" disabled={allDisabled || aggregateLocked || index === 0} onClick={() => onReferenceMove?.(image.public_id, -1)} size="icon" type="button" variant="ghost"><ArrowUp className="h-4 w-4" /></Button>
+                  <Button aria-label={`${c.referenceDown} ${index + 1}`} className="min-h-11 min-w-11" disabled={allDisabled || aggregateLocked || index === view.reference_images.length - 1} onClick={() => onReferenceMove?.(image.public_id, 1)} size="icon" type="button" variant="ghost"><ArrowDown className="h-4 w-4" /></Button>
+                  <Button aria-label={`${c.removeReference} ${index + 1}`} className="min-h-11 min-w-11" disabled={allDisabled || aggregateLocked} onClick={() => onReferenceDelete?.(image.public_id)} size="icon" type="button" variant="ghost"><Trash2 className="h-4 w-4" /></Button>
                 </div></div>
               </li>)}
             </ul>
           ) : <p className="mt-3 text-xs text-muted-foreground">{language === "zh" ? "尚未添加参考图" : "No reference images yet"}</p>}
         </section>
 
-        <div className="flex justify-end"><Button aria-label={`${c.save}${displayName}`} className="min-h-11" disabled={allDisabled} onClick={onSave} type="button"><Save className="h-4 w-4" />{c.save}{displayName}</Button></div>
+        <div className="flex justify-end"><Button aria-label={`${c.save}${displayName}`} className="min-h-11" disabled={allDisabled || saveDisabled} onClick={onSave} type="button"><Save className="h-4 w-4" />{c.save}{displayName}</Button></div>
       </CardContent>
     </Card>
   );

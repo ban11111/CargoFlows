@@ -22,6 +22,7 @@ paths:
       operationId: listCaptureSOPs
       parameters:
         - { in: query, name: category_id, schema: { type: integer, minimum: 1 } }
+        - { in: query, name: include_all, description: "Admin lifecycle listing. When true, includes draft-only and archived-only SOPs and every ordered version. Defaults to published-only selection semantics.", schema: { type: boolean, default: false } }
       responses:
         '200':
           description: Capture SOPs

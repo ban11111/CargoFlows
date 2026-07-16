@@ -255,7 +255,7 @@ func TestSOPServiceCopySingleDraftArchiveAndList(t *testing.T) {
 	if err := service.Archive(ctx, published.PublicID); err != nil {
 		t.Fatal(err)
 	}
-	listed, err := service.List(ctx, category.ID)
+	listed, err := service.List(ctx, category.ID, false)
 	if err != nil {
 		t.Fatal(err)
 	}

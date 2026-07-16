@@ -681,6 +681,8 @@ export interface operations {
         parameters: {
             query?: {
                 category_id?: number;
+                /** @description Admin lifecycle listing. When true, includes draft-only and archived-only SOPs and every ordered version. Defaults to published-only selection semantics. */
+                include_all?: boolean;
             };
             header?: never;
             path?: never;

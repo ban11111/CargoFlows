@@ -106,14 +106,21 @@ func (s *SOPService) Create(ctx context.Context, input CreateSOPInput) (*Created
 	return &created, nil
 }
 
-func (s *SOPService) List(ctx context.Context, categoryID uint) ([]models.CaptureSOP, error) {
+func (s *SOPService) List(ctx context.Context, categoryID uint, includeAll bool) ([]models.CaptureSOP, error) {
 	var result []models.CaptureSOP
-	db := s.db.WithContext(ctx).Model(&models.CaptureSOP{}).
-		Joins("JOIN sop_versions selectable_versions ON selectable_versions.capture_sop_id = capture_sops.id AND selectable_versions.status = ?", models.SOPVersionPublished).
-		Distinct("capture_sops.*").
-		Preload("Versions", "status = ?", models.SOPVersionPublished).
+	db := s.db.WithContext(ctx).Model(&models.CaptureSOP{})
+	if includeAll {
+		db = db.Preload("Versions", func(db *gorm.DB) *gorm.DB { return db.Order("version_number ASC") })
+	} else {
+		db = db.
+			Joins("JOIN sop_versions selectable_versions ON selectable_versions.capture_sop_id = capture_sops.id AND selectable_versions.status = ?", models.SOPVersionPublished).
+			Distinct("capture_sops.*").
+			Preload("Versions", "status = ?", models.SOPVersionPublished)
+	}
+	db = db.
 		Preload("Versions.Views", func(db *gorm.DB) *gorm.DB { return db.Order("sequence ASC") }).
-		Preload("Versions.Views.ReferenceImages", func(db *gorm.DB) *gorm.DB { return db.Order("sort_order ASC") })
+		Preload("Versions.Views.ReferenceImages", func(db *gorm.DB) *gorm.DB { return db.Order("sort_order ASC") }).
+		Order("capture_sops.id ASC")
 	if categoryID != 0 {
 		db = db.Where("capture_sops.category_id = ?", categoryID)
 	}

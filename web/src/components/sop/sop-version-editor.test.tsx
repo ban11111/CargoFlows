@@ -12,6 +12,7 @@ const referenceID = "11111111-1111-4111-8111-111111111111";
 const backID = "22222222-2222-4222-8222-222222222222";
 const versionID = "33333333-3333-4333-8333-333333333333";
 const sopID = "44444444-4444-4444-8444-444444444444";
+const detailID = "77777777-7777-4777-8777-777777777777";
 
 const referenceView = {
   public_id: referenceID,
@@ -46,6 +47,16 @@ const backView = {
   name: { "zh-CN": "背面", en: "Back" },
   instruction: { "zh-CN": "拍摄商品背面。", en: "Capture the product back." },
   pose: { ...referenceView.pose, camera_position_direction: [0, 0, -1] as [number, number, number] },
+};
+
+const detailView = {
+  ...backView,
+  public_id: detailID,
+  sequence: 3,
+  preset_key: "detail_label",
+  view_kind: "detail" as const,
+  name: { "zh-CN": "标签细节", en: "Label Detail" },
+  required: false,
 };
 
 const draftFixture: SOPVersion = {
@@ -84,6 +95,14 @@ function Providers({ children }: { children: ReactNode }) {
 
 function renderEditor(version: SOPVersion = draftFixture) {
   return render(<SOPVersionEditor initialVersion={version} />, { wrapper: Providers });
+}
+
+function renderEditorWithClient(version: SOPVersion = draftFixture) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const rendered = render(
+    <LanguageProvider><QueryClientProvider client={client}><SOPVersionEditor initialVersion={version} /></QueryClientProvider></LanguageProvider>,
+  );
+  return { ...rendered, client };
 }
 
 describe("SOPVersionEditor", () => {
@@ -177,21 +196,108 @@ describe("SOPVersionEditor", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("sends a complete UUID list when moving a view", async () => {
-    const reordered = { ...draftFixture, views: [referenceView, { ...backView, sequence: 2 }] };
+  it("sends a complete UUID list when moving an interior view", async () => {
+    const initial = { ...draftFixture, views: [referenceView, backView, detailView] };
+    const reordered = { ...initial, views: [referenceView, { ...detailView, sequence: 2 }, { ...backView, sequence: 3 }] };
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => response(reordered));
-    renderEditor();
+    renderEditor(initial);
 
-    fireEvent.click(screen.getByRole("button", { name: "背面上移" }));
+    fireEvent.click(screen.getByRole("button", { name: "标签细节上移" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
 
     expect(fetchMock).toHaveBeenCalledWith(
       `/api/proxy/sop-versions/${versionID}/view-order`,
       expect.objectContaining({
         method: "PUT",
-        body: JSON.stringify({ public_ids: [referenceID, backID] }),
+        body: JSON.stringify({ public_ids: [referenceID, detailID, backID] }),
       }),
     );
+  });
+
+  it("disables both reference controls and every boundary move without a request", () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => response(draftFixture));
+    renderEditor();
+
+    expect(screen.getByRole("button", { name: "正面上移" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "正面下移" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "背面上移" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "背面下移" })).toBeDisabled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves an unsaved title when a view save returns an older aggregate", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => response(draftFixture));
+    renderEditor();
+
+    fireEvent.change(screen.getByLabelText("SOP 中文名称"), { target: { value: "未保存的新标题" } });
+    fireEvent.change(screen.getByLabelText("背面 相机位置方向 X"), { target: { value: "0.125" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存背面" }));
+
+    await waitFor(() => expect(screen.getByLabelText("SOP 中文名称")).toHaveValue("未保存的新标题"));
+    expect(screen.getByRole("button", { name: "发布版本" })).toBeDisabled();
+  });
+
+  it("blocks publication and aggregate mutations while edits are dirty", () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => response(draftFixture));
+    renderEditor();
+
+    fireEvent.change(screen.getByLabelText("SOP 中文名称"), { target: { value: "未保存的新标题" } });
+
+    expect(screen.getByText("请先保存所有未保存的修改，再执行发布、排序或新增视图。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "发布版本" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "添加包装正面" })).toBeDisabled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("publishes the server-confirmed revision only after every dirty section is saved", async () => {
+    const calls: string[] = [];
+    const savedTitle = { ...draftFixture, name: { ...draftFixture.name, "zh-CN": "新标题" } };
+    const savedBack = { ...backView, pose: { ...backView.pose, camera_position_direction: [0.25, 0, -1] as [number, number, number] } };
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.endsWith(`/views/${backID}`)) return response({ ...savedTitle, views: [referenceView, savedBack] });
+      if (url.endsWith(`/sop-versions/${versionID}`)) return response(savedTitle);
+      if (url.endsWith("/validate")) return response({ code: "sop_valid", errors: [] });
+      if (url.endsWith("/publish")) return response({ ...savedTitle, status: "published", views: [referenceView, savedBack] });
+      throw new Error(`Unexpected request ${url}`);
+    });
+    renderEditor();
+
+    fireEvent.change(screen.getByLabelText("SOP 中文名称"), { target: { value: "新标题" } });
+    fireEvent.change(screen.getByLabelText("背面 相机位置方向 X"), { target: { value: "0.25" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存版本信息" }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(screen.getByLabelText("背面 相机位置方向 X")).toHaveValue(0.25);
+    expect(screen.getByRole("button", { name: "发布版本" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "保存背面" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "发布版本" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "发布版本" }));
+
+    expect(await screen.findByText("已发布版本不可修改")).toBeInTheDocument();
+    expect(calls).toEqual([
+      `/api/proxy/sop-versions/${versionID}`,
+      `/api/proxy/sop-versions/${versionID}/views/${backID}`,
+      `/api/proxy/sop-versions/${versionID}/validate`,
+      `/api/proxy/sop-versions/${versionID}/publish`,
+    ]);
+  });
+
+  it("protects dirty navigation and clears the guard after a confirmed save", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => response({ ...draftFixture, name: { ...draftFixture.name, "zh-CN": "新标题" } }));
+    renderEditor();
+    fireEvent.change(screen.getByLabelText("SOP 中文名称"), { target: { value: "新标题" } });
+
+    const dirtyEvent = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(dirtyEvent);
+    expect(dirtyEvent.defaultPrevented).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "保存版本信息" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "发布版本" })).toBeEnabled());
+    const cleanEvent = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(cleanEvent);
+    expect(cleanEvent.defaultPrevented).toBe(false);
   });
 
   it("preserves exact numeric vector input in a view update", async () => {
@@ -226,7 +332,8 @@ describe("SOPVersionEditor", () => {
       }, 201);
       throw new Error(`Unexpected request ${url}`);
     });
-    renderEditor();
+    const { client } = renderEditorWithClient();
+    client.setQueryData(["sop-version", versionID], draftFixture);
     const file = new File(["pixels"], "sample.jpg", { type: "image/jpeg" });
 
     fireEvent.change(screen.getByLabelText("背面参考图中文说明"), { target: { value: "包装细节示例" } });
@@ -245,5 +352,33 @@ describe("SOPVersionEditor", () => {
       thumbnail_url: "/media/sample.jpg",
       caption: { "zh-CN": "包装细节示例", en: "Packaging detail example" },
     });
+    const cached = client.getQueryData<SOPVersion>(["sop-version", versionID]);
+    expect(cached?.views[1].reference_images).toHaveLength(1);
+    expect(client.getQueryState(["sop-version", versionID])?.isInvalidated).toBe(true);
+  });
+
+  it("updates and invalidates the exact version cache after reference reorder and delete", async () => {
+    const firstImage = { public_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", object_key: "one.jpg", thumbnail_url: "/one.jpg", sort_order: 1, caption: { "zh-CN": "一", en: "One" } };
+    const secondImage = { public_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", object_key: "two.jpg", thumbnail_url: "/two.jpg", sort_order: 2, caption: { "zh-CN": "二", en: "Two" } };
+    const withImages = { ...draftFixture, views: [referenceView, { ...backView, reference_images: [firstImage, secondImage] }] };
+    const reordered = { ...withImages, views: [referenceView, { ...backView, reference_images: [{ ...secondImage, sort_order: 1 }, { ...firstImage, sort_order: 2 }] }] };
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      if (init?.method === "PUT") return response(reordered);
+      if (init?.method === "DELETE") return response(undefined, 204);
+      throw new Error(`Unexpected request ${String(input)}`);
+    });
+    const { client } = renderEditorWithClient(withImages);
+    client.setQueryData(["sop-version", versionID], withImages);
+
+    fireEvent.click(screen.getByRole("button", { name: "参考图上移 2" }));
+    await waitFor(() => expect(client.getQueryData<SOPVersion>(["sop-version", versionID])?.views[1].reference_images[0].public_id).toBe(secondImage.public_id));
+    expect(client.getQueryState(["sop-version", versionID])?.isInvalidated).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "删除参考图 1" }));
+    await waitFor(() => expect(client.getQueryData<SOPVersion>(["sop-version", versionID])?.views[1].reference_images).toHaveLength(1));
+    expect(client.getQueryData<SOPVersion>(["sop-version", versionID])?.views[1].reference_images[0].public_id).toBe(firstImage.public_id);
+    expect(client.getQueryState(["sop-version", versionID])?.isInvalidated).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(`/api/proxy/sop-versions/${versionID}/views/${backID}/reference-images/${secondImage.public_id}`, expect.objectContaining({ method: "DELETE" }));
   });
 });

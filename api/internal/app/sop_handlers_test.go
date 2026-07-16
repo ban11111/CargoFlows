@@ -190,6 +190,7 @@ func TestListCaptureSOPsWithoutCategoryReturnsPublishedSOPs(t *testing.T) {
 	if _, err := service.Publish(t.Context(), created.Version.PublicID); err != nil {
 		t.Fatal(err)
 	}
+	_ = createTestSOP(t, service, category, user)
 	server, token := authenticatedSOPRouter(t, db, user)
 	defer server.Close()
 	response := sopRequest(t, server, token, http.MethodGet, "/api/v1/capture-sops", "")
@@ -205,6 +206,59 @@ func TestListCaptureSOPsWithoutCategoryReturnsPublishedSOPs(t *testing.T) {
 	}
 	if len(result.Data) != 1 || result.Data[0].PublicID != created.SOP.PublicID {
 		t.Fatalf("data = %#v", result.Data)
+	}
+}
+
+func TestListCaptureSOPsIncludeAllReturnsDraftOnlyAndArchivedOnly(t *testing.T) {
+	db := newTestDB(t)
+	category, user := seedSOPCategoryAndUser(t, db)
+	service := NewSOPService(db)
+	draftOnly := createTestSOP(t, service, category, user)
+	archivedOnly := createTestSOP(t, service, category, user)
+	if _, err := service.Publish(t.Context(), archivedOnly.Version.PublicID); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Archive(t.Context(), archivedOnly.Version.PublicID); err != nil {
+		t.Fatal(err)
+	}
+	server, token := authenticatedSOPRouter(t, db, user)
+	defer server.Close()
+
+	response := sopRequest(t, server, token, http.MethodGet, "/api/v1/capture-sops?include_all=true", "")
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", response.StatusCode)
+	}
+	var result struct {
+		Data []captureSOPSummaryDTO `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Data) != 2 {
+		t.Fatalf("expected 2 lifecycle SOPs, got %#v", result.Data)
+	}
+	byID := make(map[string]captureSOPSummaryDTO, len(result.Data))
+	for _, item := range result.Data {
+		byID[item.PublicID] = item
+	}
+	if got := byID[draftOnly.SOP.PublicID].Versions; len(got) != 1 || got[0].Status != models.SOPVersionDraft {
+		t.Fatalf("draft-only versions = %#v", got)
+	}
+	if got := byID[archivedOnly.SOP.PublicID].Versions; len(got) != 1 || got[0].Status != models.SOPVersionArchived {
+		t.Fatalf("archived-only versions = %#v", got)
+	}
+}
+
+func TestListCaptureSOPsRejectsInvalidIncludeAll(t *testing.T) {
+	db := newTestDB(t)
+	_, user := seedSOPCategoryAndUser(t, db)
+	server, token := authenticatedSOPRouter(t, db, user)
+	defer server.Close()
+	response := sopRequest(t, server, token, http.MethodGet, "/api/v1/capture-sops?include_all=maybe", "")
+	response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d", response.StatusCode)
 	}
 }
 

@@ -119,7 +119,12 @@ func (s *Server) listCaptureSOPs(c *gin.Context) {
 		respondSOPBadRequest(c, err)
 		return
 	}
-	values, err := NewSOPService(s.db).List(c, categoryID)
+	includeAll, err := parseOptionalBool(c.Query("include_all"))
+	if err != nil {
+		respondSOPBadRequest(c, err)
+		return
+	}
+	values, err := NewSOPService(s.db).List(c, categoryID, includeAll)
 	if err != nil {
 		respondSOPError(c, err)
 		return
@@ -560,4 +565,17 @@ func parseOptionalUint(value string) (uint, error) {
 		return 0, errors.New("value must be greater than zero")
 	}
 	return uint(parsed), err
+}
+
+func parseOptionalBool(value string) (bool, error) {
+	if value == "" {
+		return false, nil
+	}
+	if value == "true" {
+		return true, nil
+	}
+	if value == "false" {
+		return false, nil
+	}
+	return false, errors.New("include_all must be true or false")
 }
