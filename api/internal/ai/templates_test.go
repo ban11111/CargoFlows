@@ -1,0 +1,192 @@
+package ai
+
+import (
+	"encoding/json"
+	"errors"
+	"reflect"
+	"sort"
+	"testing"
+
+	"cargoflow/api/internal/models"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+)
+
+func templateTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&models.AIContentTemplate{}, &models.AIContentTemplateVersion{}, &models.AIContentSlot{}); err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
+
+func validTemplateInput() CreateTemplateInput {
+	return CreateTemplateInput{
+		NameZH: "Lazada 详情", NameEN: "Lazada Detail", TargetPlatform: "lazada", CreatedByID: 1,
+		Version: UpdateTemplateVersionInput{
+			DefaultLocale: "zh-CN", PromptCompilerVersion: "v1", PlatformPrompt: "Create content for {{product.name}}.",
+			Slots: []SlotInput{{
+				SlotKey: "hero", Kind: "image", NameZH: "主图", NameEN: "Hero", Sequence: 1,
+				PromptFragment:   "Create a faithful image of {{sku.code}}.",
+				Constraints:      json.RawMessage(`{"required_views":["reference_front"]}`),
+				GenerationConfig: json.RawMessage(`{"size":"1024x1024","candidate_count":2}`),
+				LayoutConfig:     json.RawMessage(`{"text_safe_area":{"x":0.08,"y":0.08,"width":0.84,"height":0.28}}`),
+			}},
+		},
+	}
+}
+
+func TestTemplateCreateGetListAndNormalizesSlots(t *testing.T) {
+	service := NewTemplateService(templateTestDB(t))
+	input := validTemplateInput()
+	input.Version.Slots = append(input.Version.Slots, SlotInput{
+		SlotKey: " title ", Kind: " title ", NameZH: " 标题 ", NameEN: " Title ",
+		PromptFragment: " Write {{product.name}} ", Constraints: json.RawMessage(` { } `),
+		GenerationConfig: json.RawMessage(`{"candidate_count":1}`), LayoutConfig: json.RawMessage(`{}`),
+	})
+	input.Version.Slots[0].Sequence = 0
+
+	created, err := service.Create(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Template.PublicID == "" || created.Version.PublicID == "" || created.Version.Status != models.AITemplateDraft {
+		t.Fatalf("unexpected created template: %#v", created)
+	}
+	got, err := service.Get(t.Context(), created.Template.PublicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Versions) != 1 || len(got.Versions[0].Slots) != 2 {
+		t.Fatalf("unexpected loaded template: %#v", got)
+	}
+	for i, slot := range got.Versions[0].Slots {
+		if slot.Sequence != i+1 {
+			t.Fatalf("slot %d sequence = %d", i, slot.Sequence)
+		}
+	}
+	if got.Versions[0].Slots[1].SlotKey != "title" || got.Versions[0].Slots[1].NameEN != "Title" {
+		t.Fatalf("slot was not normalized: %#v", got.Versions[0].Slots[1])
+	}
+	listed, err := service.List(t.Context(), true)
+	if err != nil || len(listed) != 1 || listed[0].PublicID != created.Template.PublicID {
+		t.Fatalf("list = %#v, err = %v", listed, err)
+	}
+}
+
+func TestPublishReturnsAllValidationIssuesAndLeavesDraft(t *testing.T) {
+	service := NewTemplateService(templateTestDB(t))
+	input := validTemplateInput()
+	input.NameEN = ""
+	input.Version.PlatformPrompt = "Use {{unknown.value}}"
+	input.Version.Slots[0].NameZH = ""
+	input.Version.Slots[0].PromptFragment = ""
+	input.Version.Slots[0].GenerationConfig = json.RawMessage(`{"size":"999x999","candidate_count":5}`)
+	input.Version.Slots[0].LayoutConfig = json.RawMessage(`{"text_safe_area":{"x":0.9,"y":0.1,"width":0.2,"height":0.3}}`)
+	created, err := service.Create(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issues, err := service.Publish(t.Context(), created.Version.PublicID, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertIssueCodes(t, issues, "name_en_required", "slot_name_zh_required", "prompt_required", "template_variable_unknown", "candidate_count_invalid", "image_size_invalid", "safe_area_invalid")
+
+	got, err := service.Get(t.Context(), created.Template.PublicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != models.AITemplateDraft || got.Versions[0].Status != models.AITemplateDraft || got.Versions[0].PublishedAt != nil {
+		t.Fatalf("invalid publication changed lifecycle: %#v", got)
+	}
+}
+
+func TestValidateTemplateVersionReportsDuplicateKeysKindsSequencesAndJSON(t *testing.T) {
+	version := models.AIContentTemplateVersion{DefaultLocale: "zh-CN", PromptCompilerVersion: "v1", PlatformPrompt: "ok"}
+	slots := []models.AIContentSlot{
+		{SlotKey: "hero", Kind: "video", NameZH: "主图", NameEN: "Hero", Sequence: 1, PromptFragment: "ok", ConstraintsJSON: []byte(`[]`), GenerationConfigJSON: []byte(`{`), LayoutConfigJSON: []byte(`{}`)},
+		{SlotKey: "hero", Kind: models.AIContentSlotImage, NameZH: "主图 2", NameEN: "Hero 2", Sequence: 3, PromptFragment: "ok", ConstraintsJSON: []byte(`{}`), GenerationConfigJSON: []byte(`{}`), LayoutConfigJSON: []byte(`{}`)},
+	}
+	issues := ValidateTemplateVersion(version, slots)
+	assertIssueCodes(t, issues, "slot_key_duplicate", "slot_kind_invalid", "slot_sequence_invalid", "constraints_object_required", "generation_config_object_required")
+}
+
+func TestPublishFreezesVersionCopyCreatesFreshDraftAndArchiveClosesPublished(t *testing.T) {
+	db := templateTestDB(t)
+	service := NewTemplateService(db)
+	created, err := service.Create(t.Context(), validTemplateInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	issues, err := service.Publish(t.Context(), created.Version.PublicID, 7)
+	if err != nil || len(issues) != 0 {
+		t.Fatalf("publish issues = %#v, err = %v", issues, err)
+	}
+	if _, err := service.UpdateDraft(t.Context(), created.Version.PublicID, validTemplateInput().Version); !errors.Is(err, ErrTemplateVersionImmutable) {
+		t.Fatalf("update published error = %v", err)
+	}
+
+	copied, err := service.CopyVersion(t.Context(), created.Template.PublicID, created.Version.PublicID, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if copied.PublicID == created.Version.PublicID || copied.VersionNumber != 2 || copied.Status != models.AITemplateDraft || len(copied.Slots) != 1 || copied.Slots[0].PublicID == created.Version.Slots[0].PublicID {
+		t.Fatalf("unexpected copied version: %#v", copied)
+	}
+	if _, err := service.CopyVersion(t.Context(), created.Template.PublicID, created.Version.PublicID, 8); !errors.Is(err, ErrTemplateDraftExists) {
+		t.Fatalf("second copy error = %v", err)
+	}
+	if err := service.Archive(t.Context(), created.Version.PublicID); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Archive(t.Context(), copied.PublicID); !errors.Is(err, ErrTemplateVersionImmutable) {
+		t.Fatalf("archive draft error = %v", err)
+	}
+}
+
+func TestUpdateDraftReplacesSlotsAndRejectsMissingVersion(t *testing.T) {
+	service := NewTemplateService(templateTestDB(t))
+	created, err := service.Create(t.Context(), validTemplateInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	update := validTemplateInput().Version
+	update.Slots = []SlotInput{{
+		SlotKey: "seo", Kind: "seo_description", NameZH: "SEO 描述", NameEN: "SEO description",
+		PromptFragment: "Write for {{product.name}}", Constraints: json.RawMessage(`{}`), GenerationConfig: json.RawMessage(`{"candidate_count":4}`), LayoutConfig: json.RawMessage(`{}`),
+	}}
+	updated, err := service.UpdateDraft(t.Context(), created.Version.PublicID, update)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.Slots) != 1 || updated.Slots[0].SlotKey != "seo" || updated.Slots[0].Sequence != 1 {
+		t.Fatalf("unexpected update: %#v", updated)
+	}
+	if _, err := service.UpdateDraft(t.Context(), "00000000-0000-0000-0000-000000000000", update); !errors.Is(err, ErrTemplateVersionNotFound) {
+		t.Fatalf("missing update error = %v", err)
+	}
+}
+
+func assertIssueCodes(t *testing.T, issues []ValidationIssue, want ...string) {
+	t.Helper()
+	got := make([]string, 0, len(issues))
+	for _, issue := range issues {
+		got = append(got, issue.Code)
+	}
+	sort.Strings(got)
+	sort.Strings(want)
+	for _, code := range want {
+		if !containsString(got, code) {
+			t.Fatalf("issue codes = %v, want code %q (issues: %#v)", got, code, issues)
+		}
+	}
+}
+
+func containsString(values []string, value string) bool {
+	return reflect.ValueOf(values).Len() > 0 && sort.SearchStrings(values, value) < len(values) && values[sort.SearchStrings(values, value)] == value
+}
