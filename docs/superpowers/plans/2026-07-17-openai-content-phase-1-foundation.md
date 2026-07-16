@@ -869,9 +869,9 @@ git commit -m "feat(web): add AI dry-run job workflow"
 
 **Interfaces:**
 - Consumes: every Phase 1 API and Web interface.
-- Produces: documented local startup and one end-to-end dry-run acceptance path.
+- Produces: documented local startup and one end-to-end template-to-dry-run acceptance path; credential configuration remains covered by Task 5's isolated API tests so E2E never needs a real OpenAI key.
 
-- [ ] **Step 1: Add an E2E test for admin configuration, template publication, and dry-run completion**
+- [ ] **Step 1: Add an E2E test for template publication and dry-run completion**
 
 ```ts
 test("admin can publish a template and complete a dry-run job", async ({ page }) => {
