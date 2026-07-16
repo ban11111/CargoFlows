@@ -208,6 +208,18 @@ func TestListCaptureSOPsWithoutCategoryReturnsPublishedSOPs(t *testing.T) {
 	}
 }
 
+func TestListCaptureSOPsRejectsExplicitZeroCategory(t *testing.T) {
+	db := newTestDB(t)
+	_, user := seedSOPCategoryAndUser(t, db)
+	server, token := authenticatedSOPRouter(t, db, user)
+	defer server.Close()
+	response := sopRequest(t, server, token, http.MethodGet, "/api/v1/capture-sops?category_id=0", "")
+	response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d", response.StatusCode)
+	}
+}
+
 func TestPublishedVersionRejectsAllReferenceImageMutations(t *testing.T) {
 	db := newTestDB(t)
 	category, user := seedSOPCategoryAndUser(t, db)
@@ -237,6 +249,80 @@ func TestPublishedVersionRejectsAllReferenceImageMutations(t *testing.T) {
 		if response.StatusCode != http.StatusConflict {
 			t.Errorf("%s %s status = %d", tc.method, tc.path, response.StatusCode)
 		}
+	}
+}
+
+func TestVersionPatchRejectsMissingRequiredShapeWithoutMutation(t *testing.T) {
+	cases := []struct{ name, body string }{
+		{"null", `null`},
+		{"empty object", `{}`},
+		{"missing name", `{"description":{"zh-CN":"说明","en":"Description"}}`},
+		{"missing description", `{"name":{"zh-CN":"名称","en":"Name"}}`},
+		{"missing Chinese name", `{"name":{"en":"Name"},"description":{"zh-CN":"说明","en":"Description"}}`},
+		{"missing English description", `{"name":{"zh-CN":"名称","en":"Name"},"description":{"zh-CN":"说明"}}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newTestDB(t)
+			category, user := seedSOPCategoryAndUser(t, db)
+			service := NewSOPService(db)
+			created := createTestSOP(t, service, category, user)
+			server, token := authenticatedSOPRouter(t, db, user)
+			defer server.Close()
+
+			response := sopRequest(t, server, token, http.MethodPatch, "/api/v1/sop-versions/"+created.Version.PublicID, tc.body)
+			response.Body.Close()
+			if response.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d", response.StatusCode)
+			}
+			persisted, err := service.GetVersion(t.Context(), created.Version.PublicID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persisted.NameZH != created.Version.NameZH || persisted.NameEN != created.Version.NameEN || persisted.DescriptionZH != created.Version.DescriptionZH || persisted.DescriptionEN != created.Version.DescriptionEN {
+				t.Fatalf("invalid patch mutated version: %#v", persisted)
+			}
+		})
+	}
+}
+
+func TestMutationBodiesEnforceNestedRequiredFields(t *testing.T) {
+	db := newTestDB(t)
+	category, user := seedSOPCategoryAndUser(t, db)
+	service := NewSOPService(db)
+	created := createTestSOP(t, service, category, user)
+	server, token := authenticatedSOPRouter(t, db, user)
+	defer server.Close()
+	versionPath := "/api/v1/sop-versions/" + created.Version.PublicID
+	viewPath := versionPath + "/views/" + created.Version.Views[0].PublicID
+	prefix := "sop-references/" + created.Version.PublicID + "/" + created.Version.Views[0].PublicID + "/"
+
+	cases := []struct{ name, method, path, body string }{
+		{"partial create description", http.MethodPost, "/api/v1/capture-sops", `{"category_id":` + jsonNumber(category.ID) + `,"name":{"zh-CN":"新建","en":"New"},"description":{"en":"Only English"}}`},
+		{"custom view missing allow_mirror", http.MethodPost, versionPath + "/views", `{"custom":{"role":"capture","view_kind":"standard","name":{"zh-CN":"背面","en":"Back"},"instruction":{"zh-CN":"","en":""},"required":true,"pose":{"space":"object","camera_position_direction":[0,0,-1],"image_up_direction":[1,0,0],"target":[0,0,0]},"composition":{"frame_occupancy":0.8,"aspect_ratio":"1:1","allow_rotation_correction":true}}}`},
+		{"view patch missing required", http.MethodPatch, viewPath, `{"role":"reference_front","view_kind":"standard","name":{"zh-CN":"正面","en":"Front"}}`},
+		{"view reorder missing IDs", http.MethodPut, versionPath + "/view-order", `{}`},
+		{"copy missing source", http.MethodPost, "/api/v1/capture-sops/" + created.SOP.PublicID + "/versions", `{}`},
+		{"upload missing content type", http.MethodPost, viewPath + "/reference-images/upload-url", `{"file_name":"example.jpg"}`},
+		{"reference missing thumbnail", http.MethodPost, viewPath + "/reference-images", `{"object_key":"` + prefix + `example.jpg","caption":{"zh-CN":"","en":""}}`},
+		{"reference missing caption language", http.MethodPost, viewPath + "/reference-images", `{"object_key":"` + prefix + `example.jpg","thumbnail_url":"/thumb.jpg","caption":{"zh-CN":"示例"}}`},
+		{"reference reorder missing IDs", http.MethodPut, viewPath + "/reference-image-order", `{}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			response := sopRequest(t, server, token, tc.method, tc.path, tc.body)
+			response.Body.Close()
+			if response.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d", response.StatusCode)
+			}
+		})
+	}
+	version, err := service.GetVersion(t.Context(), created.Version.PublicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(version.Views) != 1 || len(version.Views[0].ReferenceImages) != 0 {
+		t.Fatalf("invalid requests mutated aggregate: %#v", version)
 	}
 }
 

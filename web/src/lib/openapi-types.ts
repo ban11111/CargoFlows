@@ -373,7 +373,7 @@ export interface components {
             /** @enum {string} */
             preset_key?: "back" | "left" | "bottom" | "right" | "top" | "detail_label" | "packaging_front";
             custom?: components["schemas"]["ViewMutation"];
-        };
+        } & (unknown | unknown);
         CreateCaptureSOPRequest: {
             category_id: number;
             name: components["schemas"]["LocalizedText"];
@@ -403,6 +403,9 @@ export interface components {
             code: string;
             message: string;
         };
+        AuthErrorResponse: {
+            message: string;
+        };
         UploadEnvelope: {
             /** @enum {string} */
             method: "PUT";
@@ -427,6 +430,15 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
+        /** @description Missing or invalid bearer token */
+        Unauthorized: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["AuthErrorResponse"];
+            };
+        };
         /** @description Not found */
         NotFound: {
             headers: {
@@ -438,6 +450,33 @@ export interface components {
         };
         /** @description Lifecycle conflict */
         Conflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description SOP aggregate validation failed */
+        ValidationFailed: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ValidationResponse"];
+            };
+        };
+        /** @description Unexpected database or server error */
+        InternalServerError: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description Object storage unavailable */
+        ServiceUnavailable: {
             headers: {
                 [name: string]: unknown;
             };
@@ -488,6 +527,9 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     createCaptureSOP: {
@@ -513,6 +555,8 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     getCaptureSOP: {
@@ -535,7 +579,10 @@ export interface operations {
                     "application/json": components["schemas"]["CaptureSOPSummary"];
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     copySOPVersion: {
@@ -565,7 +612,11 @@ export interface operations {
                     "application/json": components["schemas"]["SOPVersion"];
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     getSOPVersion: {
@@ -588,7 +639,10 @@ export interface operations {
                     "application/json": components["schemas"]["SOPVersion"];
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     updateSOPVersion: {
@@ -615,7 +669,11 @@ export interface operations {
                     "application/json": components["schemas"]["SOPVersion"];
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     addSOPView: {
@@ -642,7 +700,11 @@ export interface operations {
                     "application/json": components["schemas"]["SOPVersion"];
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     deleteSOPView: {
@@ -664,7 +726,11 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     updateSOPView: {
@@ -692,7 +758,11 @@ export interface operations {
                     "application/json": components["schemas"]["SOPVersion"];
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     reorderSOPViews: {
@@ -715,7 +785,11 @@ export interface operations {
                     "application/json": components["schemas"]["SOPVersion"];
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     validateSOPVersion: {
@@ -738,6 +812,10 @@ export interface operations {
                     "application/json": components["schemas"]["ValidationResponse"];
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     publishSOPVersion: {
@@ -760,16 +838,12 @@ export interface operations {
                     "application/json": components["schemas"]["SOPVersion"];
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
-            /** @description Validation failed */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ValidationResponse"];
-                };
-            };
+            422: components["responses"]["ValidationFailed"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     archiveSOPVersion: {
@@ -792,7 +866,11 @@ export interface operations {
                     "application/json": components["schemas"]["SOPVersion"];
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     createSOPReferenceUploadURL: {
@@ -823,7 +901,12 @@ export interface operations {
                     "application/json": components["schemas"]["UploadEnvelope"];
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     addSOPReferenceImage: {
@@ -851,7 +934,11 @@ export interface operations {
                     "application/json": components["schemas"]["ReferenceImage"];
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     deleteSOPReferenceImage: {
@@ -874,7 +961,11 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     reorderSOPReferenceImages: {
@@ -898,7 +989,11 @@ export interface operations {
                     "application/json": components["schemas"]["SOPVersion"];
                 };
             };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
         };
     };
 }
