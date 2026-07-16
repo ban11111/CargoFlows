@@ -50,23 +50,25 @@ func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
 	protected.POST("/categories", server.createCategory)
 	protected.DELETE("/categories/:id", server.deleteCategory)
 	protected.GET("/tags", server.listTags)
-	protected.POST("/capture-sops", server.createCaptureSOP)
 	protected.GET("/capture-sops", server.listCaptureSOPs)
 	protected.GET("/capture-sops/:sop_id", server.getCaptureSOP)
 	protected.GET("/sop-versions/:version_id", server.getSOPVersion)
-	protected.PATCH("/sop-versions/:version_id", server.updateSOPVersion)
-	protected.POST("/sop-versions/:version_id/views", server.addSOPView)
-	protected.PATCH("/sop-versions/:version_id/views/:view_id", server.updateSOPView)
-	protected.DELETE("/sop-versions/:version_id/views/:view_id", server.deleteSOPView)
-	protected.PUT("/sop-versions/:version_id/view-order", server.reorderSOPViews)
-	protected.POST("/sop-versions/:version_id/validate", server.validateSOPVersion)
-	protected.POST("/sop-versions/:version_id/publish", server.publishSOPVersion)
-	protected.POST("/capture-sops/:sop_id/versions", server.copySOPVersion)
-	protected.POST("/sop-versions/:version_id/archive", server.archiveSOPVersion)
-	protected.POST("/sop-versions/:version_id/views/:view_id/reference-images/upload-url", server.createSOPReferenceUploadURL)
-	protected.POST("/sop-versions/:version_id/views/:view_id/reference-images", server.addSOPReferenceImage)
-	protected.DELETE("/sop-versions/:version_id/views/:view_id/reference-images/:image_id", server.deleteSOPReferenceImage)
-	protected.PUT("/sop-versions/:version_id/views/:view_id/reference-image-order", server.reorderSOPReferenceImages)
+	sopManagers := protected.Group("")
+	sopManagers.Use(requireRoles(models.RoleAdmin, models.RoleOperator))
+	sopManagers.POST("/capture-sops", server.createCaptureSOP)
+	sopManagers.PATCH("/sop-versions/:version_id", server.updateSOPVersion)
+	sopManagers.POST("/sop-versions/:version_id/views", server.addSOPView)
+	sopManagers.PATCH("/sop-versions/:version_id/views/:view_id", server.updateSOPView)
+	sopManagers.DELETE("/sop-versions/:version_id/views/:view_id", server.deleteSOPView)
+	sopManagers.PUT("/sop-versions/:version_id/view-order", server.reorderSOPViews)
+	sopManagers.POST("/sop-versions/:version_id/validate", server.validateSOPVersion)
+	sopManagers.POST("/sop-versions/:version_id/publish", server.publishSOPVersion)
+	sopManagers.POST("/capture-sops/:sop_id/versions", server.copySOPVersion)
+	sopManagers.POST("/sop-versions/:version_id/archive", server.archiveSOPVersion)
+	sopManagers.POST("/sop-versions/:version_id/views/:view_id/reference-images/upload-url", server.createSOPReferenceUploadURL)
+	sopManagers.POST("/sop-versions/:version_id/views/:view_id/reference-images", server.addSOPReferenceImage)
+	sopManagers.DELETE("/sop-versions/:version_id/views/:view_id/reference-images/:image_id", server.deleteSOPReferenceImage)
+	sopManagers.PUT("/sop-versions/:version_id/views/:view_id/reference-image-order", server.reorderSOPReferenceImages)
 	protected.POST("/photo-sessions", server.createPhotoSession)
 	protected.POST("/assets/upload-url", server.createUploadURL)
 	protected.POST("/assets/complete", server.completeAssetUpload)
@@ -78,6 +80,24 @@ func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
 	protected.GET("/users", server.listUsers)
 
 	return router
+}
+
+func requireRoles(roles ...models.Role) gin.HandlerFunc {
+	allowed := make(map[models.Role]struct{}, len(roles))
+	for _, role := range roles {
+		allowed[role] = struct{}{}
+	}
+	return func(c *gin.Context) {
+		if _, ok := allowed[currentUser(c).Role]; !ok {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": "insufficient permissions"})
+			return
+		}
+		c.Next()
+	}
+}
+
+func isSOPManager(user models.User) bool {
+	return user.Role == models.RoleAdmin || user.Role == models.RoleOperator
 }
 
 func (s *Server) requireAuth() gin.HandlerFunc {

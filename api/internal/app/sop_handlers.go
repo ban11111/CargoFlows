@@ -124,6 +124,10 @@ func (s *Server) listCaptureSOPs(c *gin.Context) {
 		respondSOPBadRequest(c, err)
 		return
 	}
+	if includeAll && !isSOPManager(currentUser(c)) {
+		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": "insufficient permissions"})
+		return
+	}
 	values, err := NewSOPService(s.db).List(c, categoryID, includeAll)
 	if err != nil {
 		respondSOPError(c, err)
@@ -145,6 +149,19 @@ func (s *Server) getCaptureSOP(c *gin.Context) {
 		respondSOPError(c, err)
 		return
 	}
+	if !isSOPManager(currentUser(c)) {
+		published := value.Versions[:0]
+		for _, version := range value.Versions {
+			if version.Status == models.SOPVersionPublished {
+				published = append(published, version)
+			}
+		}
+		value.Versions = published
+		if len(value.Versions) == 0 {
+			respondSOPError(c, ErrCaptureSOPNotFound)
+			return
+		}
+	}
 	c.JSON(http.StatusOK, summaryDTOFromModel(*value))
 }
 
@@ -152,7 +169,16 @@ func (s *Server) getSOPVersion(c *gin.Context) {
 	if !requireUUIDParam(c, "version_id") {
 		return
 	}
-	s.respondVersion(c, http.StatusOK, c.Param("version_id"))
+	version, err := NewSOPService(s.db).GetVersion(c, c.Param("version_id"))
+	if err != nil {
+		respondSOPError(c, err)
+		return
+	}
+	if !isSOPManager(currentUser(c)) && version.Status != models.SOPVersionPublished {
+		respondSOPError(c, ErrVersionNotFound)
+		return
+	}
+	s.respondVersionModel(c, http.StatusOK, *version)
 }
 
 func (s *Server) updateSOPVersion(c *gin.Context) {
@@ -509,6 +535,8 @@ func respondSOPError(c *gin.Context, err error) {
 	switch {
 	case errors.As(err, &validation):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "sop_validation_failed", "errors": validation.Errors})
+	case errors.Is(err, ErrCategoryNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"code": "category_not_found", "message": err.Error()})
 	case errors.Is(err, ErrVersionNotFound), errors.Is(err, ErrCaptureSOPNotFound), errors.Is(err, gorm.ErrRecordNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
 	case errors.Is(err, ErrVersionImmutable):

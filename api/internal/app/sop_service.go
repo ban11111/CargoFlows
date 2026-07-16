@@ -20,6 +20,7 @@ var (
 	ErrReferenceLocked           = errors.New("reference-front view is locked")
 	ErrVersionNotFound           = errors.New("SOP version not found")
 	ErrCaptureSOPNotFound        = errors.New("capture SOP not found")
+	ErrCategoryNotFound          = errors.New("category not found")
 	ErrSourceVersionNotPublished = errors.New("source SOP version is not published")
 )
 
@@ -71,6 +72,12 @@ type CreatedSOP struct {
 func (s *SOPService) Create(ctx context.Context, input CreateSOPInput) (*CreatedSOP, error) {
 	var created CreatedSOP
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var category models.Category
+		if err := tx.Select("id").First(&category, input.CategoryID).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrCategoryNotFound
+		} else if err != nil {
+			return err
+		}
 		created.SOP = models.CaptureSOP{
 			PublicID: uuid.NewString(), CategoryID: input.CategoryID, CreatedByID: input.CreatedByID,
 		}
