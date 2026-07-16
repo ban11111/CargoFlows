@@ -59,9 +59,56 @@ final class SOPCaptureLogicTests: XCTestCase {
         XCTAssertEqual(state.requestSelection("v2"), .changed)
         let currentToken = try XCTUnwrap(state.beginVersionLoad())
 
-        XCTAssertFalse(state.accept(version: try versionFixture(id: "v1", number: 1), token: staleToken))
-        XCTAssertTrue(state.accept(version: try versionFixture(id: "v2", number: 2), token: currentToken))
+        XCTAssertEqual(state.accept(version: try versionFixture(id: "v1", number: 1), token: staleToken), .stale)
+        XCTAssertEqual(state.accept(version: try versionFixture(id: "v2", number: 2), token: currentToken), .accepted)
         XCTAssertEqual(state.version?.id, "v2")
+    }
+
+    func testCurrentVersionLoadWithMismatchedResponseIDIsInvalid() throws {
+        let state = SOPCaptureState()
+        state.installCandidates([
+            SOPVersionCandidate(id: "v1", sopID: "sop", versionNumber: 1, name: LocalizedText(zhCN: "一", en: "One")),
+        ])
+        let token = try XCTUnwrap(state.beginVersionLoad())
+
+        XCTAssertEqual(state.accept(version: try versionFixture(id: "wrong", number: 1), token: token), .invalidResponse)
+        XCTAssertNil(state.version)
+    }
+
+    func testOlderCandidateRequestCannotOverwriteOrFinishNewerRequestState() async throws {
+        let state = SOPCaptureState()
+        state.installCandidates([
+            SOPVersionCandidate(id: "existing", sopID: "sop", versionNumber: 1, name: LocalizedText(zhCN: "现有", en: "Existing")),
+        ])
+        let existingSession = try await state.resolveSession { self.sessionFixture(versionID: $0) }
+        state.recordCapture(viewID: "view-1")
+        let old = state.beginCandidateLoad()
+        let current = state.beginCandidateLoad()
+
+        XCTAssertFalse(state.acceptCandidates(try [summaryFixture(sopID: "old", versions: [("old-v1", 1, "published")])], token: old))
+        XCTAssertFalse(state.failCandidateLoad(token: old))
+        XCTAssertFalse(state.finishCandidateLoad(token: old))
+        XCTAssertTrue(state.isCandidateLoading)
+        XCTAssertFalse(state.candidateLoadFailed)
+        XCTAssertEqual(state.selectedVersionID, "existing")
+        XCTAssertEqual(state.capturedViewIDs, ["view-1"])
+        XCTAssertNotNil(state.session)
+
+        XCTAssertTrue(state.acceptCandidates(
+            try [summaryFixture(sopID: "sop", versions: [("existing", 1, "published"), ("new-v2", 2, "published")])],
+            token: current
+        ))
+        XCTAssertTrue(state.finishCandidateLoad(token: current))
+
+        XCTAssertFalse(state.acceptCandidates(try [summaryFixture(sopID: "old", versions: [("old-v1", 1, "published")])], token: old))
+        XCTAssertFalse(state.failCandidateLoad(token: old))
+        XCTAssertFalse(state.finishCandidateLoad(token: old))
+        XCTAssertFalse(state.isCandidateLoading)
+        XCTAssertFalse(state.candidateLoadFailed)
+        XCTAssertEqual(state.candidates.map(\.id), ["new-v2", "existing"])
+        XCTAssertEqual(state.selectedVersionID, "existing")
+        XCTAssertEqual(state.capturedViewIDs, ["view-1"])
+        XCTAssertEqual(state.session?.id, existingSession.id)
     }
 
     func testSessionIsCreatedLazilyOnceAndReused() async throws {
@@ -103,6 +150,59 @@ final class SOPCaptureLogicTests: XCTestCase {
         XCTAssertEqual(createCount, 1)
     }
 
+    func testResolvedSessionIsReusedAfterVersionBecomesArchived() async throws {
+        let state = SOPCaptureState()
+        state.installCandidates([
+            SOPVersionCandidate(id: "v1", sopID: "sop", versionNumber: 1, name: LocalizedText(zhCN: "一", en: "One")),
+        ])
+        let load = try XCTUnwrap(state.beginVersionLoad())
+        XCTAssertEqual(state.accept(version: try versionFixture(id: "v1", number: 1), token: load), .accepted)
+        let original = try await state.resolveSession { self.sessionFixture(versionID: $0) }
+        let archiveRefresh = try XCTUnwrap(state.beginVersionLoad())
+        XCTAssertEqual(
+            state.accept(version: try versionFixture(id: "v1", number: 1, status: "archived"), token: archiveRefresh),
+            .accepted
+        )
+
+        let reused = try await state.resolveSession { _ in
+            XCTFail("An archived version must not trigger a new session after one already exists")
+            throw APIError.server(409)
+        }
+
+        XCTAssertEqual(reused.id, original.id)
+    }
+
+    func testSession409ClassifiesAsSessionCreationFailure() {
+        let failure = classifyCaptureFailure(APIError.server(409), during: .sessionCreation)
+
+        XCTAssertEqual(failure, .session)
+        XCTAssertEqual(failure.titleKey, "capture.session.failed")
+        XCTAssertEqual(failure.descriptionKey, "capture.session.failed.desc")
+        XCTAssertNotEqual(failure, .upload)
+    }
+
+    func testShotRowAccessibilityLabelIncludesInstructionExactlyOnce() throws {
+        let view = try viewFixture(id: "reference", required: true)
+
+        let label = shotRowAccessibilityLabel(
+            view: view,
+            language: .en,
+            kind: "Reference Front",
+            requirement: "Required"
+        )
+
+        XCTAssertTrue(label.contains("Instruction"))
+        XCTAssertEqual(label.components(separatedBy: "Instruction").count - 1, 1)
+        XCTAssertTrue(label.contains("01"))
+    }
+
+    func testChineseShotRowHintDescribesVoiceOverDoubleTap() {
+        let language = LanguageStore()
+        language.language = .zh
+
+        XCTAssertEqual(language.t("capture.row.hint"), "轻点两下以拍摄或选择这张照片。")
+    }
+
     private func viewFixture(id: String, required: Bool) throws -> SOPView {
         let data = Data(#"{"public_id":"\#(id)","sequence":1,"role":"capture","view_kind":"standard","preset_key":null,"name":{"zh-CN":"视图","en":"View"},"instruction":{"zh-CN":"说明","en":"Instruction"},"required":\#(required),"pose":{"space":"object","camera_position_direction":[0,0,1],"image_up_direction":[1,0,0],"target":[0,0,0]},"composition":{"frame_occupancy":0.85,"aspect_ratio":"1:1","allow_rotation_correction":true,"allow_mirror":false},"reference_images":[]}"#.utf8)
         return try JSONDecoder().decode(SOPView.self, from: data)
@@ -116,8 +216,8 @@ final class SOPCaptureLogicTests: XCTestCase {
         return try JSONDecoder().decode(CaptureSOPSummary.self, from: data)
     }
 
-    private func versionFixture(id: String, number: Int) throws -> SOPVersion {
-        try summaryFixture(sopID: "sop", versions: [(id, number, "published")]).versions[0]
+    private func versionFixture(id: String, number: Int, status: String = "published") throws -> SOPVersion {
+        try summaryFixture(sopID: "sop", versions: [(id, number, status)]).versions[0]
     }
 
     private func sessionFixture(versionID: String) -> PhotoSession {

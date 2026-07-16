@@ -114,7 +114,7 @@ private let strings: [AppLanguage: [String: String]] = [
         "capture.state.pending": "待拍摄",
         "capture.state.uploading": "上传中",
         "capture.state.complete": "已完成",
-        "capture.row.hint": "轻点以拍摄或选择这张照片。",
+        "capture.row.hint": "轻点两下以拍摄或选择这张照片。",
         "capture.required.footer": "完成所有必拍视图后即可结束；选拍视图（包括包装正面）不会阻止完成。",
         "api": "API",
         "account": "账号",

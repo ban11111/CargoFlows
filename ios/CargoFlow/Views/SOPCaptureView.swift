@@ -41,6 +41,16 @@ enum SOPVersionSelectionResult: Equatable {
     case needsConfirmation
 }
 
+enum SOPVersionAcceptance: Equatable {
+    case accepted
+    case stale
+    case invalidResponse
+}
+
+struct SOPCandidateLoadToken: Equatable {
+    fileprivate let generation: Int
+}
+
 struct SOPVersionLoadToken: Equatable {
     fileprivate let versionID: String
     fileprivate let generation: Int
@@ -52,9 +62,12 @@ final class SOPCaptureState: ObservableObject {
     @Published private(set) var selectedVersionID: String?
     @Published private(set) var version: SOPVersion?
     @Published private(set) var capturedViewIDs: Set<String> = []
+    @Published private(set) var isCandidateLoading = true
+    @Published private(set) var candidateLoadFailed = false
     private(set) var session: PhotoSession?
 
     private var loadGeneration = 0
+    private var candidateLoadGeneration = 0
     private var sessionCreationVersionID: String?
     private var sessionWaiters: [CheckedContinuation<PhotoSession, Error>] = []
 
@@ -83,6 +96,35 @@ final class SOPCaptureState: ObservableObject {
         applySelection(versionID)
     }
 
+    func beginCandidateLoad() -> SOPCandidateLoadToken {
+        candidateLoadGeneration += 1
+        isCandidateLoading = true
+        candidateLoadFailed = false
+        return SOPCandidateLoadToken(generation: candidateLoadGeneration)
+    }
+
+    @discardableResult
+    func acceptCandidates(_ summaries: [CaptureSOPSummary], token: SOPCandidateLoadToken) -> Bool {
+        guard token.generation == candidateLoadGeneration else { return false }
+        installCandidates(publishedVersionCandidates(from: summaries))
+        candidateLoadFailed = false
+        return true
+    }
+
+    @discardableResult
+    func failCandidateLoad(token: SOPCandidateLoadToken) -> Bool {
+        guard token.generation == candidateLoadGeneration else { return false }
+        candidateLoadFailed = true
+        return true
+    }
+
+    @discardableResult
+    func finishCandidateLoad(token: SOPCandidateLoadToken) -> Bool {
+        guard token.generation == candidateLoadGeneration else { return false }
+        isCandidateLoading = false
+        return true
+    }
+
     func beginVersionLoad() -> SOPVersionLoadToken? {
         guard let selectedVersionID else { return nil }
         loadGeneration += 1
@@ -91,12 +133,12 @@ final class SOPCaptureState: ObservableObject {
     }
 
     @discardableResult
-    func accept(version: SOPVersion, token: SOPVersionLoadToken) -> Bool {
+    func accept(version: SOPVersion, token: SOPVersionLoadToken) -> SOPVersionAcceptance {
         guard token.generation == loadGeneration,
-              token.versionID == selectedVersionID,
-              version.id == selectedVersionID else { return false }
+              token.versionID == selectedVersionID else { return .stale }
+        guard version.id == selectedVersionID else { return .invalidResponse }
         self.version = version
-        return true
+        return .accepted
     }
 
     func recordCapture(viewID: String) {
@@ -165,9 +207,7 @@ struct SOPCaptureView: View {
     @State private var pendingVersionID: String?
     @State private var isSourcePickerPresented = false
     @State private var uploadingViewID: String?
-    @State private var isListLoading = true
     @State private var isVersionLoading = false
-    @State private var listError = false
     @State private var versionError = false
     @State private var operationFailure: CaptureOperationFailure?
 
@@ -183,9 +223,9 @@ struct SOPCaptureView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if isListLoading {
+                if captureState.isCandidateLoading {
                     loadingView(key: "capture.loading.sops")
-                } else if listError {
+                } else if captureState.candidateLoadFailed {
                     unavailableView(
                         titleKey: "capture.sops.failed",
                         descriptionKey: "capture.sops.failed.desc",
@@ -373,22 +413,23 @@ struct SOPCaptureView: View {
 
     @MainActor
     private func loadCandidates() async {
-        isListLoading = true
-        listError = false
+        let token = captureState.beginCandidateLoad()
         versionError = false
-        defer { isListLoading = false }
+        defer { captureState.finishCandidateLoad(token: token) }
 
         guard let categoryID = sku.product.catalogCategory?.id else {
-            captureState.installCandidates([])
+            _ = captureState.acceptCandidates([], token: token)
             return
         }
         do {
             let summaries = try await APIClient.shared.listPublishedSOPs(categoryID: categoryID).data
-            captureState.installCandidates(publishedVersionCandidates(from: summaries))
+            guard !Task.isCancelled else { return }
+            _ = captureState.acceptCandidates(summaries, token: token)
         } catch is CancellationError {
             return
         } catch {
-            listError = true
+            guard !Task.isCancelled else { return }
+            _ = captureState.failCandidateLoad(token: token)
         }
     }
 
@@ -401,7 +442,12 @@ struct SOPCaptureView: View {
         do {
             let version = try await APIClient.shared.getSOPVersion(id: token.versionID)
             guard !Task.isCancelled else { return }
-            _ = captureState.accept(version: version, token: token)
+            switch captureState.accept(version: version, token: token) {
+            case .accepted, .stale:
+                break
+            case .invalidResponse:
+                versionError = true
+            }
         } catch is CancellationError {
             return
         } catch {
@@ -429,7 +475,7 @@ struct SOPCaptureView: View {
         } catch is CancellationError {
             return
         } catch {
-            operationFailure = .session
+            operationFailure = classifyCaptureFailure(error, during: .sessionCreation)
             return
         }
 
@@ -447,18 +493,48 @@ struct SOPCaptureView: View {
         } catch is CancellationError {
             return
         } catch {
-            operationFailure = .upload
+            operationFailure = classifyCaptureFailure(error, during: .upload)
         }
     }
 }
 
-private enum CaptureOperationFailure: String, Identifiable {
+enum CaptureOperationStage {
+    case sessionCreation
+    case upload
+}
+
+enum CaptureOperationFailure: String, Identifiable, Equatable {
     case session
     case upload
 
     var id: String { rawValue }
     var titleKey: String { self == .session ? "capture.session.failed" : "capture.upload.failed" }
     var descriptionKey: String { self == .session ? "capture.session.failed.desc" : "capture.upload.failed.desc" }
+}
+
+func classifyCaptureFailure(_ error: Error, during stage: CaptureOperationStage) -> CaptureOperationFailure {
+    _ = error
+    switch stage {
+    case .sessionCreation: return .session
+    case .upload: return .upload
+    }
+}
+
+func shotRowAccessibilityLabel(
+    view: SOPView,
+    language: AppLanguage,
+    kind: String,
+    requirement: String
+) -> String {
+    [
+        String(format: "%02d", view.sequence),
+        view.displayName(for: language),
+        view.displayInstruction(for: language),
+        kind,
+        requirement,
+    ]
+    .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    .joined(separator: ", ")
 }
 
 private struct CaptureViewRow: View {
@@ -533,7 +609,12 @@ private struct CaptureViewRow: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
-            "\(String(format: "%02d", view.sequence)), \(view.displayName(for: language.language)), \(language.t(kindKey)), \(language.t(view.required ? "required" : "optional"))"
+            shotRowAccessibilityLabel(
+                view: view,
+                language: language.language,
+                kind: language.t(kindKey),
+                requirement: language.t(view.required ? "required" : "optional")
+            )
         )
         .accessibilityValue(language.t(stateKey))
         .accessibilityHint(language.t("capture.row.hint"))
@@ -555,14 +636,44 @@ private struct CaptureSourceView: View {
         let photoLibraryTitle = language.t("capture.photo.library")
 
         NavigationStack {
-            VStack(alignment: .leading, spacing: 24) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(view?.displayName(for: language.language) ?? language.t("view"))
-                        .font(.title2.bold())
-                    Text(view?.displayInstruction(for: language.language) ?? "")
-                        .foregroundStyle(.secondary)
-                }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(view?.displayName(for: language.language) ?? language.t("view"))
+                            .font(.title2.bold())
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(view?.displayInstruction(for: language.language) ?? "")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
+                    if !UIImagePickerController.isSourceTypeAvailable(.camera) {
+                        Text(language.t("capture.camera.unavailable"))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    if isReadingPhoto {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text(language.t("capture.preparing")).foregroundStyle(.secondary)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+
+                    if let errorKey {
+                        Label(language.t(errorKey), systemImage: "exclamationmark.triangle")
+                            .font(.subheadline)
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(24)
+            }
+            .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 12) {
                     Button {
                         isCameraPresented = true
@@ -580,29 +691,10 @@ private struct CaptureSourceView: View {
                     .buttonStyle(.bordered)
                     .disabled(isReadingPhoto)
                 }
-
-                if !UIImagePickerController.isSourceTypeAvailable(.camera) {
-                    Text(language.t("capture.camera.unavailable"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                if isReadingPhoto {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                        Text(language.t("capture.preparing")).foregroundStyle(.secondary)
-                    }
-                    .accessibilityElement(children: .combine)
-                }
-
-                if let errorKey {
-                    Label(language.t(errorKey), systemImage: "exclamationmark.triangle")
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-                Spacer()
+                .padding(.horizontal, 24)
+                .padding(.vertical, 12)
+                .background(.bar)
             }
-            .padding(24)
             .navigationTitle(language.t("capture"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
