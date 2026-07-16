@@ -2,7 +2,7 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { Archive, CheckCircle2, ClipboardPlus, Copy, LoaderCircle, Plus, Send, TriangleAlert } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import { SOPViewEditor } from "@/components/sop/sop-view-editor";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +15,7 @@ import { ApiError, apiRequest } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 import { sopVersionSchema, sopViewSchema } from "@/lib/schemas";
 import { addableSOPPresetKeys, localizedText, type LocalizedText, type SOPPresetKey, type SOPVersion, type SOPView, type ValidationResponse } from "@/lib/sop";
+import { useUnsavedNavigationGuard } from "@/lib/use-unsaved-navigation-guard";
 
 interface SOPVersionEditorProps {
   initialVersion: SOPVersion;
@@ -55,16 +56,7 @@ export function SOPVersionEditor({ initialVersion, onVersionChange }: SOPVersion
   const immutable = version.status !== "draft";
   const dirty = metadataDirty || dirtyViewIDs.size > 0;
   const aggregateLocked = dirty || Boolean(busy);
-
-  useEffect(() => {
-    if (!dirty) return;
-    const protectUnsaved = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", protectUnsaved);
-    return () => window.removeEventListener("beforeunload", protectUnsaved);
-  }, [dirty]);
+  useUnsavedNavigationGuard(dirty, language === "zh" ? "有未保存的修改。离开后这些修改将丢失，确定离开吗？" : "You have unsaved changes. Leaving will discard them. Leave this page?");
 
   const allErrors = useMemo(() => [
     ...errors.map((error) => ({ path: error.path, message: localizedText(language, error.message) })),

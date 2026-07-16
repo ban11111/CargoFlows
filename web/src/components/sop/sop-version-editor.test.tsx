@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { ReactNode } from "react";
+import Link from "next/link";
+import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LanguageProvider } from "@/lib/i18n";
@@ -105,10 +106,21 @@ function renderEditorWithClient(version: SOPVersion = draftFixture) {
   return { ...rendered, client };
 }
 
+function renderEditorWithBackLink(onNavigate: (event: ReactMouseEvent<HTMLAnchorElement>) => void) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  return render(
+    <LanguageProvider><QueryClientProvider client={client}>
+      <Link href="/sop-templates" onClick={onNavigate}>返回 SOP 列表</Link>
+      <SOPVersionEditor initialVersion={draftFixture} />
+    </QueryClientProvider></LanguageProvider>,
+  );
+}
+
 describe("SOPVersionEditor", () => {
   beforeEach(() => {
     localStorage.clear();
     vi.restoreAllMocks();
+    window.history.replaceState({}, "", `/sop-templates/${sopID}/versions/${versionID}`);
   });
 
   it("renders the reference front as locked but leaves its text editable", () => {
@@ -298,6 +310,62 @@ describe("SOPVersionEditor", () => {
     const cleanEvent = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(cleanEvent);
     expect(cleanEvent.defaultPrevented).toBe(false);
+  });
+
+  it("blocks an actual same-origin back anchor when navigation is cancelled", () => {
+    const onNavigate = vi.fn();
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderEditorWithBackLink(onNavigate);
+    fireEvent.change(screen.getByLabelText("SOP 中文名称"), { target: { value: "未保存" } });
+
+    fireEvent.click(screen.getByRole("link", { name: "返回 SOP 列表" }));
+
+    expect(window.confirm).toHaveBeenCalledWith("有未保存的修改。离开后这些修改将丢失，确定离开吗？");
+    expect(onNavigate).not.toHaveBeenCalled();
+    expect(window.location.pathname).toContain(`/versions/${versionID}`);
+  });
+
+  it("continues an internal anchor navigation after confirmation without a prompt loop", async () => {
+    const onNavigate = vi.fn((event: ReactMouseEvent<HTMLAnchorElement>) => event.preventDefault());
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderEditorWithBackLink(onNavigate);
+    fireEvent.change(screen.getByLabelText("SOP 中文名称"), { target: { value: "未保存" } });
+
+    fireEvent.click(screen.getByRole("link", { name: "返回 SOP 列表" }));
+
+    await waitFor(() => expect(onNavigate).toHaveBeenCalledTimes(1));
+    expect(window.confirm).toHaveBeenCalledTimes(1);
+  });
+
+  it("restores the editor on cancelled browser back and permits confirmed back", async () => {
+    window.history.replaceState({}, "", "/sop-templates");
+    window.history.pushState({}, "", `/sop-templates/${sopID}/versions/${versionID}`);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+    renderEditor();
+    fireEvent.change(screen.getByLabelText("SOP 中文名称"), { target: { value: "未保存" } });
+
+    window.history.back();
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(window.location.pathname).toContain(`/versions/${versionID}`));
+
+    window.history.back();
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(window.location.pathname).toBe("/sop-templates"));
+  });
+
+  it("does not guard clean, external, download, new-tab, or modifier navigation", () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const { container } = renderEditorWithBackLink(() => undefined);
+    fireEvent.click(screen.getByRole("link", { name: "返回 SOP 列表" }));
+    expect(confirm).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText("SOP 中文名称"), { target: { value: "未保存" } });
+    const external = document.createElement("a"); external.href = "https://example.com"; external.target = "_blank"; external.textContent = "external"; container.append(external);
+    const download = document.createElement("a"); download.href = "/export"; download.download = "sop.json"; download.textContent = "download"; container.append(download);
+    fireEvent.click(external);
+    fireEvent.click(download);
+    fireEvent.click(screen.getByRole("link", { name: "返回 SOP 列表" }), { metaKey: true });
+    expect(confirm).not.toHaveBeenCalled();
   });
 
   it("preserves exact numeric vector input in a view update", async () => {
