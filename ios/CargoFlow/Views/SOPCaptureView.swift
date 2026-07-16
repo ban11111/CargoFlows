@@ -12,6 +12,21 @@ struct SOPVersionCandidate: Identifiable {
     let sopID: String
     let versionNumber: Int
     let name: LocalizedText
+    let availableForNewSession: Bool
+
+    init(
+        id: String,
+        sopID: String,
+        versionNumber: Int,
+        name: LocalizedText,
+        availableForNewSession: Bool = true
+    ) {
+        self.id = id
+        self.sopID = sopID
+        self.versionNumber = versionNumber
+        self.name = name
+        self.availableForNewSession = availableForNewSession
+    }
 }
 
 func publishedVersionCandidates(from summaries: [CaptureSOPSummary]) -> [SOPVersionCandidate] {
@@ -47,6 +62,13 @@ enum SOPVersionAcceptance: Equatable {
     case invalidResponse
 }
 
+enum SOPCandidateAcceptance: Equatable {
+    case applied
+    case preservedActiveSession
+    case needsConfirmation
+    case stale
+}
+
 struct SOPCandidateLoadToken: Equatable {
     fileprivate let generation: Int
 }
@@ -62,14 +84,19 @@ final class SOPCaptureState: ObservableObject {
     @Published private(set) var selectedVersionID: String?
     @Published private(set) var version: SOPVersion?
     @Published private(set) var capturedViewIDs: Set<String> = []
+    @Published private(set) var capturedImages: [String: UIImage] = [:]
     @Published private(set) var isCandidateLoading = true
     @Published private(set) var candidateLoadFailed = false
+    @Published private(set) var isVersionLoading = false
+    @Published private(set) var versionLoadFailed = false
+    @Published private(set) var hasPendingCandidateTransition = false
     private(set) var session: PhotoSession?
 
     private var loadGeneration = 0
     private var candidateLoadGeneration = 0
     private var sessionCreationVersionID: String?
     private var sessionWaiters: [CheckedContinuation<PhotoSession, Error>] = []
+    private var pendingCandidates: [SOPVersionCandidate]?
 
     func installCandidates(_ candidates: [SOPVersionCandidate]) {
         self.candidates = candidates
@@ -96,6 +123,18 @@ final class SOPCaptureState: ObservableObject {
         applySelection(versionID)
     }
 
+    func confirmCandidateTransition() {
+        guard let pendingCandidates else { return }
+        self.pendingCandidates = nil
+        hasPendingCandidateTransition = false
+        installCandidates(pendingCandidates)
+    }
+
+    func cancelCandidateTransition() {
+        pendingCandidates = nil
+        hasPendingCandidateTransition = false
+    }
+
     func beginCandidateLoad() -> SOPCandidateLoadToken {
         candidateLoadGeneration += 1
         isCandidateLoading = true
@@ -104,11 +143,49 @@ final class SOPCaptureState: ObservableObject {
     }
 
     @discardableResult
-    func acceptCandidates(_ summaries: [CaptureSOPSummary], token: SOPCandidateLoadToken) -> Bool {
-        guard token.generation == candidateLoadGeneration else { return false }
-        installCandidates(publishedVersionCandidates(from: summaries))
+    func acceptCandidates(
+        _ summaries: [CaptureSOPSummary],
+        token: SOPCandidateLoadToken
+    ) -> SOPCandidateAcceptance {
+        guard token.generation == candidateLoadGeneration else { return .stale }
+        let incoming = publishedVersionCandidates(from: summaries)
+        if let selectedVersionID, !incoming.contains(where: { $0.id == selectedVersionID }) {
+            if session != nil, let active = candidates.first(where: { $0.id == selectedVersionID }) {
+                let pinned = SOPVersionCandidate(
+                    id: active.id,
+                    sopID: active.sopID,
+                    versionNumber: active.versionNumber,
+                    name: active.name,
+                    availableForNewSession: false
+                )
+                candidates = [pinned] + incoming
+                pendingCandidates = nil
+                hasPendingCandidateTransition = false
+                candidateLoadFailed = false
+                return .preservedActiveSession
+            }
+            if !capturedViewIDs.isEmpty || !capturedImages.isEmpty {
+                if let current = candidates.first(where: { $0.id == selectedVersionID }) {
+                    let pinned = SOPVersionCandidate(
+                        id: current.id,
+                        sopID: current.sopID,
+                        versionNumber: current.versionNumber,
+                        name: current.name,
+                        availableForNewSession: false
+                    )
+                    candidates = [pinned] + incoming
+                }
+                pendingCandidates = incoming
+                hasPendingCandidateTransition = true
+                candidateLoadFailed = false
+                return .needsConfirmation
+            }
+        }
+        pendingCandidates = nil
+        hasPendingCandidateTransition = false
+        installCandidates(incoming)
         candidateLoadFailed = false
-        return true
+        return .applied
     }
 
     @discardableResult
@@ -128,6 +205,8 @@ final class SOPCaptureState: ObservableObject {
     func beginVersionLoad() -> SOPVersionLoadToken? {
         guard let selectedVersionID else { return nil }
         loadGeneration += 1
+        isVersionLoading = true
+        versionLoadFailed = false
         version = nil
         return SOPVersionLoadToken(versionID: selectedVersionID, generation: loadGeneration)
     }
@@ -136,13 +215,34 @@ final class SOPCaptureState: ObservableObject {
     func accept(version: SOPVersion, token: SOPVersionLoadToken) -> SOPVersionAcceptance {
         guard token.generation == loadGeneration,
               token.versionID == selectedVersionID else { return .stale }
-        guard version.id == selectedVersionID else { return .invalidResponse }
+        guard version.id == selectedVersionID else {
+            versionLoadFailed = true
+            return .invalidResponse
+        }
         self.version = version
+        versionLoadFailed = false
         return .accepted
     }
 
-    func recordCapture(viewID: String) {
+    @discardableResult
+    func failVersionLoad(token: SOPVersionLoadToken) -> Bool {
+        guard token.generation == loadGeneration,
+              token.versionID == selectedVersionID else { return false }
+        versionLoadFailed = true
+        return true
+    }
+
+    @discardableResult
+    func finishVersionLoad(token: SOPVersionLoadToken) -> Bool {
+        guard token.generation == loadGeneration,
+              token.versionID == selectedVersionID else { return false }
+        isVersionLoading = false
+        return true
+    }
+
+    func recordCapture(viewID: String, image: UIImage) {
         capturedViewIDs.insert(viewID)
+        capturedImages[viewID] = image
     }
 
     func resolveSession(
@@ -180,7 +280,11 @@ final class SOPCaptureState: ObservableObject {
         selectedVersionID = versionID
         version = nil
         capturedViewIDs = []
+        capturedImages = [:]
         session = nil
+        versionLoadFailed = false
+        if versionID == nil { isVersionLoading = false }
+        candidates.removeAll { !$0.availableForNewSession && $0.id != versionID }
     }
 
     private func finishSessionCreation(with result: Result<PhotoSession, Error>) {
@@ -202,13 +306,10 @@ struct SOPCaptureView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var language: LanguageStore
     @StateObject private var captureState = SOPCaptureState()
-    @State private var capturedImages: [String: UIImage] = [:]
     @State private var selectedView: SOPView?
     @State private var pendingVersionID: String?
     @State private var isSourcePickerPresented = false
     @State private var uploadingViewID: String?
-    @State private var isVersionLoading = false
-    @State private var versionError = false
     @State private var operationFailure: CaptureOperationFailure?
 
     private var views: [SOPView] {
@@ -267,13 +368,21 @@ struct SOPCaptureView: View {
                 Button(language.t("cancel"), role: .cancel) { pendingVersionID = nil }
                 Button(language.t("capture.change.version"), role: .destructive) {
                     guard let pendingVersionID else { return }
-                    capturedImages = [:]
                     selectedView = nil
                     captureState.confirmSelection(pendingVersionID)
                     self.pendingVersionID = nil
                 }
             } message: {
                 Text(language.t("capture.change.version.desc"))
+            }
+            .alert(language.t("capture.refresh.change.title"), isPresented: candidateTransitionBinding) {
+                Button(language.t("cancel"), role: .cancel) { captureState.cancelCandidateTransition() }
+                Button(language.t("capture.change.version"), role: .destructive) {
+                    selectedView = nil
+                    captureState.confirmCandidateTransition()
+                }
+            } message: {
+                Text(language.t("capture.refresh.change.desc"))
             }
             .alert(item: $operationFailure) { failure in
                 Alert(
@@ -296,7 +405,9 @@ struct SOPCaptureView: View {
                 if captureState.candidates.count > 1 {
                     Picker(language.t("capture.select.version"), selection: versionSelectionBinding) {
                         ForEach(captureState.candidates) { candidate in
-                            Text(versionLabel(candidate)).tag(candidate.id)
+                            Text(versionLabel(candidate))
+                                .tag(candidate.id)
+                                .disabled(!candidate.availableForNewSession && candidate.id != captureState.selectedVersionID)
                         }
                     }
                     .disabled(uploadingViewID != nil)
@@ -306,9 +417,9 @@ struct SOPCaptureView: View {
                 }
             }
 
-            if isVersionLoading {
+            if captureState.isVersionLoading {
                 Section { loadingRow(key: "capture.loading.version") }
-            } else if versionError {
+            } else if captureState.versionLoadFailed {
                 Section {
                     VStack(alignment: .leading, spacing: 12) {
                         Label(language.t("capture.version.failed"), systemImage: "exclamationmark.triangle")
@@ -331,7 +442,7 @@ struct SOPCaptureView: View {
                         } label: {
                             CaptureViewRow(
                                 view: view,
-                                image: capturedImages[view.id],
+                                image: captureState.capturedImages[view.id],
                                 isUploading: uploadingViewID == view.id,
                                 language: language
                             )
@@ -357,7 +468,6 @@ struct SOPCaptureView: View {
                 case .needsConfirmation:
                     pendingVersionID = newID
                 case .changed:
-                    capturedImages = [:]
                     selectedView = nil
                 case .unchanged:
                     break
@@ -373,8 +483,18 @@ struct SOPCaptureView: View {
         )
     }
 
+    private var candidateTransitionBinding: Binding<Bool> {
+        Binding(
+            get: { captureState.hasPendingCandidateTransition },
+            set: { if !$0 { captureState.cancelCandidateTransition() } }
+        )
+    }
+
     private func versionLabel(_ candidate: SOPVersionCandidate) -> String {
-        "\(candidate.name.value(for: language.language)) · V\(candidate.versionNumber)"
+        let base = "\(candidate.name.value(for: language.language)) · V\(candidate.versionNumber)"
+        guard !candidate.availableForNewSession else { return base }
+        let stateKey = captureState.session == nil ? "capture.unavailable.session" : "capture.active.session"
+        return "\(base) · \(language.t(stateKey))"
     }
 
     private func loadingView(key: String) -> some View {
@@ -414,7 +534,6 @@ struct SOPCaptureView: View {
     @MainActor
     private func loadCandidates() async {
         let token = captureState.beginCandidateLoad()
-        versionError = false
         defer { captureState.finishCandidateLoad(token: token) }
 
         guard let categoryID = sku.product.catalogCategory?.id else {
@@ -436,23 +555,16 @@ struct SOPCaptureView: View {
     @MainActor
     private func loadSelectedVersion() async {
         guard let token = captureState.beginVersionLoad() else { return }
-        isVersionLoading = true
-        versionError = false
-        defer { isVersionLoading = false }
+        defer { captureState.finishVersionLoad(token: token) }
         do {
             let version = try await APIClient.shared.getSOPVersion(id: token.versionID)
             guard !Task.isCancelled else { return }
-            switch captureState.accept(version: version, token: token) {
-            case .accepted, .stale:
-                break
-            case .invalidResponse:
-                versionError = true
-            }
+            _ = captureState.accept(version: version, token: token)
         } catch is CancellationError {
             return
         } catch {
-            guard !Task.isCancelled, token.versionID == captureState.selectedVersionID else { return }
-            versionError = true
+            guard !Task.isCancelled else { return }
+            _ = captureState.failVersionLoad(token: token)
         }
     }
 
@@ -488,8 +600,7 @@ struct SOPCaptureView: View {
                 photoSessionID: session.id,
                 fileName: fileName
             )
-            capturedImages[view.id] = image
-            captureState.recordCapture(viewID: view.id)
+            captureState.recordCapture(viewID: view.id, image: image)
         } catch is CancellationError {
             return
         } catch {

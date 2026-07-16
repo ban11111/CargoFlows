@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 @testable import CargoFlow
 
 @MainActor
@@ -35,7 +36,7 @@ final class SOPCaptureLogicTests: XCTestCase {
             SOPVersionCandidate(id: "v1", sopID: "sop", versionNumber: 1, name: LocalizedText(zhCN: "一", en: "One")),
             SOPVersionCandidate(id: "v2", sopID: "sop", versionNumber: 2, name: LocalizedText(zhCN: "二", en: "Two")),
         ])
-        state.recordCapture(viewID: "view-1")
+        state.recordCapture(viewID: "view-1", image: UIImage())
         _ = try await state.resolveSession { self.sessionFixture(versionID: $0) }
 
         XCTAssertEqual(state.requestSelection("v2"), .needsConfirmation)
@@ -81,11 +82,11 @@ final class SOPCaptureLogicTests: XCTestCase {
             SOPVersionCandidate(id: "existing", sopID: "sop", versionNumber: 1, name: LocalizedText(zhCN: "现有", en: "Existing")),
         ])
         let existingSession = try await state.resolveSession { self.sessionFixture(versionID: $0) }
-        state.recordCapture(viewID: "view-1")
+        state.recordCapture(viewID: "view-1", image: UIImage())
         let old = state.beginCandidateLoad()
         let current = state.beginCandidateLoad()
 
-        XCTAssertFalse(state.acceptCandidates(try [summaryFixture(sopID: "old", versions: [("old-v1", 1, "published")])], token: old))
+        XCTAssertEqual(state.acceptCandidates(try [summaryFixture(sopID: "old", versions: [("old-v1", 1, "published")])], token: old), .stale)
         XCTAssertFalse(state.failCandidateLoad(token: old))
         XCTAssertFalse(state.finishCandidateLoad(token: old))
         XCTAssertTrue(state.isCandidateLoading)
@@ -94,13 +95,13 @@ final class SOPCaptureLogicTests: XCTestCase {
         XCTAssertEqual(state.capturedViewIDs, ["view-1"])
         XCTAssertNotNil(state.session)
 
-        XCTAssertTrue(state.acceptCandidates(
+        XCTAssertEqual(state.acceptCandidates(
             try [summaryFixture(sopID: "sop", versions: [("existing", 1, "published"), ("new-v2", 2, "published")])],
             token: current
-        ))
+        ), .applied)
         XCTAssertTrue(state.finishCandidateLoad(token: current))
 
-        XCTAssertFalse(state.acceptCandidates(try [summaryFixture(sopID: "old", versions: [("old-v1", 1, "published")])], token: old))
+        XCTAssertEqual(state.acceptCandidates(try [summaryFixture(sopID: "old", versions: [("old-v1", 1, "published")])], token: old), .stale)
         XCTAssertFalse(state.failCandidateLoad(token: old))
         XCTAssertFalse(state.finishCandidateLoad(token: old))
         XCTAssertFalse(state.isCandidateLoading)
@@ -201,6 +202,93 @@ final class SOPCaptureLogicTests: XCTestCase {
         language.language = .zh
 
         XCTAssertEqual(language.t("capture.row.hint"), "轻点两下以拍摄或选择这张照片。")
+    }
+
+    func testPublishedRefreshRetainsOmittedVersionForResolvedActiveSession() async throws {
+        let state = SOPCaptureState()
+        let initial = state.beginCandidateLoad()
+        XCTAssertEqual(
+            state.acceptCandidates(try [summaryFixture(sopID: "sop", versions: [("v1", 1, "published")])], token: initial),
+            .applied
+        )
+        _ = state.finishCandidateLoad(token: initial)
+        let detail = try XCTUnwrap(state.beginVersionLoad())
+        XCTAssertEqual(state.accept(version: try versionFixture(id: "v1", number: 1), token: detail), .accepted)
+        _ = state.finishVersionLoad(token: detail)
+        state.recordCapture(viewID: "view-1", image: UIImage())
+        let session = try await state.resolveSession { self.sessionFixture(versionID: $0) }
+
+        let refresh = state.beginCandidateLoad()
+        XCTAssertEqual(state.acceptCandidates([], token: refresh), .preservedActiveSession)
+        _ = state.finishCandidateLoad(token: refresh)
+
+        XCTAssertEqual(state.selectedVersionID, "v1")
+        XCTAssertEqual(state.version?.id, "v1")
+        XCTAssertEqual(state.capturedViewIDs, ["view-1"])
+        XCTAssertNotNil(state.capturedImages["view-1"])
+        XCTAssertEqual(state.session?.id, session.id)
+        XCTAssertEqual(state.candidates.map(\.id), ["v1"])
+        XCTAssertFalse(state.candidates[0].availableForNewSession)
+        let reused = try await state.resolveSession { _ in
+            XCTFail("Omitted active version must reuse its resolved session")
+            throw APIError.server(409)
+        }
+        XCTAssertEqual(reused.id, session.id)
+    }
+
+    func testOmittedVersionWithoutSessionConfirmsThenResetsAllCaptureState() throws {
+        let state = SOPCaptureState()
+        state.installCandidates([
+            SOPVersionCandidate(id: "v1", sopID: "sop", versionNumber: 1, name: LocalizedText(zhCN: "一", en: "One")),
+        ])
+        let detail = try XCTUnwrap(state.beginVersionLoad())
+        XCTAssertEqual(state.accept(version: try versionFixture(id: "v1", number: 1), token: detail), .accepted)
+        state.recordCapture(viewID: "view-1", image: UIImage())
+
+        let refresh = state.beginCandidateLoad()
+        XCTAssertEqual(
+            state.acceptCandidates(try [summaryFixture(sopID: "sop", versions: [("v2", 2, "published")])], token: refresh),
+            .needsConfirmation
+        )
+        XCTAssertEqual(state.selectedVersionID, "v1")
+        XCTAssertNotNil(state.capturedImages["view-1"])
+        XCTAssertFalse(state.candidates.first(where: { $0.id == "v1" })?.availableForNewSession ?? true)
+
+        state.confirmCandidateTransition()
+
+        XCTAssertEqual(state.selectedVersionID, "v2")
+        XCTAssertNil(state.version)
+        XCTAssertTrue(state.capturedViewIDs.isEmpty)
+        XCTAssertTrue(state.capturedImages.isEmpty)
+        XCTAssertNil(state.session)
+    }
+
+    func testOlderVersionRequestCannotChangeNewerLoadingOrErrorState() throws {
+        let state = SOPCaptureState()
+        state.installCandidates([
+            SOPVersionCandidate(id: "v1", sopID: "sop", versionNumber: 1, name: LocalizedText(zhCN: "一", en: "One")),
+            SOPVersionCandidate(id: "v2", sopID: "sop", versionNumber: 2, name: LocalizedText(zhCN: "二", en: "Two")),
+        ])
+        let old = try XCTUnwrap(state.beginVersionLoad())
+        XCTAssertEqual(state.requestSelection("v2"), .changed)
+        let current = try XCTUnwrap(state.beginVersionLoad())
+
+        XCTAssertEqual(state.accept(version: try versionFixture(id: "v1", number: 1), token: old), .stale)
+        XCTAssertFalse(state.failVersionLoad(token: old))
+        XCTAssertFalse(state.finishVersionLoad(token: old))
+        XCTAssertTrue(state.isVersionLoading)
+        XCTAssertFalse(state.versionLoadFailed)
+        XCTAssertEqual(state.selectedVersionID, "v2")
+
+        XCTAssertEqual(state.accept(version: try versionFixture(id: "v2", number: 2), token: current), .accepted)
+        XCTAssertTrue(state.finishVersionLoad(token: current))
+        XCTAssertFalse(state.isVersionLoading)
+        XCTAssertFalse(state.versionLoadFailed)
+
+        XCTAssertFalse(state.failVersionLoad(token: old))
+        XCTAssertFalse(state.finishVersionLoad(token: old))
+        XCTAssertEqual(state.version?.id, "v2")
+        XCTAssertFalse(state.versionLoadFailed)
     }
 
     private func viewFixture(id: String, required: Bool) throws -> SOPView {
