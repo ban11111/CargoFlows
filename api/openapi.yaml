@@ -190,7 +190,7 @@ paths:
         required: true
         content: { application/json: { schema: { type: object, additionalProperties: false, required: [file_name, content_type], properties: { file_name: { type: string, minLength: 1 }, content_type: { type: string, pattern: '^image/' } } } } }
       responses:
-        '200': { description: Upload details, content: { application/json: { schema: { $ref: '#/components/schemas/UploadEnvelope' } } } }
+        '200': { description: SOP reference upload details, content: { application/json: { schema: { $ref: '#/components/schemas/SOPReferenceUploadEnvelope' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -264,7 +264,7 @@ paths:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/CreateAssetUploadRequest' } } }
       responses:
-        '200': { description: Upload details, content: { application/json: { schema: { $ref: '#/components/schemas/UploadEnvelope' } } } }
+        '200': { description: Capture asset upload details with a signed completion ticket, content: { application/json: { schema: { $ref: '#/components/schemas/AssetUploadEnvelope' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -279,6 +279,7 @@ paths:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/CompleteAssetRequest' } } }
       responses:
+        '200': { description: Idempotent replay; returns the asset previously created by this completion ticket, content: { application/json: { schema: { $ref: '#/components/schemas/CompletedAsset' } } } }
         '201': { description: Asset completed, content: { application/json: { schema: { $ref: '#/components/schemas/CompletedAsset' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -492,7 +493,17 @@ components:
       type: object
       required: [message]
       properties: { message: { type: string } }
-    UploadEnvelope:
+    SOPReferenceUploadEnvelope:
+      type: object
+      required: [method, upload_url, asset_url, object_key, expires_in, headers]
+      properties:
+        method: { type: string, enum: [PUT] }
+        upload_url: { type: string, format: uri }
+        asset_url: { type: string, format: uri }
+        object_key: { type: string }
+        expires_in: { type: integer }
+        headers: { type: object, additionalProperties: { type: string } }
+    AssetUploadEnvelope:
       type: object
       required: [method, upload_url, asset_url, object_key, completion_token, expires_in, headers]
       properties:

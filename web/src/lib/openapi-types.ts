@@ -486,7 +486,20 @@ export interface components {
         AuthErrorResponse: {
             message: string;
         };
-        UploadEnvelope: {
+        SOPReferenceUploadEnvelope: {
+            /** @enum {string} */
+            method: "PUT";
+            /** Format: uri */
+            upload_url: string;
+            /** Format: uri */
+            asset_url: string;
+            object_key: string;
+            expires_in: number;
+            headers: {
+                [key: string]: string;
+            };
+        };
+        AssetUploadEnvelope: {
             /** @enum {string} */
             method: "PUT";
             /** Format: uri */
@@ -1125,13 +1138,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Upload details */
+            /** @description SOP reference upload details */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UploadEnvelope"];
+                    "application/json": components["schemas"]["SOPReferenceUploadEnvelope"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -1289,13 +1302,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Upload details */
+            /** @description Capture asset upload details with a signed completion ticket */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UploadEnvelope"];
+                    "application/json": components["schemas"]["AssetUploadEnvelope"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -1320,6 +1333,15 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Idempotent replay; returns the asset previously created by this completion ticket */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompletedAsset"];
+                };
+            };
             /** @description Asset completed */
             201: {
                 headers: {

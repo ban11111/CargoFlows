@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"cargoflow/api/internal/config"
 	"cargoflow/api/internal/models"
@@ -218,6 +220,96 @@ func TestCompleteAssetUsesSignedTicketAndServerDerivedURL(t *testing.T) {
 	}
 	if receipt.ObjectKey != ticket.ObjectKey || receipt.OriginalURL != storage.assetURL(ticket.ObjectKey) {
 		t.Fatalf("asset location was not derived from the signed ticket: %#v", receipt)
+	}
+}
+
+func TestCompleteAssetIsIdempotentForRepeatedTicket(t *testing.T) {
+	db := newTestDB(t)
+	version := createCaptureVersionFixture(t, db, models.SOPVersionPublished, "41414141-4141-4414-8414-414141414141")
+	view := createCaptureViewFixture(t, db, version.ID, "42424242-4242-4424-8424-424242424242", "正面", "Front")
+	session := createPhotoSessionFixture(t, db, version.ID, "43434343-4343-4434-8434-434343434343")
+	server := &Server{db: db, cfg: testAssetConfig(), storage: &fakeAssetStorage{exists: true}}
+	ticket := createAssetUploadTicket(t, server, session, view, "capture.jpg")
+
+	first := performCompleteAssetWithTicket(t, server, session, view, ticket.CompletionToken, "2026-07-16T12:00:00Z")
+	second := performCompleteAssetWithTicket(t, server, session, view, ticket.CompletionToken, "2026-07-16T13:00:00Z")
+	if first.Code != http.StatusCreated || second.Code != http.StatusOK {
+		t.Fatalf("expected first completion 201 and replay 200, got %d and %d: first=%s second=%s", first.Code, second.Code, first.Body.String(), second.Body.String())
+	}
+	var firstAsset, secondAsset completedAssetResponse
+	if err := json.Unmarshal(first.Body.Bytes(), &firstAsset); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(second.Body.Bytes(), &secondAsset); err != nil {
+		t.Fatal(err)
+	}
+	if firstAsset.ID != secondAsset.ID || firstAsset.ObjectKey != secondAsset.ObjectKey || !firstAsset.CapturedAt.Equal(secondAsset.CapturedAt) {
+		t.Fatalf("replay must return the originally created asset: first=%#v second=%#v", firstAsset, secondAsset)
+	}
+	var count int64
+	if err := db.Model(&models.Asset{}).Where("object_key = ?", ticket.ObjectKey).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("expected exactly one asset for ticket, count=%d err=%v", count, err)
+	}
+}
+
+func TestCompleteAssetIsIdempotentForConcurrentTicketConsumption(t *testing.T) {
+	db := newTestDB(t)
+	version := createCaptureVersionFixture(t, db, models.SOPVersionPublished, "44444444-4141-4414-8414-414141414141")
+	view := createCaptureViewFixture(t, db, version.ID, "45454545-4242-4424-8424-424242424242", "正面", "Front")
+	session := createPhotoSessionFixture(t, db, version.ID, "46464646-4343-4434-8434-434343434343")
+	server := &Server{db: db, cfg: testAssetConfig(), storage: &fakeAssetStorage{exists: true}}
+	ticket := createAssetUploadTicket(t, server, session, view, "capture.jpg")
+
+	start := make(chan struct{})
+	responses := make(chan *httptest.ResponseRecorder, 2)
+	var workers sync.WaitGroup
+	for range 2 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			responses <- performCompleteAssetWithTicket(t, server, session, view, ticket.CompletionToken, "")
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(responses)
+
+	ids := make([]uint, 0, 2)
+	statuses := map[int]int{}
+	for response := range responses {
+		statuses[response.Code]++
+		if response.Code != http.StatusCreated && response.Code != http.StatusOK {
+			t.Fatalf("expected concurrent completion to succeed idempotently, got %d: %s", response.Code, response.Body.String())
+		}
+		var asset completedAssetResponse
+		if err := json.Unmarshal(response.Body.Bytes(), &asset); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, asset.ID)
+	}
+	if statuses[http.StatusCreated] != 1 || statuses[http.StatusOK] != 1 || len(ids) != 2 || ids[0] != ids[1] {
+		t.Fatalf("expected one create and one replay for the same asset, statuses=%v ids=%v", statuses, ids)
+	}
+	var count int64
+	if err := db.Model(&models.Asset{}).Where("object_key = ?", ticket.ObjectKey).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("expected exactly one concurrent asset, count=%d err=%v", count, err)
+	}
+}
+
+func TestAssetObjectKeyCannotBeRebound(t *testing.T) {
+	db := newTestDB(t)
+	first := models.Asset{SKUID: 1, PhotoSessionID: 1, SOPViewID: 1, ObjectKey: "photo-sessions/one/views/front/capture.jpg", OriginalURL: "https://assets.example.test/one.jpg", ReviewStatus: "pending", CapturedAt: time.Now()}
+	second := models.Asset{SKUID: 2, PhotoSessionID: 2, SOPViewID: 2, ObjectKey: first.ObjectKey, OriginalURL: "https://assets.example.test/two.jpg", ReviewStatus: "pending", CapturedAt: time.Now()}
+	if err := db.Create(&first).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&second).Error; err == nil {
+		t.Fatal("expected an object key to be permanently bound to one asset")
+	}
+	var count int64
+	if err := db.Model(&models.Asset{}).Where("object_key = ?", first.ObjectKey).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("expected exactly one binding for object key, count=%d err=%v", count, err)
 	}
 }
 

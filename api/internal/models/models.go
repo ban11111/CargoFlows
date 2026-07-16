@@ -99,7 +99,7 @@ type Asset struct {
 	SKUID          uint         `gorm:"index;not null" json:"sku_id"`
 	PhotoSessionID uint         `gorm:"index" json:"photo_session_id"`
 	SOPViewID      uint         `gorm:"index" json:"sop_view_id"`
-	ObjectKey      string       `gorm:"size:500;not null" json:"object_key"`
+	ObjectKey      string       `gorm:"size:500;uniqueIndex;not null" json:"object_key"`
 	OriginalURL    string       `gorm:"size:500;not null" json:"original_url"`
 	ThumbnailURL   string       `gorm:"size:500" json:"thumbnail_url"`
 	ReviewStatus   string       `gorm:"size:32;not null;default:pending" json:"review_status"`

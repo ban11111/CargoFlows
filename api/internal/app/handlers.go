@@ -10,6 +10,7 @@ import (
 
 	"cargoflow/api/internal/models"
 	"github.com/gin-gonic/gin"
+	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -442,6 +443,19 @@ func (s *Server) completeAssetUpload(c *gin.Context) {
 		respondCaptureError(c, errInvalidUploadTicket)
 		return
 	}
+	existing, found, err := s.findCompletedAsset(claims.ObjectKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "internal server error"})
+		return
+	}
+	if found {
+		if existing.SKUID != session.SKUID || existing.PhotoSessionID != session.ID || existing.SOPViewID != view.ID {
+			respondCaptureError(c, errInvalidUploadTicket)
+			return
+		}
+		writeCompletedAsset(c, http.StatusOK, existing, session.PublicID, view.PublicID)
+		return
+	}
 	exists, err := s.storage.objectExists(c.Request.Context(), claims.ObjectKey)
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "object_storage_unavailable", "message": "verify uploaded object failed"})
@@ -460,11 +474,86 @@ func (s *Server) completeAssetUpload(c *gin.Context) {
 		ReviewStatus:   "pending",
 		CapturedAt:     capturedAt,
 	}
-	if err := s.db.Create(&asset).Error; err != nil {
+	asset, created, err := s.createCompletedAsset(asset)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "internal server error"})
 		return
 	}
-	c.JSON(http.StatusCreated, completedAssetResponse{ID: asset.ID, SKUID: asset.SKUID, PhotoSessionID: session.PublicID, SOPViewID: view.PublicID, ObjectKey: asset.ObjectKey, OriginalURL: asset.OriginalURL, ThumbnailURL: asset.ThumbnailURL, ReviewStatus: asset.ReviewStatus, CapturedAt: asset.CapturedAt})
+	if asset.SKUID != session.SKUID || asset.PhotoSessionID != session.ID || asset.SOPViewID != view.ID {
+		respondCaptureError(c, errInvalidUploadTicket)
+		return
+	}
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+	}
+	writeCompletedAsset(c, status, asset, session.PublicID, view.PublicID)
+}
+
+func (s *Server) findCompletedAsset(objectKey string) (models.Asset, bool, error) {
+	var lastErr error
+	for attempt := 0; attempt < 6; attempt++ {
+		var asset models.Asset
+		err := s.db.Where("object_key = ?", objectKey).First(&asset).Error
+		if err == nil {
+			return asset, true, nil
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return models.Asset{}, false, nil
+		}
+		lastErr = err
+		if !s.retryableAssetDBError(err) || attempt == 5 {
+			return models.Asset{}, false, err
+		}
+		time.Sleep(time.Duration(1<<attempt) * time.Millisecond)
+	}
+	return models.Asset{}, false, lastErr
+}
+
+func (s *Server) createCompletedAsset(asset models.Asset) (models.Asset, bool, error) {
+	var lastErr error
+	for attempt := 0; attempt < 6; attempt++ {
+		candidate := asset
+		result := s.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&candidate)
+		if result.Error == nil && result.RowsAffected == 1 {
+			return candidate, true, nil
+		}
+		if result.Error != nil {
+			lastErr = result.Error
+			if !s.retryableAssetDBError(result.Error) || attempt == 5 {
+				return models.Asset{}, false, result.Error
+			}
+		} else {
+			existing, found, err := s.findCompletedAsset(asset.ObjectKey)
+			if err == nil && found {
+				return existing, false, nil
+			}
+			if err != nil {
+				lastErr = err
+				if !s.retryableAssetDBError(err) || attempt == 5 {
+					return models.Asset{}, false, err
+				}
+			}
+		}
+		time.Sleep(time.Duration(1<<attempt) * time.Millisecond)
+	}
+	return models.Asset{}, false, lastErr
+}
+
+func (s *Server) retryableAssetDBError(err error) bool {
+	var mysqlErr *mysqlDriver.MySQLError
+	if errors.As(err, &mysqlErr) {
+		return mysqlErr.Number == 1205 || mysqlErr.Number == 1213
+	}
+	if s.db.Dialector.Name() == "sqlite" {
+		message := strings.ToLower(err.Error())
+		return strings.Contains(message, "database is locked") || strings.Contains(message, "database table is locked")
+	}
+	return false
+}
+
+func writeCompletedAsset(c *gin.Context, status int, asset models.Asset, sessionPublicID, viewPublicID string) {
+	c.JSON(status, completedAssetResponse{ID: asset.ID, SKUID: asset.SKUID, PhotoSessionID: sessionPublicID, SOPViewID: viewPublicID, ObjectKey: asset.ObjectKey, OriginalURL: asset.OriginalURL, ThumbnailURL: asset.ThumbnailURL, ReviewStatus: asset.ReviewStatus, CapturedAt: asset.CapturedAt})
 }
 
 func imageExtension(contentType string) (string, bool) {

@@ -34,7 +34,7 @@ func TestCaptureSOPOpenAPIHasCompleteRuntimeErrorResponses(t *testing.T) {
 		"/sop-versions/{version_id}/views/{view_id}/reference-image-order":       {"put": {"200", "400", "401", "403", "404", "409", "428", "500"}},
 		"/photo-sessions":                                                        {"post": {"201", "400", "401", "404", "409", "500"}},
 		"/assets/upload-url":                                                     {"post": {"200", "400", "401", "403", "404", "409", "500", "503"}},
-		"/assets/complete":                                                       {"post": {"201", "400", "401", "403", "404", "409", "500", "503"}},
+		"/assets/complete":                                                       {"post": {"200", "201", "400", "401", "403", "404", "409", "500", "503"}},
 		"/assets/review":                                                         {"get": {"200", "401", "500"}},
 		"/assets/review/hierarchy":                                               {"get": {"200", "401", "500"}},
 	}
@@ -68,5 +68,46 @@ func TestCaptureSOPOpenAPIHasCompleteRuntimeErrorResponses(t *testing.T) {
 		if _, ok := responses[name]; !ok {
 			t.Errorf("missing reusable response %s", name)
 		}
+	}
+}
+
+func TestOpenAPIUsesDistinctUploadResponseSchemas(t *testing.T) {
+	contents, err := os.ReadFile("../../openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := yaml.Unmarshal(contents, &document); err != nil {
+		t.Fatal(err)
+	}
+	paths := document["paths"].(map[string]any)
+	schemaRef := func(path string) string {
+		operation := paths[path].(map[string]any)["post"].(map[string]any)
+		responses := operation["responses"].(map[string]any)
+		response := responses["200"].(map[string]any)
+		content := response["content"].(map[string]any)
+		mediaType := content["application/json"].(map[string]any)
+		return mediaType["schema"].(map[string]any)["$ref"].(string)
+	}
+	if got := schemaRef("/assets/upload-url"); got != "#/components/schemas/AssetUploadEnvelope" {
+		t.Fatalf("asset upload response must require its completion ticket, got %q", got)
+	}
+	if got := schemaRef("/sop-versions/{version_id}/views/{view_id}/reference-images/upload-url"); got != "#/components/schemas/SOPReferenceUploadEnvelope" {
+		t.Fatalf("SOP reference upload response must use its runtime schema without a completion ticket, got %q", got)
+	}
+
+	schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
+	requiredFields := func(name string) map[string]bool {
+		result := map[string]bool{}
+		for _, value := range schemas[name].(map[string]any)["required"].([]any) {
+			result[value.(string)] = true
+		}
+		return result
+	}
+	if !requiredFields("AssetUploadEnvelope")["completion_token"] {
+		t.Fatal("asset upload response must require completion_token")
+	}
+	if requiredFields("SOPReferenceUploadEnvelope")["completion_token"] {
+		t.Fatal("SOP reference upload response must not claim a completion_token")
 	}
 }
