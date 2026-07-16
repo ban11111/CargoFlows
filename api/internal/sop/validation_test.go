@@ -104,6 +104,20 @@ func TestValidateVersionChecksEveryViewField(t *testing.T) {
 	}
 }
 
+func TestValidateVersionRejectsUnknownViewRoleAndKind(t *testing.T) {
+	version := validVersion()
+	version.Views = append(version.Views, models.SOPView{
+		Sequence: 2, Role: models.SOPViewRole("sideways"), ViewKind: models.SOPViewKind("panorama"),
+		NameZH: "无效", NameEN: "Invalid",
+		CameraPositionZ: 1, ImageUpX: 1,
+		Composition: models.Composition{FrameOccupancy: 0.85, AspectRatio: "1:1"},
+	})
+
+	errors := ValidateVersion(version)
+	assertValidationError(t, errors, "view_role_invalid", "views[1].role")
+	assertValidationError(t, errors, "view_kind_invalid", "views[1].view_kind")
+}
+
 func TestValidateVersionDetectsZeroPoseVectorAndDuplicateSequence(t *testing.T) {
 	version := validVersion()
 	version.Views = append(version.Views, models.SOPView{

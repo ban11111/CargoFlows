@@ -15,10 +15,11 @@ import (
 )
 
 var (
-	ErrVersionImmutable = errors.New("SOP version is immutable")
-	ErrDraftExists      = errors.New("an SOP draft already exists")
-	ErrReferenceLocked  = errors.New("reference-front view is locked")
-	ErrVersionNotFound  = errors.New("SOP version not found")
+	ErrVersionImmutable          = errors.New("SOP version is immutable")
+	ErrDraftExists               = errors.New("an SOP draft already exists")
+	ErrReferenceLocked           = errors.New("reference-front view is locked")
+	ErrVersionNotFound           = errors.New("SOP version not found")
+	ErrSourceVersionNotPublished = errors.New("source SOP version is not published")
 )
 
 type SOPValidationError struct {
@@ -312,19 +313,22 @@ func (s *SOPService) CopyVersion(ctx context.Context, sopPublicID, sourceVersion
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("public_id = ?", sopPublicID).First(&parent).Error; err != nil {
 			return err
 		}
+		source, err := getVersion(tx.Clauses(clause.Locking{Strength: "UPDATE"}), sourceVersionPublicID)
+		if err != nil {
+			return err
+		}
+		if source.CaptureSOPID != parent.ID {
+			return ErrVersionNotFound
+		}
+		if source.Status != models.SOPVersionPublished {
+			return ErrSourceVersionNotPublished
+		}
 		var draftCount int64
 		if err := tx.Model(&models.SOPVersion{}).Where("capture_sop_id = ? AND status = ?", parent.ID, models.SOPVersionDraft).Count(&draftCount).Error; err != nil {
 			return err
 		}
 		if draftCount != 0 {
 			return ErrDraftExists
-		}
-		source, err := getVersion(tx, sourceVersionPublicID)
-		if err != nil {
-			return err
-		}
-		if source.CaptureSOPID != parent.ID {
-			return ErrVersionNotFound
 		}
 		var maxVersion int
 		if err := tx.Model(&models.SOPVersion{}).Where("capture_sop_id = ?", parent.ID).Select("COALESCE(MAX(version_number), 0)").Scan(&maxVersion).Error; err != nil {

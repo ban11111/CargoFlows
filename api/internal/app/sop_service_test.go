@@ -215,6 +215,12 @@ func TestSOPServiceCopySingleDraftArchiveAndList(t *testing.T) {
 	if _, err := service.AddView(ctx, created.Version.PublicID, AddViewInput{PresetKey: "back"}); err != nil {
 		t.Fatal(err)
 	}
+	sourceImage, err := service.AddReferenceImage(ctx, created.Version.PublicID, created.Version.Views[0].PublicID, ReferenceImageInput{
+		ObjectKey: "reference/source.jpg", ThumbnailURL: "/reference/source.jpg", CaptionEN: "Source reference",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	published, err := service.Publish(ctx, created.Version.PublicID)
 	if err != nil {
 		t.Fatal(err)
@@ -231,6 +237,16 @@ func TestSOPServiceCopySingleDraftArchiveAndList(t *testing.T) {
 		if copied.Views[i].PublicID == published.Views[i].PublicID {
 			t.Fatalf("copied view reused UUID at index %d", i)
 		}
+	}
+	if len(copied.Views[0].ReferenceImages) != 1 {
+		t.Fatalf("copied reference images = %#v", copied.Views[0].ReferenceImages)
+	}
+	copiedImage := copied.Views[0].ReferenceImages[0]
+	if copiedImage.PublicID == sourceImage.PublicID {
+		t.Fatal("copied reference-image relationship reused UUID")
+	}
+	if copiedImage.ObjectKey != sourceImage.ObjectKey {
+		t.Fatalf("copied object key = %q, want %q", copiedImage.ObjectKey, sourceImage.ObjectKey)
 	}
 	if _, err := service.CopyVersion(ctx, created.SOP.PublicID, published.PublicID); !errors.Is(err, ErrDraftExists) {
 		t.Fatalf("second copy error = %v", err)
@@ -252,6 +268,68 @@ func TestSOPServiceCopySingleDraftArchiveAndList(t *testing.T) {
 	}
 	if persisted.Status != models.SOPVersionArchived {
 		t.Fatalf("status = %q", persisted.Status)
+	}
+}
+
+func TestSOPServiceCopyRejectsArchivedSource(t *testing.T) {
+	db := newTestDB(t)
+	category, user := seedSOPCategoryAndUser(t, db)
+	service := NewSOPService(db)
+	created := createTestSOP(t, service, category, user)
+	ctx := context.Background()
+	published, err := service.Publish(ctx, created.Version.PublicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Archive(ctx, published.PublicID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := service.CopyVersion(ctx, created.SOP.PublicID, published.PublicID); !errors.Is(err, ErrSourceVersionNotPublished) {
+		t.Fatalf("copy archived source error = %v", err)
+	}
+	var draftCount int64
+	if err := db.Model(&models.SOPVersion{}).Where("capture_sop_id = ? AND status = ?", created.SOP.ID, models.SOPVersionDraft).Count(&draftCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if draftCount != 0 {
+		t.Fatalf("copy failure created %d drafts", draftCount)
+	}
+}
+
+func TestSOPServicePublishRejectsUnknownViewEnumsTransactionally(t *testing.T) {
+	db := newTestDB(t)
+	category, user := seedSOPCategoryAndUser(t, db)
+	service := NewSOPService(db)
+	created := createTestSOP(t, service, category, user)
+	ctx := context.Background()
+	if _, err := service.AddView(ctx, created.Version.PublicID, AddViewInput{Custom: &sop.ViewInput{
+		Role: models.SOPViewRole("sideways"), Kind: models.SOPViewKind("panorama"),
+		NameZH: "无效", NameEN: "Invalid",
+		CameraPosition: sop.Vector3{0, 0, 1}, ImageUp: sop.Vector3{1, 0, 0},
+		Composition: models.Composition{FrameOccupancy: 0.85, AspectRatio: "1:1"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := service.Publish(ctx, created.Version.PublicID)
+	var validationErr *SOPValidationError
+	if !errors.As(err, &validationErr) {
+		t.Fatalf("publish error = %v", err)
+	}
+	codes := make(map[string]bool, len(validationErr.Errors))
+	for _, item := range validationErr.Errors {
+		codes[item.Code] = true
+	}
+	if !codes["view_role_invalid"] || !codes["view_kind_invalid"] {
+		t.Fatalf("publication errors = %#v", validationErr.Errors)
+	}
+	stored, err := service.GetVersion(ctx, created.Version.PublicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != models.SOPVersionDraft || stored.PublishedAt != nil {
+		t.Fatalf("failed publish mutated version: %#v", stored)
 	}
 }
 

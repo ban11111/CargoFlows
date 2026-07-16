@@ -96,6 +96,16 @@ func validateSequences(views []models.SOPView) []ValidationError {
 func validateView(index int, view models.SOPView) []ValidationError {
 	basePath := fmt.Sprintf("views[%d]", index)
 	validationErrors := make([]ValidationError, 0)
+	if view.Role != models.SOPViewReferenceFront && view.Role != models.SOPViewCapture {
+		validationErrors = append(validationErrors, validationError(
+			"view_role_invalid", basePath+".role", "视图角色必须是参考正面或拍摄视图。", "View role must be reference_front or capture.",
+		))
+	}
+	if view.ViewKind != models.SOPViewStandard && view.ViewKind != models.SOPViewDetail {
+		validationErrors = append(validationErrors, validationError(
+			"view_kind_invalid", basePath+".view_kind", "视图类型必须是标准或细节视图。", "View kind must be standard or detail.",
+		))
+	}
 	if strings.TrimSpace(view.NameZH) == "" {
 		validationErrors = append(validationErrors, validationError("view_name_zh_required", basePath+".name.zh-CN", "视图中文名称不能为空。", "View Chinese name is required."))
 	}
