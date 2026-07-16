@@ -11,6 +11,30 @@ import (
 	"gorm.io/gorm"
 )
 
+func openTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
+
+func TestMigrateCreatesAIFoundationTables(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range []any{&models.OpenAIProviderSetting{}, &models.AIContentTemplate{}, &models.AIContentTemplateVersion{}, &models.AIContentSlot{}, &models.AIJob{}, &models.AIJobItem{}, &models.AIExecution{}, &models.AIAuditEvent{}} {
+		if !db.Migrator().HasTable(model) {
+			t.Fatalf("missing table for %T", model)
+		}
+	}
+	if db.Migrator().HasColumn(&models.AIJob{}, "input_asset_ids") {
+		t.Fatal("legacy input_asset_ids compatibility field must not be persisted")
+	}
+}
+
 func TestSeedCreatesPublishedPhoneCaseCaptureSOPFromExactPresets(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {

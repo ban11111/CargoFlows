@@ -119,16 +119,3 @@ type AssetReview struct {
 	Reason     string    `gorm:"type:text" json:"reason"`
 	CreatedAt  time.Time `json:"created_at"`
 }
-
-type AIJob struct {
-	ID             uint      `gorm:"primaryKey" json:"id"`
-	SKUID          uint      `gorm:"index;not null" json:"sku_id"`
-	TargetPlatform string    `gorm:"size:80;not null" json:"target_platform"`
-	Status         string    `gorm:"size:32;not null;default:pending" json:"status"`
-	InputAssetIDs  string    `gorm:"type:text" json:"input_asset_ids"`
-	ResultURL      string    `gorm:"size:500" json:"result_url"`
-	CreatedByID    uint      `gorm:"index;not null" json:"created_by_id"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	SKU            SKU       `json:"sku"`
-}

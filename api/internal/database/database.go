@@ -35,7 +35,15 @@ func Migrate(db *gorm.DB) error {
 		&models.PhotoSession{},
 		&models.Asset{},
 		&models.AssetReview{},
+		&models.OpenAIProviderSetting{},
+		&models.AIContentTemplate{},
+		&models.AIContentTemplateVersion{},
+		&models.AIContentSlot{},
 		&models.AIJob{},
+		&models.AIJobItem{},
+		&models.AIExecution{},
+		&models.AIAuditEvent{},
+		&models.AIUsageLedger{},
 	)
 }
 
