@@ -33,6 +33,9 @@ func newProductionLogger(writer logger.Writer) logger.Interface {
 }
 
 func Migrate(db *gorm.DB) error {
+	if err := migrateAIContentTemplateSchema(db); err != nil {
+		return err
+	}
 	return db.AutoMigrate(
 		&models.User{},
 		&models.Category{},
@@ -57,6 +60,75 @@ func Migrate(db *gorm.DB) error {
 		&models.AIAuditEvent{},
 		&models.AIUsageLedger{},
 	)
+}
+
+func migrateAIContentTemplateSchema(db *gorm.DB) error {
+	templateModels := []any{&models.AIContentTemplate{}, &models.AIContentTemplateVersion{}, &models.AIContentSlot{}}
+	if !db.Migrator().HasTable(&models.AIContentTemplate{}) ||
+		!db.Migrator().HasTable(&models.AIContentTemplateVersion{}) ||
+		!db.Migrator().HasTable(&models.AIContentSlot{}) {
+		return db.AutoMigrate(templateModels...)
+	}
+
+	// Remove lifecycle/index constraints before normalizing legacy data. These
+	// operations are idempotent so interrupted upgrades can safely resume.
+	if db.Migrator().HasIndex(&models.AIContentTemplateVersion{}, "idx_ai_template_draft_guard") {
+		if err := db.Migrator().DropIndex(&models.AIContentTemplateVersion{}, "idx_ai_template_draft_guard"); err != nil {
+			return err
+		}
+	}
+	if db.Migrator().HasIndex(&models.AIContentSlot{}, "idx_ai_slot_key") {
+		if err := db.Migrator().DropIndex(&models.AIContentSlot{}, "idx_ai_slot_key"); err != nil {
+			return err
+		}
+	}
+	if !db.Migrator().HasColumn(&models.AIContentTemplateVersion{}, "draft_guard") {
+		if err := db.Migrator().AddColumn(&models.AIContentTemplateVersion{}, "DraftGuard"); err != nil {
+			return err
+		}
+	}
+
+	if err := archiveDuplicateLegacyDrafts(db); err != nil {
+		return err
+	}
+	if err := db.Exec(`UPDATE ai_content_template_versions
+		SET draft_guard = CASE WHEN status = 'draft' THEN 'draft' ELSE NULL END`).Error; err != nil {
+		return err
+	}
+	if err := db.Exec(`UPDATE ai_content_templates
+		SET status = CASE WHEN EXISTS (
+			SELECT 1 FROM ai_content_template_versions
+			WHERE ai_content_template_versions.ai_content_template_id = ai_content_templates.id
+			AND ai_content_template_versions.status IN ('draft', 'published')
+		) THEN 'active' ELSE 'archived' END`).Error; err != nil {
+		return err
+	}
+
+	// AutoMigrate now sees normalized rows, recreates the draft uniqueness guard
+	// and named check constraint, and recreates slot-key lookup as non-unique.
+	return db.AutoMigrate(templateModels...)
+}
+
+func archiveDuplicateLegacyDrafts(db *gorm.DB) error {
+	if db.Dialector.Name() == "mysql" {
+		return db.Exec(`UPDATE ai_content_template_versions AS older
+			JOIN ai_content_template_versions AS newer
+			  ON newer.ai_content_template_id = older.ai_content_template_id
+			 AND newer.status = 'draft'
+			 AND (newer.version_number > older.version_number
+			      OR (newer.version_number = older.version_number AND newer.id > older.id))
+			SET older.status = 'archived', older.archived_at = COALESCE(older.archived_at, CURRENT_TIMESTAMP), older.draft_guard = NULL
+			WHERE older.status = 'draft'`).Error
+	}
+	return db.Exec(`UPDATE ai_content_template_versions AS older
+		SET status = 'archived', archived_at = COALESCE(archived_at, CURRENT_TIMESTAMP), draft_guard = NULL
+		WHERE status = 'draft' AND EXISTS (
+			SELECT 1 FROM ai_content_template_versions AS newer
+			WHERE newer.ai_content_template_id = older.ai_content_template_id
+			AND newer.status = 'draft'
+			AND (newer.version_number > older.version_number
+			     OR (newer.version_number = older.version_number AND newer.id > older.id))
+		)`).Error
 }
 
 func Seed(db *gorm.DB) error {

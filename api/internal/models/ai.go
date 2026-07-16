@@ -104,7 +104,7 @@ type AIContentTemplateVersion struct {
 	AIContentTemplateID   uint             `gorm:"uniqueIndex:idx_ai_template_version,priority:1;uniqueIndex:idx_ai_template_draft_guard,priority:1;not null" json:"-"`
 	VersionNumber         int              `gorm:"uniqueIndex:idx_ai_template_version,priority:2;not null" json:"version_number"`
 	Status                AITemplateStatus `gorm:"size:32;index;not null;default:draft" json:"status"`
-	DraftGuard            *string          `gorm:"size:16;uniqueIndex:idx_ai_template_draft_guard,priority:2" json:"-"`
+	DraftGuard            *string          `gorm:"size:16;uniqueIndex:idx_ai_template_draft_guard,priority:2;check:chk_ai_template_draft_guard,(status = 'draft' AND draft_guard IS NOT NULL AND draft_guard = 'draft') OR (status <> 'draft' AND draft_guard IS NULL)" json:"-"`
 	DefaultLocale         string           `gorm:"size:32;not null;default:zh-CN" json:"default_locale"`
 	PromptCompilerVersion string           `gorm:"size:64;not null" json:"prompt_compiler_version"`
 	PlatformPrompt        string           `gorm:"type:text;not null" json:"platform_prompt"`

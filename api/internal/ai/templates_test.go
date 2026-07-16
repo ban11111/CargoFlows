@@ -5,6 +5,8 @@ import (
 	"errors"
 	"reflect"
 	"sort"
+	"strings"
+	"sync"
 	"testing"
 
 	"cargoflow/api/internal/models"
@@ -253,6 +255,133 @@ func TestDatabaseRejectsSecondDraftForLogicalTemplate(t *testing.T) {
 	}
 	if err := db.Create(&second).Error; err == nil {
 		t.Fatal("database accepted a second draft for one logical template")
+	}
+}
+
+func TestDatabaseRejectsDraftWithoutGuard(t *testing.T) {
+	db := templateTestDB(t)
+	created, err := NewTemplateService(db).Create(t.Context(), validTemplateInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := db.Exec(`INSERT INTO ai_content_template_versions
+		(public_id, ai_content_template_id, version_number, status, default_locale, prompt_compiler_version, platform_prompt, created_by_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		"00000000-0000-0000-0000-000000000003", created.Template.ID, 2, models.AITemplateDraft, "zh-CN", "v1", "", 2)
+	if result.Error == nil || !strings.Contains(result.Error.Error(), "chk_ai_template_draft_guard") {
+		t.Fatalf("unguarded draft error = %v, want draft-guard check constraint", result.Error)
+	}
+}
+
+func TestConcurrentArchiveOfLastPublishedVersionsArchivesParent(t *testing.T) {
+	db := templateTestDB(t)
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// SQLite serializes writes on one connection; launching both calls together
+	// deterministically exercises the service boundary under that supported rule.
+	sqlDB.SetMaxOpenConns(1)
+	service := NewTemplateService(db)
+	created, err := service.Create(t.Context(), validTemplateInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issues, err := service.Publish(t.Context(), created.Version.PublicID, 1); err != nil || len(issues) != 0 {
+		t.Fatalf("publish v1 issues=%#v err=%v", issues, err)
+	}
+	second, err := service.CopyVersion(t.Context(), created.Template.PublicID, created.Version.PublicID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issues, err := service.Publish(t.Context(), second.PublicID, 2); err != nil || len(issues) != 0 {
+		t.Fatalf("publish v2 issues=%#v err=%v", issues, err)
+	}
+
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var ready sync.WaitGroup
+	ready.Add(2)
+	for _, versionID := range []string{created.Version.PublicID, second.PublicID} {
+		go func() {
+			ready.Done()
+			<-start
+			errs <- service.Archive(t.Context(), versionID)
+		}()
+	}
+	ready.Wait()
+	close(start)
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := service.Get(t.Context(), created.Template.PublicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != models.AIContentTemplateArchived {
+		t.Fatalf("parent status = %q, want archived", got.Status)
+	}
+}
+
+func TestArchiveLocksParentBeforeVersionMutation(t *testing.T) {
+	db := templateTestDB(t)
+	service := NewTemplateService(db)
+	created, err := service.Create(t.Context(), validTemplateInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issues, err := service.Publish(t.Context(), created.Version.PublicID, 1); err != nil || len(issues) != 0 {
+		t.Fatalf("publish issues=%#v err=%v", issues, err)
+	}
+
+	var mu sync.Mutex
+	var events []string
+	const queryCallback = "test:observe-template-parent-lock"
+	const updateCallback = "test:observe-template-version-update"
+	if err := db.Callback().Query().Before("gorm:query").Register(queryCallback, func(tx *gorm.DB) {
+		if tx.Statement.Table != "ai_content_templates" {
+			return
+		}
+		if _, locked := tx.Statement.Clauses["FOR"]; locked {
+			mu.Lock()
+			events = append(events, "lock_parent")
+			mu.Unlock()
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Callback().Update().Before("gorm:update").Register(updateCallback, func(tx *gorm.DB) {
+		if tx.Statement.Table == "ai_content_template_versions" {
+			mu.Lock()
+			events = append(events, "update_version")
+			mu.Unlock()
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = db.Callback().Query().Remove(queryCallback)
+		_ = db.Callback().Update().Remove(updateCallback)
+	})
+
+	if err := service.Archive(t.Context(), created.Version.PublicID); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	lockIndex, updateIndex := -1, -1
+	for index, event := range events {
+		if event == "lock_parent" && lockIndex == -1 {
+			lockIndex = index
+		}
+		if event == "update_version" && updateIndex == -1 {
+			updateIndex = index
+		}
+	}
+	if lockIndex == -1 || updateIndex == -1 || lockIndex >= updateIndex {
+		t.Fatalf("archive orchestration events = %v, want parent lock before version update", events)
 	}
 }
 

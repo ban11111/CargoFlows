@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"cargoflow/api/internal/models"
 	"cargoflow/api/internal/sop"
@@ -14,6 +15,57 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+type oldAIContentTemplate struct {
+	ID             uint `gorm:"primaryKey"`
+	PublicID       string
+	NameZH         string
+	NameEN         string
+	TargetPlatform string
+	Status         string
+	CreatedByID    uint
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+func (oldAIContentTemplate) TableName() string { return "ai_content_templates" }
+
+type oldAIContentTemplateVersion struct {
+	ID                    uint `gorm:"primaryKey"`
+	PublicID              string
+	AIContentTemplateID   uint `gorm:"uniqueIndex:idx_ai_template_version"`
+	VersionNumber         int  `gorm:"uniqueIndex:idx_ai_template_version"`
+	Status                string
+	DefaultLocale         string
+	PromptCompilerVersion string
+	PlatformPrompt        string
+	CreatedByID           uint
+	PublishedAt           *time.Time
+	ArchivedAt            *time.Time
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+}
+
+func (oldAIContentTemplateVersion) TableName() string { return "ai_content_template_versions" }
+
+type oldAIContentSlot struct {
+	ID                         uint `gorm:"primaryKey"`
+	PublicID                   string
+	AIContentTemplateVersionID uint   `gorm:"uniqueIndex:idx_ai_slot_key"`
+	SlotKey                    string `gorm:"uniqueIndex:idx_ai_slot_key"`
+	Kind                       string
+	NameZH                     string
+	NameEN                     string
+	Sequence                   int
+	PromptFragment             string
+	ConstraintsJSON            []byte
+	GenerationConfigJSON       []byte
+	LayoutConfigJSON           []byte
+	CreatedAt                  time.Time
+	UpdatedAt                  time.Time
+}
+
+func (oldAIContentSlot) TableName() string { return "ai_content_slots" }
 
 func TestProductionLoggerRemovesSecretQueryParameters(t *testing.T) {
 	var output bytes.Buffer
@@ -69,6 +121,67 @@ func TestMigrateCreatesAIFoundationTables(t *testing.T) {
 	}
 	if !db.Migrator().HasIndex(&models.AIContentTemplateVersion{}, "idx_ai_template_draft_guard") {
 		t.Fatal("missing unique AI template draft guard index")
+	}
+}
+
+func TestMigrateUpgradesLegacyAITemplateLifecycleAndIndexes(t *testing.T) {
+	db := openTestDB(t)
+	if err := db.AutoMigrate(&oldAIContentTemplate{}, &oldAIContentTemplateVersion{}, &oldAIContentSlot{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	parents := []oldAIContentTemplate{
+		{ID: 1, PublicID: "template-active", NameZH: "活动", NameEN: "Active", TargetPlatform: "lazada", Status: "published", CreatedByID: 1, CreatedAt: now, UpdatedAt: now},
+		{ID: 2, PublicID: "template-archived", NameZH: "归档", NameEN: "Archived", TargetPlatform: "lazada", Status: "draft", CreatedByID: 1, CreatedAt: now, UpdatedAt: now},
+	}
+	if err := db.Create(&parents).Error; err != nil {
+		t.Fatal(err)
+	}
+	versions := []oldAIContentTemplateVersion{
+		{ID: 1, PublicID: "v1-published", AIContentTemplateID: 1, VersionNumber: 1, Status: "published", DefaultLocale: "zh-CN", PromptCompilerVersion: "v1", CreatedByID: 1, CreatedAt: now, UpdatedAt: now},
+		{ID: 2, PublicID: "v2-old-draft", AIContentTemplateID: 1, VersionNumber: 2, Status: "draft", DefaultLocale: "zh-CN", PromptCompilerVersion: "v1", CreatedByID: 1, CreatedAt: now, UpdatedAt: now},
+		{ID: 3, PublicID: "v3-kept-draft", AIContentTemplateID: 1, VersionNumber: 3, Status: "draft", DefaultLocale: "zh-CN", PromptCompilerVersion: "v1", CreatedByID: 1, CreatedAt: now, UpdatedAt: now},
+		{ID: 4, PublicID: "v1-archived", AIContentTemplateID: 2, VersionNumber: 1, Status: "archived", DefaultLocale: "zh-CN", PromptCompilerVersion: "v1", CreatedByID: 1, ArchivedAt: &now, CreatedAt: now, UpdatedAt: now},
+	}
+	if err := db.Create(&versions).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&oldAIContentSlot{ID: 1, PublicID: "slot-1", AIContentTemplateVersionID: 1, SlotKey: "hero", Kind: "image", NameZH: "主图", NameEN: "Hero", Sequence: 1, ConstraintsJSON: []byte(`{}`), GenerationConfigJSON: []byte(`{}`), LayoutConfigJSON: []byte(`{}`), CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatalf("repeated migration failed: %v", err)
+	}
+	var migratedParents []models.AIContentTemplate
+	if err := db.Order("id").Find(&migratedParents).Error; err != nil {
+		t.Fatal(err)
+	}
+	if migratedParents[0].Status != models.AIContentTemplateActive || migratedParents[1].Status != models.AIContentTemplateArchived {
+		t.Fatalf("parent statuses = %q, %q", migratedParents[0].Status, migratedParents[1].Status)
+	}
+	var migratedVersions []models.AIContentTemplateVersion
+	if err := db.Order("id").Find(&migratedVersions).Error; err != nil {
+		t.Fatal(err)
+	}
+	if migratedVersions[1].Status != models.AITemplateArchived || migratedVersions[1].DraftGuard != nil || migratedVersions[1].ArchivedAt == nil {
+		t.Fatalf("older draft was not safely archived: %#v", migratedVersions[1])
+	}
+	if migratedVersions[2].Status != models.AITemplateDraft || migratedVersions[2].DraftGuard == nil || *migratedVersions[2].DraftGuard != "draft" {
+		t.Fatalf("latest draft was not guarded: %#v", migratedVersions[2])
+	}
+	duplicate := models.AIContentSlot{PublicID: "slot-duplicate", AIContentTemplateVersionID: 1, SlotKey: "hero", Kind: models.AIContentSlotImage, NameZH: "重复", NameEN: "Duplicate", Sequence: 2, ConstraintsJSON: []byte(`{}`), GenerationConfigJSON: []byte(`{}`), LayoutConfigJSON: []byte(`{}`)}
+	if err := db.Create(&duplicate).Error; err != nil {
+		t.Fatalf("non-unique migrated slot index rejected duplicate: %v", err)
+	}
+	result := db.Exec(`INSERT INTO ai_content_template_versions
+		(public_id, ai_content_template_id, version_number, status, default_locale, prompt_compiler_version, platform_prompt, created_by_id, created_at, updated_at)
+		VALUES (?, ?, ?, 'draft', 'zh-CN', 'v1', '', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`, "unguarded", 2, 2)
+	if result.Error == nil {
+		t.Fatal("migrated database accepted an unguarded draft")
 	}
 }
 
