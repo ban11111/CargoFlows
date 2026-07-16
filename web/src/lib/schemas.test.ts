@@ -90,10 +90,26 @@ describe("sopViewSchema", () => {
       ...baseView,
       pose: {
         ...baseView.pose,
-        camera_position_direction: [Number.MAX_VALUE, 0, 0],
-        image_up_direction: [-Number.MAX_VALUE, 0, 0],
+        camera_position_direction: [Number.MAX_VALUE, Number.MAX_VALUE, 0],
+        image_up_direction: [Number.MAX_VALUE, Number.MAX_VALUE, 0],
       },
     })).toThrow();
+    expect(() => sopViewSchema.parse({
+      ...baseView,
+      pose: {
+        ...baseView.pose,
+        camera_position_direction: [Number.MAX_VALUE, Number.MAX_VALUE, 0],
+        image_up_direction: [-Number.MAX_VALUE, -Number.MAX_VALUE, 0],
+      },
+    })).toThrow();
+    expect(sopViewSchema.parse({
+      ...baseView,
+      pose: {
+        ...baseView.pose,
+        camera_position_direction: [Number.MAX_VALUE, Number.MAX_VALUE, 0],
+        image_up_direction: [Number.MAX_VALUE, -Number.MAX_VALUE, 0],
+      },
+    }).pose.image_up_direction).toEqual([Number.MAX_VALUE, -Number.MAX_VALUE, 0]);
   });
 
   it("enforces standard and detail target rules", () => {
@@ -161,5 +177,11 @@ describe("SOP contract helpers", () => {
     expect(localizedText("zh", baseView.name)).toBe("包装正面");
     expect(localizedText("zh-CN", baseView.name)).toBe("包装正面");
     expect(localizedText("en", baseView.name)).toBe("Packaging Front");
+  });
+
+  it("falls back to the other locale and then to empty text", () => {
+    expect(localizedText("zh", { "zh-CN": "", en: "English fallback" })).toBe("English fallback");
+    expect(localizedText("en", { "zh-CN": "中文回退", en: "" })).toBe("中文回退");
+    expect(localizedText("zh-CN", { "zh-CN": "", en: "" })).toBe("");
   });
 });

@@ -52,19 +52,24 @@ const poseSchema = z.object({
   image_up_direction: vector3Schema,
   target: vector3Schema,
 }).strict().superRefine((pose, context) => {
-  const cameraLength = Math.hypot(...pose.camera_position_direction);
-  const upLength = Math.hypot(...pose.image_up_direction);
-  if (cameraLength < 1e-9) {
+  const scaledUnit = (vector: readonly [number, number, number]) => {
+    const scale = Math.max(...vector.map(Math.abs));
+    if (scale === 0) return undefined;
+    const scaled = vector.map((component) => component / scale) as [number, number, number];
+    const scaledLength = Math.hypot(...scaled);
+    if (scale < 1e-9 / scaledLength) return undefined;
+    return scaled.map((component) => component / scaledLength) as [number, number, number];
+  };
+  const cameraUnit = scaledUnit(pose.camera_position_direction);
+  const upUnit = scaledUnit(pose.image_up_direction);
+  if (!cameraUnit) {
     context.addIssue({ code: "custom", path: ["camera_position_direction"], message: "Camera direction must be non-zero" });
   }
-  if (upLength < 1e-9) {
+  if (!upUnit) {
     context.addIssue({ code: "custom", path: ["image_up_direction"], message: "Image-up direction must be non-zero" });
   }
-  if (cameraLength >= 1e-9 && upLength >= 1e-9) {
-    const dot = pose.camera_position_direction.reduce(
-      (sum, value, index) => sum + (value / cameraLength) * (pose.image_up_direction[index] / upLength),
-      0,
-    );
+  if (cameraUnit && upUnit) {
+    const dot = cameraUnit.reduce((sum, value, index) => sum + value * upUnit[index], 0);
     if (Math.abs(dot) >= 0.999) {
       context.addIssue({ code: "custom", path: ["image_up_direction"], message: "Pose directions must not be parallel" });
     }
