@@ -277,10 +277,13 @@ Presets are creation shortcuts. After adding a preset to a draft, the resulting 
 | `right` | `[0,-1,0]` | `[-1,0,0]` | standard | true |
 | `top` | `[1,0,0]` | `[0,-1,0]` | standard | true |
 | `detail_label` | `[0,0,1]` | `[1,0,0]` | detail | false |
+| `packaging_front` | `[0,0,1]` | `[1,0,0]` | standard | false |
 
 The `left`, `bottom`, `right`, and `top` mappings ensure the final image's left side corresponds to object back (`-Z`) and its right side corresponds to object front (`+Z`).
 
 `detail_label` is an optional starting point. The user must be able to customize its normalized target, composition, bilingual text, and reference images.
+
+`packaging_front` is an optional standard View for photographing the front of the product packaging. Its default bilingual name is `包装正面` / `Packaging Front`, and its default instruction asks the photographer to center the complete package front with all branding and labels legible. It uses the origin target `[0,0,0]` and may coexist with `reference_front` because identical poses are valid when the subject semantics and composition differ.
 
 ## 9. Composition Object
 
@@ -467,6 +470,7 @@ Required error categories include:
 - Orthogonalize image-up input.
 - Reject zero, non-finite, and nearly parallel vectors.
 - Preserve the approved six-view preset mappings.
+- Create `packaging_front` as an optional standard front View with packaging-specific bilingual text.
 - Enforce reference-front invariants.
 - Validate standard and detail targets.
 - Validate composition ranges and reject unknown properties.
@@ -493,6 +497,7 @@ Required error categories include:
 
 - Web editor starts with the locked reference-front View.
 - Preset insertion creates the approved vectors and default required-state.
+- Packaging-front insertion remains distinct from the locked product reference-front View.
 - Arbitrary-angle input shows the canonical saved vectors.
 - Detail editor limits target points to the normalized bounding box.
 - Language switching updates every SOP, View, validation, and preset label immediately.
@@ -504,6 +509,7 @@ Required error categories include:
 - A custom View can represent any valid three-dimensional camera direction and image roll.
 - Four side-face presets render object back on image-left and object front on image-right.
 - Detail Views are optional by default and support an in-bounds normalized target.
+- The optional packaging-front preset uses a front pose without replacing or weakening the mandatory product reference-front View.
 - Published versions cannot change and historical photo sessions retain exact version/View references.
 - API documents are bilingual, self-describing, and losslessly round-trip through the relational model.
 - No migration or legacy-data preservation work is included.
