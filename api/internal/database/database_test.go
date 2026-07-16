@@ -25,9 +25,14 @@ func TestMigrateCreatesAIFoundationTables(t *testing.T) {
 	if err := Migrate(db); err != nil {
 		t.Fatal(err)
 	}
-	for _, model := range []any{&models.OpenAIProviderSetting{}, &models.AIContentTemplate{}, &models.AIContentTemplateVersion{}, &models.AIContentSlot{}, &models.AIJob{}, &models.AIJobItem{}, &models.AIExecution{}, &models.AIAuditEvent{}} {
+	for _, model := range []any{&models.OpenAIProviderSetting{}, &models.AIContentTemplate{}, &models.AIContentTemplateVersion{}, &models.AIContentSlot{}, &models.AIJob{}, &models.AIJobItem{}, &models.AIExecution{}, &models.AIAuditEvent{}, &models.AIUsageLedger{}} {
 		if !db.Migrator().HasTable(model) {
 			t.Fatalf("missing table for %T", model)
+		}
+	}
+	for _, column := range []string{"l0_policy_version", "l1_product_context_version", "l2_template_version_public_id", "l3_content_slot_public_id", "normalized_input_json", "ordered_input_list_json"} {
+		if !db.Migrator().HasColumn(&models.AIExecution{}, column) {
+			t.Fatalf("missing AI execution provenance column %q", column)
 		}
 	}
 	if db.Migrator().HasColumn(&models.AIJob{}, "input_asset_ids") {
