@@ -10,6 +10,7 @@ import (
 
 	"cargoflow/api/internal/models"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
@@ -261,22 +262,28 @@ func (s *Server) listInventoryHistory(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": adjustments})
 }
 
-type photoSessionRequest struct {
-	SKUID        uint `json:"sku_id" binding:"required"`
-	SOPVersionID uint `json:"sop_version_id" binding:"required"`
+type createPhotoSessionRequest struct {
+	SKUID              uint   `json:"sku_id" binding:"required"`
+	SOPVersionPublicID string `json:"sop_version_id" binding:"required"`
 }
 
 func (s *Server) createPhotoSession(c *gin.Context) {
-	var req photoSessionRequest
+	var req createPhotoSessionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 		return
 	}
+	var sopVersion models.SOPVersion
+	if err := s.db.Where("public_id = ?", req.SOPVersionPublicID).First(&sopVersion).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "SOP version not found"})
+		return
+	}
 	user := currentUser(c)
 	session := models.PhotoSession{
+		PublicID:       uuid.NewString(),
 		Code:           fmt.Sprintf("PS-%s-%d", time.Now().Format("20060102"), time.Now().UnixNano()),
 		SKUID:          req.SKUID,
-		SOPVersionID:   req.SOPVersionID,
+		SOPVersionID:   sopVersion.ID,
 		PhotographerID: user.ID,
 		Status:         "in_progress",
 	}
