@@ -1,10 +1,12 @@
 package database
 
 import (
-	"strings"
+	"fmt"
 	"time"
 
 	"cargoflow/api/internal/models"
+	"cargoflow/api/internal/sop"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -87,6 +89,43 @@ func Seed(db *gorm.DB) error {
 		return err
 	}
 
+	captureSOP := models.CaptureSOP{PublicID: uuid.NewString(), CategoryID: phoneCase.ID, CreatedByID: users[0].ID}
+	if err := db.Create(&captureSOP).Error; err != nil {
+		return err
+	}
+	publishedAt := time.Now()
+	version := models.SOPVersion{
+		PublicID: uuid.NewString(), CaptureSOPID: captureSOP.ID, VersionNumber: 1,
+		SchemaVersion: "1.0", NameZH: "手机壳商品拍摄视图", NameEN: "Phone Case Product Capture Views",
+		DescriptionZH: "手机壳标准商品拍摄视图。", DescriptionEN: "Standard product capture views for phone cases.",
+		Status: models.SOPVersionPublished, CoordinateSystem: "pcs_object_v1", PublishedAt: &publishedAt,
+	}
+	if err := db.Create(&version).Error; err != nil {
+		return err
+	}
+	for index, key := range []string{"reference_front", "back", "left", "bottom", "right", "top", "detail_label", "packaging_front"} {
+		preset, ok := sop.PresetByKey(key)
+		if !ok {
+			return fmt.Errorf("capture SOP preset %q is unavailable", key)
+		}
+		pose, err := sop.CanonicalizePose(preset.CameraPosition, preset.ImageUp)
+		if err != nil {
+			return err
+		}
+		view := models.SOPView{
+			PublicID: uuid.NewString(), SOPVersionID: version.ID, Sequence: index + 1,
+			Role: preset.Role, ViewKind: preset.Kind, PresetKey: key,
+			NameZH: preset.NameZH, NameEN: preset.NameEN, InstructionZH: preset.InstructionZH, InstructionEN: preset.InstructionEN,
+			Required:        preset.Required,
+			CameraPositionX: pose.CameraPosition[0], CameraPositionY: pose.CameraPosition[1], CameraPositionZ: pose.CameraPosition[2],
+			ImageUpX: pose.ImageUp[0], ImageUpY: pose.ImageUp[1], ImageUpZ: pose.ImageUp[2],
+			TargetX: preset.Target[0], TargetY: preset.Target[1], TargetZ: preset.Target[2], Composition: preset.Composition,
+		}
+		if err := db.Create(&view).Error; err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -111,43 +150,5 @@ func seedCatalog(db *gorm.DB) error {
 			}
 		}
 	}
-
-	// Existing user-created categories predate bilingual fields. Preserve their
-	// value as an English fallback until an operator provides a localized name.
-	var categories []models.Category
-	if err := db.Find(&categories).Error; err != nil {
-		return err
-	}
-	for _, category := range categories {
-		if strings.TrimSpace(category.NameEN) == "" {
-			if err := db.Model(&category).Update("name_en", category.Name).Error; err != nil {
-				return err
-			}
-		}
-	}
-
-	var products []models.Product
-	if err := db.Find(&products).Error; err != nil {
-		return err
-	}
-	for _, product := range products {
-		if product.CategoryID != 0 || strings.TrimSpace(product.Category) == "" {
-			continue
-		}
-		category, err := ensureCategory(db, product.Category)
-		if err != nil {
-			return err
-		}
-		if err := db.Model(&product).Update("category_id", category.ID).Error; err != nil {
-			return err
-		}
-	}
-
 	return nil
-}
-
-func ensureCategory(db *gorm.DB, name string) (models.Category, error) {
-	category := models.Category{Name: strings.TrimSpace(name), NameEN: strings.TrimSpace(name)}
-	err := db.Where("name = ?", category.Name).FirstOrCreate(&category).Error
-	return category, err
 }

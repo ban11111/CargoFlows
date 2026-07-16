@@ -260,6 +260,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/photo-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createPhotoSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assets/upload-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createAssetUploadURL"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assets/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["completeAssetUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assets/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAssetsForReview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assets/review/hierarchy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAssetReviewHierarchy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -418,6 +498,98 @@ export interface components {
             headers: {
                 [key: string]: string;
             };
+        };
+        CreatePhotoSessionRequest: {
+            sku_id: number;
+            /** Format: uuid */
+            sop_version_id: string;
+        };
+        PhotoSession: {
+            /** Format: uuid */
+            public_id: string;
+            code: string;
+            sku_id: number;
+            /** Format: uuid */
+            sop_version_id: string;
+            /** @enum {string} */
+            status: "in_progress" | "completed";
+            /** Format: date-time */
+            created_at: string;
+        };
+        CreateAssetUploadRequest: {
+            file_name: string;
+            content_type: string;
+            /** Format: uuid */
+            photo_session_id: string;
+            /** Format: uuid */
+            sop_view_id: string;
+        };
+        CompleteAssetRequest: {
+            /** Format: uuid */
+            photo_session_id: string;
+            /** Format: uuid */
+            sop_view_id: string;
+            object_key: string;
+            original_url: string;
+            thumbnail_url?: string;
+            /** Format: date-time */
+            captured_at?: string;
+        };
+        CompletedAsset: {
+            id: number;
+            sku_id: number;
+            /** Format: uuid */
+            photo_session_id: string;
+            /** Format: uuid */
+            sop_view_id: string;
+            object_key: string;
+            original_url: string;
+            thumbnail_url: string;
+            /** @enum {string} */
+            review_status: "pending" | "approved" | "rejected";
+            /** Format: date-time */
+            captured_at: string;
+        };
+        AssetReviewItem: {
+            id: number;
+            sku_id: number;
+            original_url: string;
+            thumbnail_url: string;
+            /** @enum {string} */
+            review_status: "pending" | "approved" | "rejected";
+            /** Format: date-time */
+            captured_at: string;
+            sop_view_name: components["schemas"]["LocalizedText"];
+            photo_session_code: string;
+        };
+        Tag: {
+            id: number;
+            name: string;
+        };
+        AssetReviewSKU: {
+            id: number;
+            code: string;
+            product_name: string;
+            tags: components["schemas"]["Tag"][];
+            assets: components["schemas"]["AssetReviewHierarchyAsset"][];
+        };
+        AssetReviewHierarchyAsset: {
+            id: number;
+            original_url: string;
+            thumbnail_url: string;
+            /** @enum {string} */
+            review_status: "pending" | "approved" | "rejected";
+            /** Format: date-time */
+            captured_at: string;
+            sop_view_name: components["schemas"]["LocalizedText"];
+            photo_session_code: string;
+        };
+        AssetReviewCategory: {
+            id: number;
+            name: string;
+            name_en: string;
+            is_system: boolean;
+            skus: components["schemas"]["AssetReviewSKU"][];
         };
     };
     responses: {
@@ -993,6 +1165,146 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    createPhotoSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePhotoSessionRequest"];
+            };
+        };
+        responses: {
+            /** @description Photo session created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhotoSession"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    createAssetUploadURL: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAssetUploadRequest"];
+            };
+        };
+        responses: {
+            /** @description Upload details */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadEnvelope"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    completeAssetUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompleteAssetRequest"];
+            };
+        };
+        responses: {
+            /** @description Asset completed */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompletedAsset"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listAssetsForReview: {
+        parameters: {
+            query?: {
+                status?: "pending" | "approved" | "rejected";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Review assets */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AssetReviewItem"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listAssetReviewHierarchy: {
+        parameters: {
+            query?: {
+                status?: "pending" | "approved" | "rejected";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Review assets grouped by category and SKU */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AssetReviewCategory"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
             500: components["responses"]["InternalServerError"];
         };
     };

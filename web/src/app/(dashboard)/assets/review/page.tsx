@@ -19,7 +19,7 @@ interface Asset {
   original_url: string;
   review_status: ReviewStatus;
   captured_at: string;
-  sop_view_name: string;
+  sop_view_name: { "zh-CN": string; en: string };
   photo_session_code: string;
 }
 
@@ -100,6 +100,7 @@ export default function AssetReviewPage() {
 
   const statusLabel = (status: ReviewStatus) =>
     status === "approved" ? t("approved") : status === "rejected" ? t("rejected") : t("pendingReview");
+  const viewName = (asset: Asset) => asset.sop_view_name[language === "zh" ? "zh-CN" : "en"];
 
   return (
     <div className="space-y-6">
@@ -154,7 +155,7 @@ export default function AssetReviewPage() {
                             onClick={() => setSelectedAssetID(asset.id)}
                             type="button"
                           >
-                            <span className="min-w-0 truncate">{asset.sop_view_name}</span>
+                            <span className="min-w-0 truncate">{viewName(asset)}</span>
                             <ReviewBadge label={statusLabel(asset.review_status)} status={asset.review_status} />
                             <ChevronRight className="h-4 w-4 text-muted-foreground" />
                           </button>
@@ -176,12 +177,12 @@ export default function AssetReviewPage() {
             <div className="overflow-hidden rounded-lg border border-border bg-card">
               <div className="border-b border-border p-4">
                 <p className="text-xs text-muted-foreground">{categoryLabel(selected.category, language)}</p>
-                <p className="mt-1 font-semibold">{selected.sku.code} · {selected.asset.sop_view_name}</p>
+                <p className="mt-1 font-semibold">{selected.sku.code} · {viewName(selected.asset)}</p>
               </div>
               <div className="aspect-[4/5] bg-muted">
                 {/* MinIO image URLs are local development assets and bypass Next Image optimization. */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img alt={`${selected.sku.code} ${selected.asset.sop_view_name}`} className="h-full w-full object-contain" src={selected.asset.original_url} />
+                <img alt={`${selected.sku.code} ${viewName(selected.asset)}`} className="h-full w-full object-contain" src={selected.asset.original_url} />
               </div>
               <div className="space-y-4 p-4">
                 <div className="flex items-center justify-between gap-3">

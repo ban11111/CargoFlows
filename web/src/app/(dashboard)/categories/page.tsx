@@ -17,7 +17,7 @@ interface Category {
   name_en: string;
   is_system: boolean;
   sku_count: number;
-  sop_template_count: number;
+  capture_sop_count: number;
 }
 
 export default function CategoriesPage() {
@@ -116,7 +116,7 @@ export default function CategoriesPage() {
               )}
             </div>
             <span className="text-sm text-muted-foreground">{category.sku_count}</span>
-            <span className="text-sm text-muted-foreground">{category.sop_template_count}</span>
+            <span className="text-sm text-muted-foreground">{category.capture_sop_count}</span>
             <div className="flex justify-end">
               {category.is_system ? null : (
                 <Button

@@ -209,6 +209,64 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '500': { $ref: '#/components/responses/InternalServerError' }
+  /photo-sessions:
+    post:
+      operationId: createPhotoSession
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreatePhotoSessionRequest' } } }
+      responses:
+        '201': { description: Photo session created, content: { application/json: { schema: { $ref: '#/components/schemas/PhotoSession' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /assets/upload-url:
+    post:
+      operationId: createAssetUploadURL
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateAssetUploadRequest' } } }
+      responses:
+        '200': { description: Upload details, content: { application/json: { schema: { $ref: '#/components/schemas/UploadEnvelope' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /assets/complete:
+    post:
+      operationId: completeAssetUpload
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CompleteAssetRequest' } } }
+      responses:
+        '201': { description: Asset completed, content: { application/json: { schema: { $ref: '#/components/schemas/CompletedAsset' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /assets/review:
+    get:
+      operationId: listAssetsForReview
+      parameters:
+        - { in: query, name: status, schema: { type: string, enum: [pending, approved, rejected] } }
+      responses:
+        '200': { description: Review assets, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/AssetReviewItem' } } } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /assets/review/hierarchy:
+    get:
+      operationId: listAssetReviewHierarchy
+      parameters:
+        - { in: query, name: status, schema: { type: string, enum: [pending, approved, rejected] } }
+      responses:
+        '200': { description: Review assets grouped by category and SKU, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/AssetReviewCategory' } } } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
@@ -398,3 +456,100 @@ components:
         object_key: { type: string }
         expires_in: { type: integer }
         headers: { type: object, additionalProperties: { type: string } }
+    CreatePhotoSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [sku_id, sop_version_id]
+      properties:
+        sku_id: { type: integer, minimum: 1 }
+        sop_version_id: { type: string, format: uuid }
+    PhotoSession:
+      type: object
+      required: [public_id, code, sku_id, sop_version_id, status, created_at]
+      properties:
+        public_id: { type: string, format: uuid }
+        code: { type: string }
+        sku_id: { type: integer, minimum: 1 }
+        sop_version_id: { type: string, format: uuid }
+        status: { type: string, enum: [in_progress, completed] }
+        created_at: { type: string, format: date-time }
+    CreateAssetUploadRequest:
+      type: object
+      additionalProperties: false
+      required: [file_name, content_type, photo_session_id, sop_view_id]
+      properties:
+        file_name: { type: string, minLength: 1 }
+        content_type: { type: string, pattern: '^image/' }
+        photo_session_id: { type: string, format: uuid }
+        sop_view_id: { type: string, format: uuid }
+    CompleteAssetRequest:
+      type: object
+      additionalProperties: false
+      required: [photo_session_id, sop_view_id, object_key, original_url]
+      properties:
+        photo_session_id: { type: string, format: uuid }
+        sop_view_id: { type: string, format: uuid }
+        object_key: { type: string, minLength: 1 }
+        original_url: { type: string, minLength: 1 }
+        thumbnail_url: { type: string }
+        captured_at: { type: string, format: date-time }
+    CompletedAsset:
+      type: object
+      required: [id, sku_id, photo_session_id, sop_view_id, object_key, original_url, thumbnail_url, review_status, captured_at]
+      properties:
+        id: { type: integer, minimum: 1 }
+        sku_id: { type: integer, minimum: 1 }
+        photo_session_id: { type: string, format: uuid }
+        sop_view_id: { type: string, format: uuid }
+        object_key: { type: string }
+        original_url: { type: string }
+        thumbnail_url: { type: string }
+        review_status: { type: string, enum: [pending, approved, rejected] }
+        captured_at: { type: string, format: date-time }
+    AssetReviewItem:
+      type: object
+      required: [id, sku_id, original_url, thumbnail_url, review_status, captured_at, sop_view_name, photo_session_code]
+      properties:
+        id: { type: integer, minimum: 1 }
+        sku_id: { type: integer, minimum: 1 }
+        original_url: { type: string }
+        thumbnail_url: { type: string }
+        review_status: { type: string, enum: [pending, approved, rejected] }
+        captured_at: { type: string, format: date-time }
+        sop_view_name: { $ref: '#/components/schemas/LocalizedText' }
+        photo_session_code: { type: string }
+    Tag:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: integer, minimum: 1 }
+        name: { type: string }
+    AssetReviewSKU:
+      type: object
+      required: [id, code, product_name, tags, assets]
+      properties:
+        id: { type: integer, minimum: 1 }
+        code: { type: string }
+        product_name: { type: string }
+        tags: { type: array, items: { $ref: '#/components/schemas/Tag' } }
+        assets: { type: array, items: { $ref: '#/components/schemas/AssetReviewHierarchyAsset' } }
+    AssetReviewHierarchyAsset:
+      type: object
+      required: [id, original_url, thumbnail_url, review_status, captured_at, sop_view_name, photo_session_code]
+      properties:
+        id: { type: integer, minimum: 1 }
+        original_url: { type: string }
+        thumbnail_url: { type: string }
+        review_status: { type: string, enum: [pending, approved, rejected] }
+        captured_at: { type: string, format: date-time }
+        sop_view_name: { $ref: '#/components/schemas/LocalizedText' }
+        photo_session_code: { type: string }
+    AssetReviewCategory:
+      type: object
+      required: [id, name, name_en, is_system, skus]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        name_en: { type: string }
+        is_system: { type: boolean }
+        skus: { type: array, items: { $ref: '#/components/schemas/AssetReviewSKU' } }

@@ -81,8 +81,8 @@ func createTestSOPVersion(t *testing.T, db *gorm.DB, publicID string) models.SOP
 		NameEN:           "Test Version",
 		DescriptionZH:    "测试描述",
 		DescriptionEN:    "Test description",
-		Status:           models.SOPVersionDraft,
-		CoordinateSystem: "right_handed_y_up",
+		Status:           models.SOPVersionPublished,
+		CoordinateSystem: "pcs_object_v1",
 	}
 	if err := db.Create(&version).Error; err != nil {
 		t.Fatal(err)

@@ -13,12 +13,12 @@ import (
 )
 
 type categorySummary struct {
-	ID               uint   `json:"id"`
-	Name             string `json:"name"`
-	NameEN           string `json:"name_en"`
-	IsSystem         bool   `json:"is_system"`
-	SKUCount         int64  `json:"sku_count"`
-	SOPTemplateCount int64  `json:"sop_template_count"`
+	ID              uint   `json:"id"`
+	Name            string `json:"name"`
+	NameEN          string `json:"name_en"`
+	IsSystem        bool   `json:"is_system"`
+	SKUCount        int64  `json:"sku_count"`
+	CaptureSOPCount int64  `json:"capture_sop_count"`
 }
 
 func (s *Server) listCategories(c *gin.Context) {
@@ -30,16 +30,16 @@ func (s *Server) listCategories(c *gin.Context) {
 
 	result := make([]categorySummary, 0, len(categories))
 	for _, category := range categories {
-		var skuCount, sopTemplateCount int64
+		var skuCount, captureSOPCount int64
 		_ = s.db.Model(&models.Product{}).Where("category_id = ?", category.ID).Count(&skuCount).Error
-		_ = s.db.Model(&models.CaptureSOP{}).Where("category_id = ?", category.ID).Count(&sopTemplateCount).Error
+		_ = s.db.Model(&models.CaptureSOP{}).Where("category_id = ?", category.ID).Count(&captureSOPCount).Error
 		result = append(result, categorySummary{
-			ID:               category.ID,
-			Name:             category.Name,
-			NameEN:           category.NameEN,
-			IsSystem:         category.IsSystem,
-			SKUCount:         skuCount,
-			SOPTemplateCount: sopTemplateCount,
+			ID:              category.ID,
+			Name:            category.Name,
+			NameEN:          category.NameEN,
+			IsSystem:        category.IsSystem,
+			SKUCount:        skuCount,
+			CaptureSOPCount: captureSOPCount,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"data": result})
@@ -82,11 +82,11 @@ func (s *Server) deleteCategory(c *gin.Context) {
 		return
 	}
 
-	var productCount, sopTemplateCount int64
+	var productCount, captureSOPCount int64
 	_ = s.db.Model(&models.Product{}).Where("category_id = ?", category.ID).Count(&productCount).Error
-	_ = s.db.Model(&models.CaptureSOP{}).Where("category_id = ?", category.ID).Count(&sopTemplateCount).Error
-	if productCount > 0 || sopTemplateCount > 0 {
-		c.JSON(http.StatusConflict, gin.H{"message": "category is in use by SKU or SOP templates"})
+	_ = s.db.Model(&models.CaptureSOP{}).Where("category_id = ?", category.ID).Count(&captureSOPCount).Error
+	if productCount > 0 || captureSOPCount > 0 {
+		c.JSON(http.StatusConflict, gin.H{"message": "category is in use by SKU or capture SOPs"})
 		return
 	}
 	if err := s.db.Delete(&category).Error; err != nil {
@@ -151,13 +151,18 @@ func resolveTags(db *gorm.DB, rawTags []string) ([]models.Tag, error) {
 }
 
 type assetReviewHierarchyAsset struct {
-	ID               uint   `json:"id"`
-	OriginalURL      string `json:"original_url"`
-	ThumbnailURL     string `json:"thumbnail_url"`
-	ReviewStatus     string `json:"review_status"`
-	CapturedAt       string `json:"captured_at"`
-	SOPViewName      string `json:"sop_view_name"`
-	PhotoSessionCode string `json:"photo_session_code"`
+	ID               uint              `json:"id"`
+	OriginalURL      string            `json:"original_url"`
+	ThumbnailURL     string            `json:"thumbnail_url"`
+	ReviewStatus     string            `json:"review_status"`
+	CapturedAt       string            `json:"captured_at"`
+	SOPViewName      localizedViewName `json:"sop_view_name"`
+	PhotoSessionCode string            `json:"photo_session_code"`
+}
+
+type localizedViewName struct {
+	ZHCN string `json:"zh-CN"`
+	EN   string `json:"en"`
 }
 
 type assetReviewHierarchySKU struct {
@@ -214,7 +219,7 @@ func (s *Server) listAssetReviewHierarchy(c *gin.Context) {
 		categories[categoryPosition].SKUs[skuPosition].Assets = append(categories[categoryPosition].SKUs[skuPosition].Assets, assetReviewHierarchyAsset{
 			ID: asset.ID, OriginalURL: asset.OriginalURL, ThumbnailURL: asset.ThumbnailURL,
 			ReviewStatus: asset.ReviewStatus, CapturedAt: asset.CapturedAt.Format(time.RFC3339),
-			SOPViewName: asset.SOPView.NameEN, PhotoSessionCode: asset.PhotoSession.Code,
+			SOPViewName: localizedViewName{ZHCN: asset.SOPView.NameZH, EN: asset.SOPView.NameEN}, PhotoSessionCode: asset.PhotoSession.Code,
 		})
 	}
 

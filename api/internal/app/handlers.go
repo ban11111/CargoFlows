@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -263,60 +264,88 @@ func (s *Server) listInventoryHistory(c *gin.Context) {
 }
 
 type createPhotoSessionRequest struct {
-	SKUID              uint   `json:"sku_id" binding:"required"`
-	SOPVersionPublicID string `json:"sop_version_id" binding:"required"`
+	SKUID        uint   `json:"sku_id"`
+	SOPVersionID string `json:"sop_version_id"`
 }
+
+type photoSessionResponse struct {
+	PublicID     string    `json:"public_id"`
+	Code         string    `json:"code"`
+	SKUID        uint      `json:"sku_id"`
+	SOPVersionID string    `json:"sop_version_id"`
+	Status       string    `json:"status"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+var (
+	errCaptureVersionNotFound = errors.New("SOP version not found")
+	errVersionNotPublished    = errors.New("SOP version is not published")
+	errPhotoSessionNotFound   = errors.New("photo session not found")
+	errSOPViewNotFound        = errors.New("SOP view not found")
+	errViewVersionMismatch    = errors.New("SOP view does not belong to the session version")
+)
 
 func (s *Server) createPhotoSession(c *gin.Context) {
 	var req createPhotoSessionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
-		return
-	}
-	var sopVersion models.SOPVersion
-	if err := s.db.Where("public_id = ?", req.SOPVersionPublicID).First(&sopVersion).Error; err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "SOP version not found"})
+	if err := decodeJSONStrict(c, &req); err != nil || req.SKUID == 0 || !isUUID(req.SOPVersionID) {
+		respondSOPBadRequest(c, errOr(err, "sku_id and a UUID sop_version_id are required"))
 		return
 	}
 	user := currentUser(c)
-	session := models.PhotoSession{
-		PublicID:       uuid.NewString(),
-		Code:           fmt.Sprintf("PS-%s-%d", time.Now().Format("20060102"), time.Now().UnixNano()),
-		SKUID:          req.SKUID,
-		SOPVersionID:   sopVersion.ID,
-		PhotographerID: user.ID,
-		Status:         "in_progress",
-	}
-	if err := s.db.Create(&session).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+	var session models.PhotoSession
+	var selectedVersionPublicID string
+	err := s.db.WithContext(c).Transaction(func(tx *gorm.DB) error {
+		var version models.SOPVersion
+		if err := tx.Where("public_id = ?", req.SOPVersionID).First(&version).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errCaptureVersionNotFound
+			}
+			return err
+		}
+		if version.Status != models.SOPVersionPublished {
+			return errVersionNotPublished
+		}
+		selectedVersionPublicID = version.PublicID
+		session = models.PhotoSession{
+			PublicID: uuid.NewString(), Code: fmt.Sprintf("PS-%s-%d", time.Now().Format("20060102"), time.Now().UnixNano()),
+			SKUID: req.SKUID, SOPVersionID: version.ID, PhotographerID: user.ID, Status: "in_progress",
+		}
+		return tx.Create(&session).Error
+	})
+	if err != nil {
+		respondCaptureError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, session)
+	c.JSON(http.StatusCreated, photoSessionResponse{PublicID: session.PublicID, Code: session.Code, SKUID: session.SKUID, SOPVersionID: selectedVersionPublicID, Status: session.Status, CreatedAt: session.CreatedAt})
 }
 
 type uploadURLRequest struct {
-	FileName    string `json:"file_name" binding:"required"`
-	ContentType string `json:"content_type" binding:"required"`
-	SKUID       uint   `json:"sku_id" binding:"required"`
-	SOPViewID   uint   `json:"sop_view_id"`
+	FileName       string `json:"file_name"`
+	ContentType    string `json:"content_type"`
+	PhotoSessionID string `json:"photo_session_id"`
+	SOPViewID      string `json:"sop_view_id"`
 }
 
 func (s *Server) createUploadURL(c *gin.Context) {
 	var req uploadURLRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+	if err := decodeJSONStrict(c, &req); err != nil || strings.TrimSpace(req.FileName) == "" || !isUUID(req.PhotoSessionID) || !isUUID(req.SOPViewID) {
+		respondSOPBadRequest(c, errOr(err, "file_name, photo_session_id, and sop_view_id are required; identifiers must be UUIDs"))
 		return
 	}
 	if !strings.HasPrefix(req.ContentType, "image/") {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "only image uploads are supported"})
+		respondSOPBadRequest(c, errors.New("only image uploads are supported"))
+		return
+	}
+	if _, _, err := s.resolveCaptureBinding(c, req.PhotoSessionID, req.SOPViewID); err != nil {
+		respondCaptureError(c, err)
 		return
 	}
 
 	fileName := strings.ReplaceAll(filepath.Base(req.FileName), " ", "-")
-	objectKey := fmt.Sprintf("skus/%d/%d-%s", req.SKUID, time.Now().UnixNano(), fileName)
+	objectKey := fmt.Sprintf("photo-sessions/%s/views/%s/%d-%s", req.PhotoSessionID, req.SOPViewID, time.Now().UnixNano(), fileName)
 	uploadURL, assetURL, err := s.storage.createUploadURL(c.Request.Context(), objectKey)
 	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "prepare object storage upload failed"})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "object_storage_unavailable", "message": "prepare object storage upload failed"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -330,19 +359,35 @@ func (s *Server) createUploadURL(c *gin.Context) {
 }
 
 type completeAssetRequest struct {
-	SKUID          uint   `json:"sku_id" binding:"required"`
-	PhotoSessionID uint   `json:"photo_session_id"`
-	SOPViewID      uint   `json:"sop_view_id"`
-	ObjectKey      string `json:"object_key" binding:"required"`
-	OriginalURL    string `json:"original_url" binding:"required"`
+	PhotoSessionID string `json:"photo_session_id"`
+	SOPViewID      string `json:"sop_view_id"`
+	ObjectKey      string `json:"object_key"`
+	OriginalURL    string `json:"original_url"`
 	ThumbnailURL   string `json:"thumbnail_url"`
 	CapturedAt     string `json:"captured_at"`
 }
 
+type completedAssetResponse struct {
+	ID             uint      `json:"id"`
+	SKUID          uint      `json:"sku_id"`
+	PhotoSessionID string    `json:"photo_session_id"`
+	SOPViewID      string    `json:"sop_view_id"`
+	ObjectKey      string    `json:"object_key"`
+	OriginalURL    string    `json:"original_url"`
+	ThumbnailURL   string    `json:"thumbnail_url"`
+	ReviewStatus   string    `json:"review_status"`
+	CapturedAt     time.Time `json:"captured_at"`
+}
+
 func (s *Server) completeAssetUpload(c *gin.Context) {
 	var req completeAssetRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+	if err := decodeJSONStrict(c, &req); err != nil || !isUUID(req.PhotoSessionID) || !isUUID(req.SOPViewID) || strings.TrimSpace(req.ObjectKey) == "" || strings.TrimSpace(req.OriginalURL) == "" {
+		respondSOPBadRequest(c, errOr(err, "photo_session_id, sop_view_id, object_key, and original_url are required; identifiers must be UUIDs"))
+		return
+	}
+	session, view, err := s.resolveCaptureBinding(c, req.PhotoSessionID, req.SOPViewID)
+	if err != nil {
+		respondCaptureError(c, err)
 		return
 	}
 	capturedAt := time.Now()
@@ -352,9 +397,9 @@ func (s *Server) completeAssetUpload(c *gin.Context) {
 		}
 	}
 	asset := models.Asset{
-		SKUID:          req.SKUID,
-		PhotoSessionID: req.PhotoSessionID,
-		SOPViewID:      req.SOPViewID,
+		SKUID:          session.SKUID,
+		PhotoSessionID: session.ID,
+		SOPViewID:      view.ID,
 		ObjectKey:      req.ObjectKey,
 		OriginalURL:    req.OriginalURL,
 		ThumbnailURL:   req.ThumbnailURL,
@@ -362,10 +407,48 @@ func (s *Server) completeAssetUpload(c *gin.Context) {
 		CapturedAt:     capturedAt,
 	}
 	if err := s.db.Create(&asset).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "internal server error"})
 		return
 	}
-	c.JSON(http.StatusCreated, asset)
+	c.JSON(http.StatusCreated, completedAssetResponse{ID: asset.ID, SKUID: asset.SKUID, PhotoSessionID: session.PublicID, SOPViewID: view.PublicID, ObjectKey: asset.ObjectKey, OriginalURL: asset.OriginalURL, ThumbnailURL: asset.ThumbnailURL, ReviewStatus: asset.ReviewStatus, CapturedAt: asset.CapturedAt})
+}
+
+func (s *Server) resolveCaptureBinding(c *gin.Context, sessionPublicID, viewPublicID string) (models.PhotoSession, models.SOPView, error) {
+	var session models.PhotoSession
+	if err := s.db.WithContext(c).Where("public_id = ?", sessionPublicID).First(&session).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return session, models.SOPView{}, errPhotoSessionNotFound
+		}
+		return session, models.SOPView{}, err
+	}
+	var view models.SOPView
+	if err := s.db.WithContext(c).Where("public_id = ?", viewPublicID).First(&view).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return session, view, errSOPViewNotFound
+		}
+		return session, view, err
+	}
+	if view.SOPVersionID != session.SOPVersionID {
+		return session, view, errViewVersionMismatch
+	}
+	return session, view, nil
+}
+
+func respondCaptureError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, errVersionNotPublished):
+		c.JSON(http.StatusConflict, gin.H{"code": "version_not_published", "message": err.Error()})
+	case errors.Is(err, errViewVersionMismatch):
+		c.JSON(http.StatusConflict, gin.H{"code": "view_version_mismatch", "message": err.Error()})
+	case errors.Is(err, errCaptureVersionNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"code": "version_not_found", "message": err.Error()})
+	case errors.Is(err, errPhotoSessionNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"code": "photo_session_not_found", "message": err.Error()})
+	case errors.Is(err, errSOPViewNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"code": "sop_view_not_found", "message": err.Error()})
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "internal server error"})
+	}
 }
 
 func (s *Server) listAssetsForReview(c *gin.Context) {
@@ -378,7 +461,27 @@ func (s *Server) listAssetsForReview(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": assets})
+	items := make([]assetReviewItem, 0, len(assets))
+	for _, asset := range assets {
+		items = append(items, assetReviewItem{
+			ID: asset.ID, SKUID: asset.SKUID, OriginalURL: asset.OriginalURL, ThumbnailURL: asset.ThumbnailURL,
+			ReviewStatus: asset.ReviewStatus, CapturedAt: asset.CapturedAt,
+			SOPViewName:      localizedViewName{ZHCN: asset.SOPView.NameZH, EN: asset.SOPView.NameEN},
+			PhotoSessionCode: asset.PhotoSession.Code,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"data": items})
+}
+
+type assetReviewItem struct {
+	ID               uint              `json:"id"`
+	SKUID            uint              `json:"sku_id"`
+	OriginalURL      string            `json:"original_url"`
+	ThumbnailURL     string            `json:"thumbnail_url"`
+	ReviewStatus     string            `json:"review_status"`
+	CapturedAt       time.Time         `json:"captured_at"`
+	SOPViewName      localizedViewName `json:"sop_view_name"`
+	PhotoSessionCode string            `json:"photo_session_code"`
 }
 
 type reviewAssetRequest struct {

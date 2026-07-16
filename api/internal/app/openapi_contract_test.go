@@ -32,6 +32,11 @@ func TestCaptureSOPOpenAPIHasCompleteRuntimeErrorResponses(t *testing.T) {
 		"/sop-versions/{version_id}/views/{view_id}/reference-images":            {"post": {"201", "400", "401", "404", "409", "500"}},
 		"/sop-versions/{version_id}/views/{view_id}/reference-images/{image_id}": {"delete": {"204", "400", "401", "404", "409", "500"}},
 		"/sop-versions/{version_id}/views/{view_id}/reference-image-order":       {"put": {"200", "400", "401", "404", "409", "500"}},
+		"/photo-sessions":                                                        {"post": {"201", "400", "401", "404", "409", "500"}},
+		"/assets/upload-url":                                                     {"post": {"200", "400", "401", "404", "409", "500", "503"}},
+		"/assets/complete":                                                       {"post": {"201", "400", "401", "404", "409", "500"}},
+		"/assets/review":                                                         {"get": {"200", "401", "500"}},
+		"/assets/review/hierarchy":                                               {"get": {"200", "401", "500"}},
 	}
 	for path, methods := range expected {
 		pathItem, ok := paths[path].(map[string]any)
