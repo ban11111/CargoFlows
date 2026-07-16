@@ -1,0 +1,54 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: cargoflow
+      MYSQL_USER: cargoflow
+      MYSQL_PASSWORD: cargoflow
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: cargoflow
+      MINIO_ROOT_PASSWORD: cargoflow123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+  api:
+    build:
+      context: ./api
+    environment:
+      API_PORT: 8080
+      DB_DSN: cargoflow:cargoflow@tcp(mysql:3306)/cargoflow?charset=utf8mb4&parseTime=True&loc=Local
+      JWT_SECRET: dev-secret-change-me
+      APP_ENV: development
+      MINIO_ENDPOINT: minio:9000
+      MINIO_PUBLIC_ENDPOINT: 127.0.0.1:9000
+      MINIO_ROOT_USER: cargoflow
+      MINIO_ROOT_PASSWORD: cargoflow123
+      MINIO_BUCKET: cargoflow
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      minio:
+        condition: service_started
+
+volumes:
+  mysql-data:
+  minio-data:
