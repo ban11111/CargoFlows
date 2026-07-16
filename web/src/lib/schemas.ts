@@ -152,7 +152,7 @@ export const sopVersionSchema = z.object({
   coordinate_system: coordinateSystemSchema,
   published_at: z.string().datetime({ offset: true }).nullable().optional(),
   created_at: z.string().datetime({ offset: true }).optional(),
-  updated_at: z.string().datetime({ offset: true }).optional(),
+  updated_at: z.string().datetime({ offset: true }),
   views: z.array(sopViewSchema).min(1),
 }).strict().superRefine((version, context) => {
   const referenceCount = version.views.filter((view) => view.role === "reference_front").length;

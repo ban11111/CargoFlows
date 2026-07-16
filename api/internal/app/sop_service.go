@@ -22,7 +22,14 @@ var (
 	ErrCaptureSOPNotFound        = errors.New("capture SOP not found")
 	ErrCategoryNotFound          = errors.New("category not found")
 	ErrSourceVersionNotPublished = errors.New("source SOP version is not published")
+	ErrStaleSOPVersion           = errors.New("SOP version was changed by another editor")
 )
+
+type sopRevisionContextKey struct{}
+
+func withSOPRevision(ctx context.Context, revision time.Time) context.Context {
+	return context.WithValue(ctx, sopRevisionContextKey{}, revision)
+}
 
 type SOPValidationError struct {
 	Errors []sop.ValidationError
@@ -175,9 +182,13 @@ func (s *SOPService) UpdateVersion(ctx context.Context, publicID string, input U
 		if err := requireDraft(*version); err != nil {
 			return err
 		}
+		if err := requireSOPRevision(ctx, *version); err != nil {
+			return err
+		}
 		updates := map[string]any{
 			"name_zh": input.NameZH, "name_en": input.NameEN,
 			"description_zh": input.DescriptionZH, "description_en": input.DescriptionEN,
+			"updated_at": nextSOPRevision(version.UpdatedAt),
 		}
 		if err := tx.Model(version).Updates(updates).Error; err != nil {
 			return err
@@ -197,6 +208,9 @@ func (s *SOPService) AddView(ctx context.Context, versionPublicID string, input 
 		if err := requireDraft(*version); err != nil {
 			return err
 		}
+		if err := requireSOPRevision(ctx, *version); err != nil {
+			return err
+		}
 		viewInput, presetKey, err := resolveViewInput(input)
 		if err != nil {
 			return err
@@ -212,7 +226,10 @@ func (s *SOPService) AddView(ctx context.Context, versionPublicID string, input 
 		if err != nil {
 			return err
 		}
-		return tx.Create(&added).Error
+		if err := tx.Create(&added).Error; err != nil {
+			return err
+		}
+		return touchSOPVersion(tx, version)
 	})
 	if err != nil {
 		return nil, err
@@ -228,6 +245,9 @@ func (s *SOPService) UpdateView(ctx context.Context, versionPublicID, viewPublic
 			return err
 		}
 		if err := requireDraft(*version); err != nil {
+			return err
+		}
+		if err := requireSOPRevision(ctx, *version); err != nil {
 			return err
 		}
 		if err := tx.Where("sop_version_id = ? AND public_id = ?", version.ID, viewPublicID).First(&view).Error; err != nil {
@@ -271,7 +291,10 @@ func (s *SOPService) UpdateView(ctx context.Context, versionPublicID, viewPublic
 		if err := tx.Model(&view).Updates(updates).Error; err != nil {
 			return err
 		}
-		return tx.First(&view, view.ID).Error
+		if err := tx.First(&view, view.ID).Error; err != nil {
+			return err
+		}
+		return touchSOPVersion(tx, version)
 	})
 	if err != nil {
 		return nil, err
@@ -286,6 +309,9 @@ func (s *SOPService) DeleteView(ctx context.Context, versionPublicID, viewPublic
 			return err
 		}
 		if err := requireDraft(*version); err != nil {
+			return err
+		}
+		if err := requireSOPRevision(ctx, *version); err != nil {
 			return err
 		}
 		var view models.SOPView
@@ -305,7 +331,10 @@ func (s *SOPService) DeleteView(ctx context.Context, versionPublicID, viewPublic
 		if err := tx.Where("sop_version_id = ?", version.ID).Order("sequence ASC").Find(&remaining).Error; err != nil {
 			return err
 		}
-		return applyViewOrder(tx, version.ID, remaining)
+		if err := applyViewOrder(tx, version.ID, remaining); err != nil {
+			return err
+		}
+		return touchSOPVersion(tx, version)
 	})
 }
 
@@ -316,6 +345,9 @@ func (s *SOPService) Reorder(ctx context.Context, versionPublicID string, ordere
 			return err
 		}
 		if err := requireDraft(*version); err != nil {
+			return err
+		}
+		if err := requireSOPRevision(ctx, *version); err != nil {
 			return err
 		}
 		var views []models.SOPView
@@ -329,7 +361,10 @@ func (s *SOPService) Reorder(ctx context.Context, versionPublicID string, ordere
 		if len(ordered) == 0 || ordered[0].Role != models.SOPViewReferenceFront {
 			return ErrReferenceLocked
 		}
-		return applyViewOrder(tx, version.ID, ordered)
+		if err := applyViewOrder(tx, version.ID, ordered); err != nil {
+			return err
+		}
+		return touchSOPVersion(tx, version)
 	})
 }
 
@@ -351,15 +386,20 @@ func (s *SOPService) Publish(ctx context.Context, versionPublicID string) (*mode
 		if err := requireDraft(*version); err != nil {
 			return err
 		}
+		if err := requireSOPRevision(ctx, *version); err != nil {
+			return err
+		}
 		if validationErrors := sop.ValidateVersion(*version); len(validationErrors) != 0 {
 			return &SOPValidationError{Errors: validationErrors}
 		}
 		now := time.Now()
-		if err := tx.Model(version).Updates(map[string]any{"status": models.SOPVersionPublished, "published_at": &now}).Error; err != nil {
+		revision := nextSOPRevision(version.UpdatedAt)
+		if err := tx.Model(version).Updates(map[string]any{"status": models.SOPVersionPublished, "published_at": &now, "updated_at": revision}).Error; err != nil {
 			return err
 		}
 		version.Status = models.SOPVersionPublished
 		version.PublishedAt = &now
+		version.UpdatedAt = revision
 		published = version
 		return nil
 	})
@@ -446,7 +486,9 @@ func (s *SOPService) AddReferenceImage(ctx context.Context, versionPublicID, vie
 		if err != nil {
 			return err
 		}
-		_ = version
+		if err := requireSOPRevision(ctx, *version); err != nil {
+			return err
+		}
 		var images []models.SOPViewReferenceImage
 		if err := tx.Where("sop_view_id = ?", view.ID).Order("sort_order ASC").Find(&images).Error; err != nil {
 			return err
@@ -476,7 +518,10 @@ func (s *SOPService) AddReferenceImage(ctx context.Context, versionPublicID, vie
 			PublicID: uuid.NewString(), SOPViewID: view.ID, ObjectKey: input.ObjectKey,
 			ThumbnailURL: input.ThumbnailURL, SortOrder: position, CaptionZH: input.CaptionZH, CaptionEN: input.CaptionEN,
 		}
-		return tx.Create(&added).Error
+		if err := tx.Create(&added).Error; err != nil {
+			return err
+		}
+		return touchSOPVersion(tx, version)
 	})
 	if err != nil {
 		return nil, err
@@ -486,8 +531,11 @@ func (s *SOPService) AddReferenceImage(ctx context.Context, versionPublicID, vie
 
 func (s *SOPService) DeleteReferenceImage(ctx context.Context, versionPublicID, viewPublicID, imagePublicID string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		_, view, err := draftVersionAndView(tx, versionPublicID, viewPublicID)
+		version, view, err := draftVersionAndView(tx, versionPublicID, viewPublicID)
 		if err != nil {
+			return err
+		}
+		if err := requireSOPRevision(ctx, *version); err != nil {
 			return err
 		}
 		var image models.SOPViewReferenceImage
@@ -501,14 +549,20 @@ func (s *SOPService) DeleteReferenceImage(ctx context.Context, versionPublicID, 
 		if err := tx.Where("sop_view_id = ?", view.ID).Order("sort_order ASC").Find(&remaining).Error; err != nil {
 			return err
 		}
-		return applyReferenceImageOrder(tx, view.ID, remaining)
+		if err := applyReferenceImageOrder(tx, view.ID, remaining); err != nil {
+			return err
+		}
+		return touchSOPVersion(tx, version)
 	})
 }
 
 func (s *SOPService) ReorderReferenceImages(ctx context.Context, versionPublicID, viewPublicID string, orderedImageIDs []string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		_, view, err := draftVersionAndView(tx, versionPublicID, viewPublicID)
+		version, view, err := draftVersionAndView(tx, versionPublicID, viewPublicID)
 		if err != nil {
+			return err
+		}
+		if err := requireSOPRevision(ctx, *version); err != nil {
 			return err
 		}
 		var images []models.SOPViewReferenceImage
@@ -519,7 +573,10 @@ func (s *SOPService) ReorderReferenceImages(ctx context.Context, versionPublicID
 		if err != nil {
 			return err
 		}
-		return applyReferenceImageOrder(tx, view.ID, ordered)
+		if err := applyReferenceImageOrder(tx, view.ID, ordered); err != nil {
+			return err
+		}
+		return touchSOPVersion(tx, version)
 	})
 }
 
@@ -550,6 +607,35 @@ func requireDraft(version models.SOPVersion) error {
 	if version.Status != models.SOPVersionDraft {
 		return ErrVersionImmutable
 	}
+	return nil
+}
+
+func requireSOPRevision(ctx context.Context, version models.SOPVersion) error {
+	expected, ok := ctx.Value(sopRevisionContextKey{}).(time.Time)
+	if ok && !version.UpdatedAt.Equal(expected) {
+		return ErrStaleSOPVersion
+	}
+	return nil
+}
+
+func nextSOPRevision(previous time.Time) time.Time {
+	next := time.Now().UTC()
+	// MySQL timestamps are stored with millisecond precision in this project.
+	// Advancing by at least one millisecond keeps the token distinct even for
+	// two mutations handled inside the same clock tick.
+	minimum := previous.Add(time.Millisecond)
+	if next.Before(minimum) {
+		return minimum
+	}
+	return next
+}
+
+func touchSOPVersion(tx *gorm.DB, version *models.SOPVersion) error {
+	next := nextSOPRevision(version.UpdatedAt)
+	if err := tx.Model(version).UpdateColumn("updated_at", next).Error; err != nil {
+		return err
+	}
+	version.UpdatedAt = next
 	return nil
 }
 

@@ -12,6 +12,7 @@ const archivedSOPID = "88888888-8888-4888-8888-888888888888";
 const published = {
   schema_version: "1.0", public_id: "33333333-3333-4333-8333-333333333333", sop_public_id: sopID,
   version_number: 1, status: "published", name: { "zh-CN": "手机壳拍摄", en: "Phone Case Capture" },
+  updated_at: "2026-07-16T10:00:00.000Z",
   description: { "zh-CN": "", en: "" }, coordinate_system: { id: "pcs_object_v1", handedness: "right_handed", origin: "bounding_box_center", unit: "normalized", axes: { x_positive: "object_top", y_positive: "object_left", z_positive: "object_front" } }, views: [],
 };
 const draft = { ...published, public_id: "55555555-5555-4555-8555-555555555555", version_number: 2, status: "draft", name: { "zh-CN": "新建草稿 SOP", en: "New Draft SOP" } };

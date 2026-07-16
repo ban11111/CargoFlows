@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"cargoflow/api/internal/config"
 	"cargoflow/api/internal/models"
@@ -32,11 +33,146 @@ func sopRequest(t *testing.T, server *httptest.Server, token, method, path, body
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
+	if draftMutationPath(method, path) {
+		req.Header.Set("X-SOP-Version-Updated-At", currentSOPRevision(t, server, token, path))
+	}
 	response, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return response
+}
+
+func draftMutationPath(method, path string) bool {
+	if method != http.MethodPatch && method != http.MethodPost && method != http.MethodPut && method != http.MethodDelete {
+		return false
+	}
+	return strings.HasPrefix(path, "/api/v1/sop-versions/") &&
+		!strings.HasSuffix(path, "/validate") && !strings.HasSuffix(path, "/archive") && !strings.HasSuffix(path, "/upload-url")
+}
+
+func currentSOPRevision(t *testing.T, server *httptest.Server, token, mutationPath string) string {
+	t.Helper()
+	rest := strings.TrimPrefix(mutationPath, "/api/v1/sop-versions/")
+	versionID := strings.SplitN(rest, "/", 2)[0]
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/sop-versions/"+versionID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var document struct {
+		UpdatedAt string `json:"updated_at"`
+	}
+	if response.StatusCode != http.StatusOK || json.NewDecoder(response.Body).Decode(&document) != nil || document.UpdatedAt == "" {
+		return time.Time{}.Format(time.RFC3339Nano)
+	}
+	return document.UpdatedAt
+}
+
+func sopRequestWithRevision(t *testing.T, server *httptest.Server, token, method, path, body, updatedAt string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(method, server.URL+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	if updatedAt != "" {
+		req.Header.Set("X-SOP-Version-Updated-At", updatedAt)
+	}
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return response
+}
+
+func TestDraftMutationRejectsMissingAndStaleAggregateRevision(t *testing.T) {
+	db := newTestDB(t)
+	category, user := seedSOPCategoryAndUser(t, db)
+	created := createTestSOP(t, NewSOPService(db), category, user)
+	server, token := authenticatedSOPRouter(t, db, user)
+	defer server.Close()
+	path := "/api/v1/sop-versions/" + created.Version.PublicID
+	body := `{"name":{"zh-CN":"第一次保存","en":"First save"},"description":{"zh-CN":"","en":""}}`
+
+	missing := sopRequestWithRevision(t, server, token, http.MethodPatch, path, body, "")
+	defer missing.Body.Close()
+	assertHTTPErrorResponse(t, missing, http.StatusPreconditionRequired, "sop_revision_required")
+
+	first := sopRequestWithRevision(t, server, token, http.MethodPatch, path, body, created.Version.UpdatedAt.Format(time.RFC3339Nano))
+	defer first.Body.Close()
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("first mutation status = %d", first.StatusCode)
+	}
+	var saved struct {
+		UpdatedAt time.Time `json:"updated_at"`
+	}
+	if err := json.NewDecoder(first.Body).Decode(&saved); err != nil {
+		t.Fatal(err)
+	}
+	if !saved.UpdatedAt.After(created.Version.UpdatedAt) {
+		t.Fatalf("updated_at did not advance: old=%s new=%s", created.Version.UpdatedAt, saved.UpdatedAt)
+	}
+
+	stale := sopRequestWithRevision(t, server, token, http.MethodPatch, path, `{"name":{"zh-CN":"静默覆盖","en":"Overwrite"},"description":{"zh-CN":"","en":""}}`, created.Version.UpdatedAt.Format(time.RFC3339Nano))
+	defer stale.Body.Close()
+	assertHTTPErrorResponse(t, stale, http.StatusConflict, "stale_sop_version")
+
+	stored, err := NewSOPService(db).GetVersion(t.Context(), created.Version.PublicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.NameZH != "第一次保存" {
+		t.Fatalf("stale mutation overwrote name: %q", stored.NameZH)
+	}
+}
+
+func TestEveryDraftAggregateMutationRequiresRevision(t *testing.T) {
+	db := newTestDB(t)
+	_, user := seedSOPCategoryAndUser(t, db)
+	server, token := authenticatedSOPRouter(t, db, user)
+	defer server.Close()
+	versionID, viewID, imageID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	tests := []struct{ method, path string }{
+		{http.MethodPatch, "/api/v1/sop-versions/" + versionID},
+		{http.MethodPost, "/api/v1/sop-versions/" + versionID + "/views"},
+		{http.MethodPatch, "/api/v1/sop-versions/" + versionID + "/views/" + viewID},
+		{http.MethodDelete, "/api/v1/sop-versions/" + versionID + "/views/" + viewID},
+		{http.MethodPut, "/api/v1/sop-versions/" + versionID + "/view-order"},
+		{http.MethodPost, "/api/v1/sop-versions/" + versionID + "/publish"},
+		{http.MethodPost, "/api/v1/sop-versions/" + versionID + "/views/" + viewID + "/reference-images"},
+		{http.MethodDelete, "/api/v1/sop-versions/" + versionID + "/views/" + viewID + "/reference-images/" + imageID},
+		{http.MethodPut, "/api/v1/sop-versions/" + versionID + "/views/" + viewID + "/reference-image-order"},
+	}
+	for _, test := range tests {
+		t.Run(test.method+" "+test.path, func(t *testing.T) {
+			response := sopRequestWithRevision(t, server, token, test.method, test.path, `{}`, "")
+			defer response.Body.Close()
+			assertHTTPErrorResponse(t, response, http.StatusPreconditionRequired, "sop_revision_required")
+		})
+	}
+}
+
+func assertHTTPErrorResponse(t *testing.T, response *http.Response, status int, code string) {
+	t.Helper()
+	if response.StatusCode != status {
+		t.Fatalf("status = %d, want %d", response.StatusCode, status)
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Code != code {
+		t.Fatalf("code = %q, want %q", body.Code, code)
+	}
 }
 
 func TestCreateCaptureSOPReturnsReferenceVersionDocument(t *testing.T) {

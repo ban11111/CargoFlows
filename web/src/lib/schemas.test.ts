@@ -43,6 +43,7 @@ const baseVersion = {
   sop_public_id: "4acdab9e-f8b8-4783-8cbf-94e10de4f838",
   version_number: 1,
   status: "draft",
+  updated_at: "2026-07-16T10:00:00.000Z",
   name: { "zh-CN": "手机壳", en: "Phone Case" },
   description: { "zh-CN": "", en: "" },
   coordinate_system: {

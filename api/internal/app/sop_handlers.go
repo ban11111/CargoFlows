@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -185,6 +186,10 @@ func (s *Server) updateSOPVersion(c *gin.Context) {
 	if !requireUUIDParam(c, "version_id") {
 		return
 	}
+	ctx, ok := requireSOPRevisionHeader(c)
+	if !ok {
+		return
+	}
 	var req updateSOPVersionRequest
 	if err := decodeJSONStrict(c, &req); err != nil {
 		respondSOPBadRequest(c, err)
@@ -200,7 +205,7 @@ func (s *Server) updateSOPVersion(c *gin.Context) {
 		respondSOPBadRequest(c, err)
 		return
 	}
-	version, err := NewSOPService(s.db).UpdateVersion(c, c.Param("version_id"), UpdateVersionInput{NameZH: name.ZHCN, NameEN: name.EN, DescriptionZH: description.ZHCN, DescriptionEN: description.EN})
+	version, err := NewSOPService(s.db).UpdateVersion(ctx, c.Param("version_id"), UpdateVersionInput{NameZH: name.ZHCN, NameEN: name.EN, DescriptionZH: description.ZHCN, DescriptionEN: description.EN})
 	if err != nil {
 		respondSOPError(c, err)
 		return
@@ -210,6 +215,10 @@ func (s *Server) updateSOPVersion(c *gin.Context) {
 
 func (s *Server) addSOPView(c *gin.Context) {
 	if !requireUUIDParam(c, "version_id") {
+		return
+	}
+	ctx, ok := requireSOPRevisionHeader(c)
+	if !ok {
 		return
 	}
 	var req addSOPViewRequest
@@ -233,7 +242,7 @@ func (s *Server) addSOPView(c *gin.Context) {
 		}
 		input.Custom = &custom
 	}
-	if _, err := NewSOPService(s.db).AddView(c, c.Param("version_id"), input); err != nil {
+	if _, err := NewSOPService(s.db).AddView(ctx, c.Param("version_id"), input); err != nil {
 		respondSOPError(c, err)
 		return
 	}
@@ -242,6 +251,10 @@ func (s *Server) addSOPView(c *gin.Context) {
 
 func (s *Server) updateSOPView(c *gin.Context) {
 	if !requireUUIDParam(c, "version_id") || !requireUUIDParam(c, "view_id") {
+		return
+	}
+	ctx, ok := requireSOPRevisionHeader(c)
+	if !ok {
 		return
 	}
 	var req viewMutationRequest
@@ -254,7 +267,7 @@ func (s *Server) updateSOPView(c *gin.Context) {
 		respondSOPBadRequest(c, err)
 		return
 	}
-	_, err = NewSOPService(s.db).UpdateView(c, c.Param("version_id"), c.Param("view_id"), UpdateViewInput{Role: viewInput.Role, ViewKind: viewInput.Kind, NameZH: viewInput.NameZH, NameEN: viewInput.NameEN, InstructionZH: viewInput.InstructionZH, InstructionEN: viewInput.InstructionEN, Required: viewInput.Required, CameraPosition: viewInput.CameraPosition, ImageUp: viewInput.ImageUp, Target: viewInput.Target, Composition: viewInput.Composition})
+	_, err = NewSOPService(s.db).UpdateView(ctx, c.Param("version_id"), c.Param("view_id"), UpdateViewInput{Role: viewInput.Role, ViewKind: viewInput.Kind, NameZH: viewInput.NameZH, NameEN: viewInput.NameEN, InstructionZH: viewInput.InstructionZH, InstructionEN: viewInput.InstructionEN, Required: viewInput.Required, CameraPosition: viewInput.CameraPosition, ImageUp: viewInput.ImageUp, Target: viewInput.Target, Composition: viewInput.Composition})
 	if err != nil {
 		respondSOPError(c, err)
 		return
@@ -266,15 +279,23 @@ func (s *Server) deleteSOPView(c *gin.Context) {
 	if !requireUUIDParam(c, "version_id") || !requireUUIDParam(c, "view_id") {
 		return
 	}
-	if err := NewSOPService(s.db).DeleteView(c, c.Param("version_id"), c.Param("view_id")); err != nil {
+	ctx, ok := requireSOPRevisionHeader(c)
+	if !ok {
+		return
+	}
+	if err := NewSOPService(s.db).DeleteView(ctx, c.Param("version_id"), c.Param("view_id")); err != nil {
 		respondSOPError(c, err)
 		return
 	}
-	c.Status(http.StatusNoContent)
+	s.respondVersion(c, http.StatusOK, c.Param("version_id"))
 }
 
 func (s *Server) reorderSOPViews(c *gin.Context) {
 	if !requireUUIDParam(c, "version_id") {
+		return
+	}
+	ctx, ok := requireSOPRevisionHeader(c)
+	if !ok {
 		return
 	}
 	var req reorderRequest
@@ -282,7 +303,7 @@ func (s *Server) reorderSOPViews(c *gin.Context) {
 		respondSOPBadRequest(c, errOr(err, "public_ids must contain UUIDs"))
 		return
 	}
-	if err := NewSOPService(s.db).Reorder(c, c.Param("version_id"), *req.PublicIDs); err != nil {
+	if err := NewSOPService(s.db).Reorder(ctx, c.Param("version_id"), *req.PublicIDs); err != nil {
 		respondSOPError(c, err)
 		return
 	}
@@ -309,7 +330,11 @@ func (s *Server) publishSOPVersion(c *gin.Context) {
 	if !requireUUIDParam(c, "version_id") {
 		return
 	}
-	version, err := NewSOPService(s.db).Publish(c, c.Param("version_id"))
+	ctx, ok := requireSOPRevisionHeader(c)
+	if !ok {
+		return
+	}
+	version, err := NewSOPService(s.db).Publish(ctx, c.Param("version_id"))
 	if err != nil {
 		respondSOPError(c, err)
 		return
@@ -383,6 +408,10 @@ func (s *Server) addSOPReferenceImage(c *gin.Context) {
 	if !requireUUIDParam(c, "version_id") || !requireUUIDParam(c, "view_id") {
 		return
 	}
+	ctx, ok := requireSOPRevisionHeader(c)
+	if !ok {
+		return
+	}
 	var req struct {
 		ObjectKey    *string               `json:"object_key"`
 		ThumbnailURL *string               `json:"thumbnail_url"`
@@ -411,27 +440,35 @@ func (s *Server) addSOPReferenceImage(c *gin.Context) {
 	if req.SortOrder != nil {
 		sortOrder = *req.SortOrder
 	}
-	image, err := NewSOPService(s.db).AddReferenceImage(c, c.Param("version_id"), c.Param("view_id"), ReferenceImageInput{ObjectKey: *req.ObjectKey, ThumbnailURL: *req.ThumbnailURL, CaptionZH: caption.ZHCN, CaptionEN: caption.EN, SortOrder: sortOrder})
+	_, err = NewSOPService(s.db).AddReferenceImage(ctx, c.Param("version_id"), c.Param("view_id"), ReferenceImageInput{ObjectKey: *req.ObjectKey, ThumbnailURL: *req.ThumbnailURL, CaptionZH: caption.ZHCN, CaptionEN: caption.EN, SortOrder: sortOrder})
 	if err != nil {
 		respondSOPError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, referenceImageDTO{PublicID: image.PublicID, ObjectKey: image.ObjectKey, ThumbnailURL: image.ThumbnailURL, SortOrder: image.SortOrder, Caption: localizedTextDTO{ZHCN: image.CaptionZH, EN: image.CaptionEN}, CreatedAt: image.CreatedAt})
+	s.respondVersion(c, http.StatusCreated, c.Param("version_id"))
 }
 
 func (s *Server) deleteSOPReferenceImage(c *gin.Context) {
 	if !requireUUIDParam(c, "version_id") || !requireUUIDParam(c, "view_id") || !requireUUIDParam(c, "image_id") {
 		return
 	}
-	if err := NewSOPService(s.db).DeleteReferenceImage(c, c.Param("version_id"), c.Param("view_id"), c.Param("image_id")); err != nil {
+	ctx, ok := requireSOPRevisionHeader(c)
+	if !ok {
+		return
+	}
+	if err := NewSOPService(s.db).DeleteReferenceImage(ctx, c.Param("version_id"), c.Param("view_id"), c.Param("image_id")); err != nil {
 		respondSOPError(c, err)
 		return
 	}
-	c.Status(http.StatusNoContent)
+	s.respondVersion(c, http.StatusOK, c.Param("version_id"))
 }
 
 func (s *Server) reorderSOPReferenceImages(c *gin.Context) {
 	if !requireUUIDParam(c, "version_id") || !requireUUIDParam(c, "view_id") {
+		return
+	}
+	ctx, ok := requireSOPRevisionHeader(c)
+	if !ok {
 		return
 	}
 	var req reorderRequest
@@ -439,7 +476,7 @@ func (s *Server) reorderSOPReferenceImages(c *gin.Context) {
 		respondSOPBadRequest(c, errOr(err, "public_ids must contain UUIDs"))
 		return
 	}
-	if err := NewSOPService(s.db).ReorderReferenceImages(c, c.Param("version_id"), c.Param("view_id"), *req.PublicIDs); err != nil {
+	if err := NewSOPService(s.db).ReorderReferenceImages(ctx, c.Param("version_id"), c.Param("view_id"), *req.PublicIDs); err != nil {
 		respondSOPError(c, err)
 		return
 	}
@@ -541,6 +578,8 @@ func respondSOPError(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
 	case errors.Is(err, ErrVersionImmutable):
 		c.JSON(http.StatusConflict, gin.H{"code": "version_immutable", "message": err.Error()})
+	case errors.Is(err, ErrStaleSOPVersion):
+		c.JSON(http.StatusConflict, gin.H{"code": "stale_sop_version", "message": err.Error()})
 	case errors.Is(err, ErrReferenceLocked):
 		c.JSON(http.StatusConflict, gin.H{"code": "reference_front_locked", "message": err.Error()})
 	case errors.Is(err, ErrDraftExists):
@@ -554,6 +593,20 @@ func respondSOPError(c *gin.Context, err error) {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "internal server error"})
 		}
 	}
+}
+
+func requireSOPRevisionHeader(c *gin.Context) (context.Context, bool) {
+	value := c.GetHeader("X-SOP-Version-Updated-At")
+	if value == "" {
+		c.JSON(http.StatusPreconditionRequired, gin.H{"code": "sop_revision_required", "message": "X-SOP-Version-Updated-At is required"})
+		return nil, false
+	}
+	revision, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_sop_revision", "message": "X-SOP-Version-Updated-At must be an RFC 3339 timestamp"})
+		return nil, false
+	}
+	return withSOPRevision(c.Request.Context(), revision), true
 }
 
 func isInputError(err error) bool {

@@ -14,6 +14,7 @@ const backID = "22222222-2222-4222-8222-222222222222";
 const versionID = "33333333-3333-4333-8333-333333333333";
 const sopID = "44444444-4444-4444-8444-444444444444";
 const detailID = "77777777-7777-4777-8777-777777777777";
+const initialRevision = "2026-07-16T10:00:00.000Z";
 
 const referenceView = {
   public_id: referenceID,
@@ -66,6 +67,7 @@ const draftFixture: SOPVersion = {
   sop_public_id: sopID,
   version_number: 1,
   status: "draft",
+  updated_at: initialRevision,
   name: { "zh-CN": "手机壳拍摄", en: "Phone Case Capture" },
   description: { "zh-CN": "电商拍摄规范", en: "E-commerce capture specification" },
   coordinate_system: {
@@ -153,8 +155,26 @@ describe("SOPVersionEditor", () => {
     expect(screen.getByLabelText("Packaging Front 必拍")).not.toBeChecked();
     expect(fetchMock).toHaveBeenCalledWith(
       `/api/proxy/sop-versions/${versionID}/views`,
-      expect.objectContaining({ method: "POST", body: JSON.stringify({ preset_key: "packaging_front" }) }),
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ preset_key: "packaging_front" }), headers: expect.objectContaining({ "X-SOP-Version-Updated-At": initialRevision }) }),
     );
+  });
+
+  it("chains the confirmed updated_at token across draft mutations", async () => {
+    const nextRevision = "2026-07-16T10:00:00.001Z";
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockImplementationOnce(() => response({ ...draftFixture, updated_at: nextRevision, name: { ...draftFixture.name, "zh-CN": "第一次" } }))
+      .mockImplementationOnce(() => response({ ...draftFixture, updated_at: "2026-07-16T10:00:00.002Z", name: { ...draftFixture.name, "zh-CN": "第二次" } }));
+    renderEditor();
+
+    fireEvent.change(screen.getByLabelText("SOP 中文名称"), { target: { value: "第一次" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存版本信息" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByLabelText("SOP 中文名称"), { target: { value: "第二次" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存版本信息" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).toEqual(expect.objectContaining({ "X-SOP-Version-Updated-At": initialRevision }));
+    expect((fetchMock.mock.calls[1][1] as RequestInit).headers).toEqual(expect.objectContaining({ "X-SOP-Version-Updated-At": nextRevision }));
   });
 
   it.each(["published", "archived"] as const)("makes every field read-only for a %s version", (status) => {
@@ -380,10 +400,10 @@ describe("SOPVersionEditor", () => {
         object_key: objectKey, expires_in: 900, headers: { "content-type": "image/jpeg" },
       });
       if (url === "https://uploads.example/sample.jpg") return response(undefined, 204);
-      if (url.endsWith("/reference-images")) return response({
+      if (url.endsWith("/reference-images")) return response({ ...draftFixture, updated_at: "2026-07-16T10:00:00.001Z", views: [referenceView, { ...backView, reference_images: [{
         public_id: "66666666-6666-4666-8666-666666666666", object_key: objectKey,
         thumbnail_url: "/media/sample.jpg", sort_order: 1, caption: { "zh-CN": "", en: "" },
-      }, 201);
+      }] }] }, 201);
       throw new Error(`Unexpected request ${url}`);
     });
     const { client } = renderEditorWithClient();
@@ -419,7 +439,7 @@ describe("SOPVersionEditor", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       if (init?.method === "PUT") return response(reordered);
-      if (init?.method === "DELETE") return response(undefined, 204);
+      if (init?.method === "DELETE") return response({ ...reordered, updated_at: "2026-07-16T10:00:00.002Z", views: [referenceView, { ...backView, reference_images: [{ ...firstImage, sort_order: 1 }] }] });
       throw new Error(`Unexpected request ${String(input)}`);
     });
     const { client } = renderEditorWithClient(withImages);

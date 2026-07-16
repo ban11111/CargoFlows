@@ -114,7 +114,7 @@ export function SOPVersionEditor({ initialVersion, onVersionChange }: SOPVersion
     }
     await run("metadata", async () => {
       const confirmed = await apiRequest<SOPVersion>(`/sop-versions/${version.public_id}`, {
-        method: "PATCH", body: JSON.stringify({ name: version.name, description: version.description }),
+        method: "PATCH", body: JSON.stringify({ name: version.name, description: version.description }), headers: sopRevisionHeaders(version),
       });
       const merged = { ...version, name: confirmed.name, description: confirmed.description, updated_at: confirmed.updated_at };
       setVersion(merged);
@@ -133,7 +133,7 @@ export function SOPVersionEditor({ initialVersion, onVersionChange }: SOPVersion
     const { role, view_kind, name, instruction, required, pose, composition } = parsed.data;
     await run(`view-${view.public_id}`, async () => {
       const confirmed = await apiRequest<SOPVersion>(`/sop-versions/${version.public_id}/views/${view.public_id}`, {
-        method: "PATCH", body: JSON.stringify({ role, view_kind, name, instruction, required, pose, composition }),
+        method: "PATCH", body: JSON.stringify({ role, view_kind, name, instruction, required, pose, composition }), headers: sopRevisionHeaders(version),
       });
       const confirmedView = confirmed.views.find((item) => item.public_id === view.public_id);
       if (!confirmedView) throw new Error("saved view missing from response");
@@ -148,15 +148,14 @@ export function SOPVersionEditor({ initialVersion, onVersionChange }: SOPVersion
 
   async function addPreset(presetKey: SOPPresetKey) {
     await run("add", async () => replaceVersion(await apiRequest<SOPVersion>(`/sop-versions/${version.public_id}/views`, {
-      method: "POST", body: JSON.stringify({ preset_key: presetKey }),
+      method: "POST", body: JSON.stringify({ preset_key: presetKey }), headers: sopRevisionHeaders(version),
     })));
   }
 
   async function deleteView(view: SOPView) {
     if (!window.confirm(`${language === "zh" ? "删除" : "Delete"} ${localizedText(language, view.name)}?`)) return;
     await run(`view-${view.public_id}`, async () => {
-      await apiRequest<void>(`/sop-versions/${version.public_id}/views/${view.public_id}`, { method: "DELETE" });
-      replaceVersion({ ...version, views: version.views.filter((item) => item.public_id !== view.public_id).map((item, index) => ({ ...item, sequence: index + 1 })) });
+      replaceVersion(await apiRequest<SOPVersion>(`/sop-versions/${version.public_id}/views/${view.public_id}`, { method: "DELETE", headers: sopRevisionHeaders(version) }));
     });
   }
 
@@ -166,7 +165,7 @@ export function SOPVersionEditor({ initialVersion, onVersionChange }: SOPVersion
     if (destination !== index) [next[index], next[destination]] = [next[destination], next[index]];
     const publicIDs = next.map((view) => view.public_id);
     await run("reorder", async () => replaceVersion(await apiRequest<SOPVersion>(`/sop-versions/${version.public_id}/view-order`, {
-      method: "PUT", body: JSON.stringify({ public_ids: publicIDs }),
+      method: "PUT", body: JSON.stringify({ public_ids: publicIDs }), headers: sopRevisionHeaders(version),
     })));
   }
 
@@ -179,7 +178,7 @@ export function SOPVersionEditor({ initialVersion, onVersionChange }: SOPVersion
     await run("publish", async () => {
       const validation = await apiRequest<ValidationResponse>(`/sop-versions/${version.public_id}/validate`, { method: "POST", body: "{}" });
       if (validation.errors.length) { setErrors(validation.errors); return; }
-      replaceVersion(await apiRequest<SOPVersion>(`/sop-versions/${version.public_id}/publish`, { method: "POST", body: "{}" }));
+      replaceVersion(await apiRequest<SOPVersion>(`/sop-versions/${version.public_id}/publish`, { method: "POST", body: "{}", headers: sopRevisionHeaders(version) }));
     });
   }
 
@@ -202,12 +201,10 @@ export function SOPVersionEditor({ initialVersion, onVersionChange }: SOPVersion
       });
       const result = await fetch(upload.upload_url, { method: upload.method, headers: upload.headers, body: file });
       if (!result.ok) throw new Error("reference upload failed");
-      const image = await apiRequest<SOPView["reference_images"][number]>(`/sop-versions/${version.public_id}/views/${view.public_id}/reference-images`, {
-        method: "POST", body: JSON.stringify({ object_key: upload.object_key, thumbnail_url: upload.asset_url, caption }),
+      const confirmed = await apiRequest<SOPVersion>(`/sop-versions/${version.public_id}/views/${view.public_id}/reference-images`, {
+        method: "POST", body: JSON.stringify({ object_key: upload.object_key, thumbnail_url: upload.asset_url, caption }), headers: sopRevisionHeaders(version),
       });
-      const next = { ...version, views: version.views.map((item, index) => index === viewIndex ? { ...view, reference_images: [...view.reference_images, image] } : item) };
-      setVersion(next);
-      syncConfirmedVersion(next);
+      replaceVersion(confirmed);
     });
   }
 
@@ -215,10 +212,7 @@ export function SOPVersionEditor({ initialVersion, onVersionChange }: SOPVersion
     if (!window.confirm(language === "zh" ? "删除这张参考图？" : "Delete this reference image?")) return;
     const view = version.views[viewIndex];
     await run(`reference-${view.public_id}`, async () => {
-      await apiRequest<void>(`/sop-versions/${version.public_id}/views/${view.public_id}/reference-images/${imageID}`, { method: "DELETE" });
-      const next = { ...version, views: version.views.map((item, index) => index === viewIndex ? { ...view, reference_images: view.reference_images.filter((image) => image.public_id !== imageID).map((image, imageIndex) => ({ ...image, sort_order: imageIndex + 1 })) } : item) };
-      setVersion(next);
-      syncConfirmedVersion(next);
+      replaceVersion(await apiRequest<SOPVersion>(`/sop-versions/${version.public_id}/views/${view.public_id}/reference-images/${imageID}`, { method: "DELETE", headers: sopRevisionHeaders(version) }));
     });
   }
 
@@ -230,7 +224,7 @@ export function SOPVersionEditor({ initialVersion, onVersionChange }: SOPVersion
     const images = [...view.reference_images];
     [images[index], images[destination]] = [images[destination], images[index]];
     await run(`reference-${view.public_id}`, async () => replaceVersion(await apiRequest<SOPVersion>(`/sop-versions/${version.public_id}/views/${view.public_id}/reference-image-order`, {
-      method: "PUT", body: JSON.stringify({ public_ids: images.map((image) => image.public_id) }),
+      method: "PUT", body: JSON.stringify({ public_ids: images.map((image) => image.public_id) }), headers: sopRevisionHeaders(version),
     })));
   }
 
@@ -271,6 +265,11 @@ export function SOPVersionEditor({ initialVersion, onVersionChange }: SOPVersion
       </div>
     </div>
   );
+}
+
+function sopRevisionHeaders(version: SOPVersion) {
+  if (!version.updated_at) throw new Error("SOP version updated_at is required for mutation");
+  return { "X-SOP-Version-Updated-At": version.updated_at };
 }
 
 function Field({ id, label, children }: { id: string; label: string; children: React.ReactNode }) { return <div className="space-y-1.5"><Label htmlFor={id}>{label}</Label>{children}</div>; }

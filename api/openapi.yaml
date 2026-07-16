@@ -17,18 +17,21 @@ paths:
         '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/SOPVersion' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
     get:
       operationId: listCaptureSOPs
       parameters:
         - { in: query, name: category_id, schema: { type: integer, minimum: 1 } }
-        - { in: query, name: include_all, description: "Admin lifecycle listing. When true, includes draft-only and archived-only SOPs and every ordered version. Defaults to published-only selection semantics.", schema: { type: boolean, default: false } }
+        - { in: query, name: include_all, description: "Manager-only lifecycle listing (admin/operator). When true, includes draft-only and archived-only SOPs and every ordered version. Defaults to published-only selection semantics.", schema: { type: boolean, default: false } }
       responses:
         '200':
           description: Capture SOPs
           content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/CaptureSOPSummary' } } } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /capture-sops/{sop_id}:
     parameters: [ { $ref: '#/components/parameters/SOPID' } ]
@@ -51,6 +54,7 @@ paths:
         '201': { description: Copied draft, content: { application/json: { schema: { $ref: '#/components/schemas/SOPVersion' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '500': { $ref: '#/components/responses/InternalServerError' }
@@ -66,6 +70,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
     patch:
       operationId: updateSOPVersion
+      parameters: [ { $ref: '#/components/parameters/SOPRevision' } ]
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/VersionMetadataRequest' } } }
@@ -73,13 +78,16 @@ paths:
         '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/SOPVersion' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '428': { $ref: '#/components/responses/PreconditionRequired' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /sop-versions/{version_id}/views:
     parameters: [ { $ref: '#/components/parameters/VersionID' } ]
     post:
       operationId: addSOPView
+      parameters: [ { $ref: '#/components/parameters/SOPRevision' } ]
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/AddViewRequest' } } }
@@ -87,13 +95,16 @@ paths:
         '201': { description: View added, content: { application/json: { schema: { $ref: '#/components/schemas/SOPVersion' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '428': { $ref: '#/components/responses/PreconditionRequired' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /sop-versions/{version_id}/views/{view_id}:
     parameters: [ { $ref: '#/components/parameters/VersionID' }, { $ref: '#/components/parameters/ViewID' } ]
     patch:
       operationId: updateSOPView
+      parameters: [ { $ref: '#/components/parameters/SOPRevision' } ]
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/ViewMutation' } } }
@@ -101,29 +112,37 @@ paths:
         '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/SOPVersion' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '428': { $ref: '#/components/responses/PreconditionRequired' }
         '500': { $ref: '#/components/responses/InternalServerError' }
     delete:
       operationId: deleteSOPView
+      parameters: [ { $ref: '#/components/parameters/SOPRevision' } ]
       responses:
-        '204': { description: Deleted }
+        '200': { description: Deleted, content: { application/json: { schema: { $ref: '#/components/schemas/SOPVersion' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '428': { $ref: '#/components/responses/PreconditionRequired' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /sop-versions/{version_id}/view-order:
     parameters: [ { $ref: '#/components/parameters/VersionID' } ]
     put:
       operationId: reorderSOPViews
+      parameters: [ { $ref: '#/components/parameters/SOPRevision' } ]
       requestBody: { $ref: '#/components/requestBodies/UUIDOrder' }
       responses:
         '200': { description: Reordered, content: { application/json: { schema: { $ref: '#/components/schemas/SOPVersion' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '428': { $ref: '#/components/responses/PreconditionRequired' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /sop-versions/{version_id}/validate:
     parameters: [ { $ref: '#/components/parameters/VersionID' } ]
@@ -133,19 +152,23 @@ paths:
         '200': { description: Validation result, content: { application/json: { schema: { $ref: '#/components/schemas/ValidationResponse' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /sop-versions/{version_id}/publish:
     parameters: [ { $ref: '#/components/parameters/VersionID' } ]
     post:
       operationId: publishSOPVersion
+      parameters: [ { $ref: '#/components/parameters/SOPRevision' } ]
       responses:
         '200': { description: Published, content: { application/json: { schema: { $ref: '#/components/schemas/SOPVersion' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
+        '428': { $ref: '#/components/responses/PreconditionRequired' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /sop-versions/{version_id}/archive:
     parameters: [ { $ref: '#/components/parameters/VersionID' } ]
@@ -155,6 +178,7 @@ paths:
         '200': { description: Archived, content: { application/json: { schema: { $ref: '#/components/schemas/SOPVersion' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '500': { $ref: '#/components/responses/InternalServerError' }
@@ -169,6 +193,7 @@ paths:
         '200': { description: Upload details, content: { application/json: { schema: { $ref: '#/components/schemas/UploadEnvelope' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '500': { $ref: '#/components/responses/InternalServerError' }
@@ -177,38 +202,47 @@ paths:
     parameters: [ { $ref: '#/components/parameters/VersionID' }, { $ref: '#/components/parameters/ViewID' } ]
     post:
       operationId: addSOPReferenceImage
+      parameters: [ { $ref: '#/components/parameters/SOPRevision' } ]
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/AddReferenceImageRequest' } } }
       responses:
-        '201': { description: Reference image, content: { application/json: { schema: { $ref: '#/components/schemas/ReferenceImage' } } } }
+        '201': { description: Reference image added, content: { application/json: { schema: { $ref: '#/components/schemas/SOPVersion' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '428': { $ref: '#/components/responses/PreconditionRequired' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /sop-versions/{version_id}/views/{view_id}/reference-images/{image_id}:
     parameters: [ { $ref: '#/components/parameters/VersionID' }, { $ref: '#/components/parameters/ViewID' }, { $ref: '#/components/parameters/ImageID' } ]
     delete:
       operationId: deleteSOPReferenceImage
+      parameters: [ { $ref: '#/components/parameters/SOPRevision' } ]
       responses:
-        '204': { description: Deleted }
+        '200': { description: Deleted, content: { application/json: { schema: { $ref: '#/components/schemas/SOPVersion' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '428': { $ref: '#/components/responses/PreconditionRequired' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /sop-versions/{version_id}/views/{view_id}/reference-image-order:
     parameters: [ { $ref: '#/components/parameters/VersionID' }, { $ref: '#/components/parameters/ViewID' } ]
     put:
       operationId: reorderSOPReferenceImages
+      parameters: [ { $ref: '#/components/parameters/SOPRevision' } ]
       requestBody: { $ref: '#/components/requestBodies/UUIDOrder' }
       responses:
         '200': { description: Reordered, content: { application/json: { schema: { $ref: '#/components/schemas/SOPVersion' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '428': { $ref: '#/components/responses/PreconditionRequired' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /photo-sessions:
     post:
@@ -233,6 +267,7 @@ paths:
         '200': { description: Upload details, content: { application/json: { schema: { $ref: '#/components/schemas/UploadEnvelope' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '500': { $ref: '#/components/responses/InternalServerError' }
@@ -247,9 +282,11 @@ paths:
         '201': { description: Asset completed, content: { application/json: { schema: { $ref: '#/components/schemas/CompletedAsset' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '500': { $ref: '#/components/responses/InternalServerError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /assets/review:
     get:
       operationId: listAssetsForReview
@@ -276,6 +313,12 @@ components:
     VersionID: { in: path, name: version_id, required: true, schema: { type: string, format: uuid } }
     ViewID: { in: path, name: view_id, required: true, schema: { type: string, format: uuid } }
     ImageID: { in: path, name: image_id, required: true, schema: { type: string, format: uuid } }
+    SOPRevision:
+      in: header
+      name: X-SOP-Version-Updated-At
+      required: true
+      description: Exact updated_at value from the latest SOPVersion response; stale revisions return 409.
+      schema: { type: string, format: date-time }
   requestBodies:
     UUIDOrder:
       required: true
@@ -283,8 +326,10 @@ components:
   responses:
     BadRequest: { description: Invalid input, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
     Unauthorized: { description: Missing or invalid bearer token, content: { application/json: { schema: { $ref: '#/components/schemas/AuthErrorResponse' } } } }
+    Forbidden: { description: Authenticated user lacks the required role, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
     NotFound: { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
     Conflict: { description: Lifecycle conflict, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+    PreconditionRequired: { description: X-SOP-Version-Updated-At is required for draft aggregate mutations, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
     ValidationFailed: { description: SOP aggregate validation failed, content: { application/json: { schema: { $ref: '#/components/schemas/ValidationResponse' } } } }
     InternalServerError: { description: Unexpected database or server error, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
     ServiceUnavailable: { description: Object storage unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
@@ -361,7 +406,7 @@ components:
             z_positive: { type: string, enum: [object_front] }
     SOPVersion:
       type: object
-      required: [schema_version, public_id, sop_public_id, version_number, status, name, description, coordinate_system, views]
+      required: [schema_version, public_id, sop_public_id, version_number, status, name, description, coordinate_system, updated_at, views]
       properties:
         schema_version: { type: string, enum: ['1.0'] }
         public_id: { type: string, format: uuid }
@@ -449,12 +494,13 @@ components:
       properties: { message: { type: string } }
     UploadEnvelope:
       type: object
-      required: [method, upload_url, asset_url, object_key, expires_in, headers]
+      required: [method, upload_url, asset_url, object_key, completion_token, expires_in, headers]
       properties:
         method: { type: string, enum: [PUT] }
         upload_url: { type: string, format: uri }
         asset_url: { type: string, format: uri }
         object_key: { type: string }
+        completion_token: { type: string, minLength: 1, description: "Short-lived signed ticket required to complete this exact upload." }
         expires_in: { type: integer }
         headers: { type: object, additionalProperties: { type: string } }
     CreatePhotoSessionRequest:
@@ -486,13 +532,11 @@ components:
     CompleteAssetRequest:
       type: object
       additionalProperties: false
-      required: [photo_session_id, sop_view_id, object_key, original_url]
+      required: [photo_session_id, sop_view_id, completion_token]
       properties:
         photo_session_id: { type: string, format: uuid }
         sop_view_id: { type: string, format: uuid }
-        object_key: { type: string, minLength: 1 }
-        original_url: { type: string, minLength: 1 }
-        thumbnail_url: { type: string }
+        completion_token: { type: string, minLength: 1, description: "Signed ticket returned by createAssetUploadURL; binds user, session, view, object key, and expiry." }
         captured_at: { type: string, format: date-time }
     CompletedAsset:
       type: object

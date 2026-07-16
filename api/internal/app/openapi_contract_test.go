@@ -18,23 +18,23 @@ func TestCaptureSOPOpenAPIHasCompleteRuntimeErrorResponses(t *testing.T) {
 	}
 	paths := document["paths"].(map[string]any)
 	expected := map[string]map[string][]string{
-		"/capture-sops":                                                          {"post": {"201", "400", "401", "500"}, "get": {"200", "400", "401", "500"}},
+		"/capture-sops":                                                          {"post": {"201", "400", "401", "403", "404", "500"}, "get": {"200", "400", "401", "403", "500"}},
 		"/capture-sops/{sop_id}":                                                 {"get": {"200", "400", "401", "404", "500"}},
-		"/capture-sops/{sop_id}/versions":                                        {"post": {"201", "400", "401", "404", "409", "500"}},
-		"/sop-versions/{version_id}":                                             {"get": {"200", "400", "401", "404", "500"}, "patch": {"200", "400", "401", "404", "409", "500"}},
-		"/sop-versions/{version_id}/views":                                       {"post": {"201", "400", "401", "404", "409", "500"}},
-		"/sop-versions/{version_id}/views/{view_id}":                             {"patch": {"200", "400", "401", "404", "409", "500"}, "delete": {"204", "400", "401", "404", "409", "500"}},
-		"/sop-versions/{version_id}/view-order":                                  {"put": {"200", "400", "401", "404", "409", "500"}},
-		"/sop-versions/{version_id}/validate":                                    {"post": {"200", "400", "401", "404", "500"}},
-		"/sop-versions/{version_id}/publish":                                     {"post": {"200", "400", "401", "404", "409", "422", "500"}},
-		"/sop-versions/{version_id}/archive":                                     {"post": {"200", "400", "401", "404", "409", "500"}},
-		"/sop-versions/{version_id}/views/{view_id}/reference-images/upload-url": {"post": {"200", "400", "401", "404", "409", "500", "503"}},
-		"/sop-versions/{version_id}/views/{view_id}/reference-images":            {"post": {"201", "400", "401", "404", "409", "500"}},
-		"/sop-versions/{version_id}/views/{view_id}/reference-images/{image_id}": {"delete": {"204", "400", "401", "404", "409", "500"}},
-		"/sop-versions/{version_id}/views/{view_id}/reference-image-order":       {"put": {"200", "400", "401", "404", "409", "500"}},
+		"/capture-sops/{sop_id}/versions":                                        {"post": {"201", "400", "401", "403", "404", "409", "500"}},
+		"/sop-versions/{version_id}":                                             {"get": {"200", "400", "401", "404", "500"}, "patch": {"200", "400", "401", "403", "404", "409", "428", "500"}},
+		"/sop-versions/{version_id}/views":                                       {"post": {"201", "400", "401", "403", "404", "409", "428", "500"}},
+		"/sop-versions/{version_id}/views/{view_id}":                             {"patch": {"200", "400", "401", "403", "404", "409", "428", "500"}, "delete": {"200", "400", "401", "403", "404", "409", "428", "500"}},
+		"/sop-versions/{version_id}/view-order":                                  {"put": {"200", "400", "401", "403", "404", "409", "428", "500"}},
+		"/sop-versions/{version_id}/validate":                                    {"post": {"200", "400", "401", "403", "404", "500"}},
+		"/sop-versions/{version_id}/publish":                                     {"post": {"200", "400", "401", "403", "404", "409", "422", "428", "500"}},
+		"/sop-versions/{version_id}/archive":                                     {"post": {"200", "400", "401", "403", "404", "409", "500"}},
+		"/sop-versions/{version_id}/views/{view_id}/reference-images/upload-url": {"post": {"200", "400", "401", "403", "404", "409", "500", "503"}},
+		"/sop-versions/{version_id}/views/{view_id}/reference-images":            {"post": {"201", "400", "401", "403", "404", "409", "428", "500"}},
+		"/sop-versions/{version_id}/views/{view_id}/reference-images/{image_id}": {"delete": {"200", "400", "401", "403", "404", "409", "428", "500"}},
+		"/sop-versions/{version_id}/views/{view_id}/reference-image-order":       {"put": {"200", "400", "401", "403", "404", "409", "428", "500"}},
 		"/photo-sessions":                                                        {"post": {"201", "400", "401", "404", "409", "500"}},
-		"/assets/upload-url":                                                     {"post": {"200", "400", "401", "404", "409", "500", "503"}},
-		"/assets/complete":                                                       {"post": {"201", "400", "401", "404", "409", "500"}},
+		"/assets/upload-url":                                                     {"post": {"200", "400", "401", "403", "404", "409", "500", "503"}},
+		"/assets/complete":                                                       {"post": {"201", "400", "401", "403", "404", "409", "500", "503"}},
 		"/assets/review":                                                         {"get": {"200", "401", "500"}},
 		"/assets/review/hierarchy":                                               {"get": {"200", "401", "500"}},
 	}
@@ -64,7 +64,7 @@ func TestCaptureSOPOpenAPIHasCompleteRuntimeErrorResponses(t *testing.T) {
 	}
 	components := document["components"].(map[string]any)
 	responses := components["responses"].(map[string]any)
-	for _, name := range []string{"BadRequest", "Unauthorized", "NotFound", "Conflict", "ValidationFailed", "InternalServerError", "ServiceUnavailable"} {
+	for _, name := range []string{"BadRequest", "Unauthorized", "Forbidden", "NotFound", "Conflict", "PreconditionRequired", "ValidationFailed", "InternalServerError", "ServiceUnavailable"} {
 		if _, ok := responses[name]; !ok {
 			t.Errorf("missing reusable response %s", name)
 		}
