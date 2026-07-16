@@ -353,6 +353,7 @@ struct UploadURLResponse: Decodable {
     let uploadURL: String
     let assetURL: String
     let objectKey: String
+    let completionToken: String
     let expiresIn: Int
     let headers: [String: String]
 
@@ -361,6 +362,7 @@ struct UploadURLResponse: Decodable {
         case uploadURL = "upload_url"
         case assetURL = "asset_url"
         case objectKey = "object_key"
+        case completionToken = "completion_token"
         case expiresIn = "expires_in"
         case headers
     }
@@ -369,17 +371,13 @@ struct UploadURLResponse: Decodable {
 struct CompleteAssetRequest: Encodable {
     let photoSessionID: String
     let sopViewID: String
-    let objectKey: String
-    let originalURL: String
-    let thumbnailURL: String?
+    let completionToken: String
     let capturedAt: Date
 
     enum CodingKeys: String, CodingKey {
         case photoSessionID = "photo_session_id"
         case sopViewID = "sop_view_id"
-        case objectKey = "object_key"
-        case originalURL = "original_url"
-        case thumbnailURL = "thumbnail_url"
+        case completionToken = "completion_token"
         case capturedAt = "captured_at"
     }
 }

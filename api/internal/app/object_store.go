@@ -28,6 +28,12 @@ type objectStore struct {
 	publicURL *url.URL
 }
 
+type assetStorage interface {
+	createUploadURL(context.Context, string) (string, string, error)
+	assetURL(string) string
+	objectExists(context.Context, string) (bool, error)
+}
+
 func newObjectStore(cfg config.Config) (*objectStore, error) {
 	options := &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.MinIOAccessKey, cfg.MinIOSecretKey, ""),
@@ -58,9 +64,25 @@ func (s *objectStore) createUploadURL(ctx context.Context, objectKey string) (st
 	if err != nil {
 		return "", "", err
 	}
+	return uploadURL.String(), s.assetURL(objectKey), nil
+}
+
+func (s *objectStore) assetURL(objectKey string) string {
 	assetURL := *s.publicURL
 	assetURL.Path = "/" + s.bucket + "/" + objectKey
-	return uploadURL.String(), assetURL.String(), nil
+	return assetURL.String()
+}
+
+func (s *objectStore) objectExists(ctx context.Context, objectKey string) (bool, error) {
+	_, err := s.internal.StatObject(ctx, s.bucket, objectKey, minio.StatObjectOptions{})
+	if err == nil {
+		return true, nil
+	}
+	response := minio.ToErrorResponse(err)
+	if response.Code == "NoSuchKey" || response.Code == "NoSuchObject" || response.StatusCode == 404 {
+		return false, nil
+	}
+	return false, err
 }
 
 func (s *objectStore) ensureBucket(ctx context.Context) error {

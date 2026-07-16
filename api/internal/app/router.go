@@ -15,7 +15,7 @@ import (
 type Server struct {
 	cfg     config.Config
 	db      *gorm.DB
-	storage *objectStore
+	storage assetStorage
 }
 
 func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {

@@ -106,9 +106,7 @@ final class APIClient {
             body: CompleteAssetRequest(
                 photoSessionID: photoSessionID,
                 sopViewID: sopViewID,
-                objectKey: ticket.objectKey,
-                originalURL: ticket.assetURL,
-                thumbnailURL: nil,
+                completionToken: ticket.completionToken,
                 capturedAt: Date()
             )
         )

@@ -4,13 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"cargoflow/api/internal/models"
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -283,8 +283,11 @@ var (
 	errSKUNotFound            = errors.New("SKU not found")
 	errSKUCategoryMismatch    = errors.New("SKU category does not match the capture SOP category")
 	errPhotoSessionNotFound   = errors.New("photo session not found")
+	errPhotoSessionForbidden  = errors.New("photo session does not belong to the current user")
 	errSOPViewNotFound        = errors.New("SOP view not found")
 	errViewVersionMismatch    = errors.New("SOP view does not belong to the session version")
+	errInvalidUploadTicket    = errors.New("upload completion ticket is invalid")
+	errUploadedObjectNotFound = errors.New("uploaded object was not found")
 )
 
 func (s *Server) createPhotoSession(c *gin.Context) {
@@ -344,6 +347,14 @@ type uploadURLRequest struct {
 	SOPViewID      string `json:"sop_view_id"`
 }
 
+type assetUploadClaims struct {
+	PhotoSessionID string `json:"photo_session_id"`
+	SOPViewID      string `json:"sop_view_id"`
+	ObjectKey      string `json:"object_key"`
+	UserID         uint   `json:"user_id"`
+	jwt.RegisteredClaims
+}
+
 func (s *Server) createUploadURL(c *gin.Context) {
 	var req uploadURLRequest
 	if err := decodeJSONStrict(c, &req); err != nil || strings.TrimSpace(req.FileName) == "" || !isUUID(req.PhotoSessionID) || !isUUID(req.SOPViewID) {
@@ -359,30 +370,38 @@ func (s *Server) createUploadURL(c *gin.Context) {
 		return
 	}
 
-	fileName := strings.ReplaceAll(filepath.Base(req.FileName), " ", "-")
-	objectKey := fmt.Sprintf("photo-sessions/%s/views/%s/%d-%s", req.PhotoSessionID, req.SOPViewID, time.Now().UnixNano(), fileName)
+	extension, ok := imageExtension(req.ContentType)
+	if !ok {
+		respondSOPBadRequest(c, errors.New("unsupported image content type"))
+		return
+	}
+	objectKey := fmt.Sprintf("photo-sessions/%s/views/%s/%s%s", req.PhotoSessionID, req.SOPViewID, uuid.NewString(), extension)
 	uploadURL, assetURL, err := s.storage.createUploadURL(c.Request.Context(), objectKey)
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "object_storage_unavailable", "message": "prepare object storage upload failed"})
 		return
 	}
+	completionToken, err := s.issueAssetUploadTicket(currentUser(c).ID, req.PhotoSessionID, req.SOPViewID, objectKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "issue upload completion ticket failed"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"method":     "PUT",
-		"upload_url": uploadURL,
-		"asset_url":  assetURL,
-		"object_key": objectKey,
-		"expires_in": 900,
-		"headers":    gin.H{"content-type": req.ContentType},
+		"method":           "PUT",
+		"upload_url":       uploadURL,
+		"asset_url":        assetURL,
+		"object_key":       objectKey,
+		"completion_token": completionToken,
+		"expires_in":       900,
+		"headers":          gin.H{"content-type": req.ContentType},
 	})
 }
 
 type completeAssetRequest struct {
-	PhotoSessionID string `json:"photo_session_id"`
-	SOPViewID      string `json:"sop_view_id"`
-	ObjectKey      string `json:"object_key"`
-	OriginalURL    string `json:"original_url"`
-	ThumbnailURL   string `json:"thumbnail_url"`
-	CapturedAt     string `json:"captured_at"`
+	PhotoSessionID  string `json:"photo_session_id"`
+	SOPViewID       string `json:"sop_view_id"`
+	CompletionToken string `json:"completion_token"`
+	CapturedAt      string `json:"captured_at"`
 }
 
 type completedAssetResponse struct {
@@ -399,8 +418,8 @@ type completedAssetResponse struct {
 
 func (s *Server) completeAssetUpload(c *gin.Context) {
 	var req completeAssetRequest
-	if err := decodeJSONStrict(c, &req); err != nil || !isUUID(req.PhotoSessionID) || !isUUID(req.SOPViewID) || strings.TrimSpace(req.ObjectKey) == "" || strings.TrimSpace(req.OriginalURL) == "" {
-		respondSOPBadRequest(c, errOr(err, "photo_session_id, sop_view_id, object_key, and original_url are required; identifiers must be UUIDs"))
+	if err := decodeJSONStrict(c, &req); err != nil || !isUUID(req.PhotoSessionID) || !isUUID(req.SOPViewID) || strings.TrimSpace(req.CompletionToken) == "" {
+		respondSOPBadRequest(c, errOr(err, "photo_session_id, sop_view_id, and completion_token are required; identifiers must be UUIDs"))
 		return
 	}
 	capturedAt := time.Now()
@@ -417,13 +436,26 @@ func (s *Server) completeAssetUpload(c *gin.Context) {
 		respondCaptureError(c, err)
 		return
 	}
+	claims, err := s.verifyAssetUploadTicket(req.CompletionToken)
+	if err != nil || claims.UserID != currentUser(c).ID || claims.PhotoSessionID != session.PublicID || claims.SOPViewID != view.PublicID || !isScopedAssetObjectKey(claims.ObjectKey, session.PublicID, view.PublicID) {
+		respondCaptureError(c, errInvalidUploadTicket)
+		return
+	}
+	exists, err := s.storage.objectExists(c.Request.Context(), claims.ObjectKey)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "object_storage_unavailable", "message": "verify uploaded object failed"})
+		return
+	}
+	if !exists {
+		respondCaptureError(c, errUploadedObjectNotFound)
+		return
+	}
 	asset := models.Asset{
 		SKUID:          session.SKUID,
 		PhotoSessionID: session.ID,
 		SOPViewID:      view.ID,
-		ObjectKey:      req.ObjectKey,
-		OriginalURL:    req.OriginalURL,
-		ThumbnailURL:   req.ThumbnailURL,
+		ObjectKey:      claims.ObjectKey,
+		OriginalURL:    s.storage.assetURL(claims.ObjectKey),
 		ReviewStatus:   "pending",
 		CapturedAt:     capturedAt,
 	}
@@ -434,6 +466,62 @@ func (s *Server) completeAssetUpload(c *gin.Context) {
 	c.JSON(http.StatusCreated, completedAssetResponse{ID: asset.ID, SKUID: asset.SKUID, PhotoSessionID: session.PublicID, SOPViewID: view.PublicID, ObjectKey: asset.ObjectKey, OriginalURL: asset.OriginalURL, ThumbnailURL: asset.ThumbnailURL, ReviewStatus: asset.ReviewStatus, CapturedAt: asset.CapturedAt})
 }
 
+func imageExtension(contentType string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0])) {
+	case "image/jpeg":
+		return ".jpg", true
+	case "image/png":
+		return ".png", true
+	case "image/heic", "image/heif":
+		return ".heic", true
+	case "image/webp":
+		return ".webp", true
+	default:
+		return "", false
+	}
+}
+
+func (s *Server) issueAssetUploadTicket(userID uint, sessionID, viewID, objectKey string) (string, error) {
+	now := time.Now()
+	claims := assetUploadClaims{
+		PhotoSessionID: sessionID,
+		SOPViewID:      viewID,
+		ObjectKey:      objectKey,
+		UserID:         userID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(15 * time.Minute)),
+		},
+	}
+	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(s.cfg.JWTSecret))
+}
+
+func (s *Server) verifyAssetUploadTicket(value string) (*assetUploadClaims, error) {
+	claims := &assetUploadClaims{}
+	token, err := jwt.ParseWithClaims(value, claims, func(token *jwt.Token) (any, error) {
+		return []byte(s.cfg.JWTSecret), nil
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithExpirationRequired())
+	if err != nil || !token.Valid {
+		return nil, errInvalidUploadTicket
+	}
+	return claims, nil
+}
+
+func isScopedAssetObjectKey(objectKey, sessionID, viewID string) bool {
+	prefix := "photo-sessions/" + sessionID + "/views/" + viewID + "/"
+	base := strings.TrimPrefix(objectKey, prefix)
+	if base == objectKey || base == "" || strings.Contains(base, "/") || strings.Contains(base, "\\") {
+		return false
+	}
+	for _, extension := range []string{".jpg", ".png", ".heic", ".webp"} {
+		if strings.HasSuffix(base, extension) {
+			_, err := uuid.Parse(strings.TrimSuffix(base, extension))
+			return err == nil
+		}
+	}
+	return false
+}
+
 func (s *Server) resolveCaptureBinding(c *gin.Context, sessionPublicID, viewPublicID string) (models.PhotoSession, models.SOPView, error) {
 	var session models.PhotoSession
 	if err := s.db.WithContext(c).Where("public_id = ?", sessionPublicID).First(&session).Error; err != nil {
@@ -441,6 +529,9 @@ func (s *Server) resolveCaptureBinding(c *gin.Context, sessionPublicID, viewPubl
 			return session, models.SOPView{}, errPhotoSessionNotFound
 		}
 		return session, models.SOPView{}, err
+	}
+	if session.PhotographerID != currentUser(c).ID {
+		return session, models.SOPView{}, errPhotoSessionForbidden
 	}
 	var view models.SOPView
 	if err := s.db.WithContext(c).Where("public_id = ?", viewPublicID).First(&view).Error; err != nil {
@@ -469,8 +560,14 @@ func respondCaptureError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"code": "sku_sop_category_mismatch", "message": err.Error()})
 	case errors.Is(err, errPhotoSessionNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"code": "photo_session_not_found", "message": err.Error()})
+	case errors.Is(err, errPhotoSessionForbidden):
+		c.JSON(http.StatusForbidden, gin.H{"code": "photo_session_forbidden", "message": err.Error()})
 	case errors.Is(err, errSOPViewNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"code": "sop_view_not_found", "message": err.Error()})
+	case errors.Is(err, errInvalidUploadTicket):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_upload_ticket", "message": err.Error()})
+	case errors.Is(err, errUploadedObjectNotFound):
+		c.JSON(http.StatusConflict, gin.H{"code": "upload_not_found", "message": err.Error()})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "internal server error"})
 	}

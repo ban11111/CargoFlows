@@ -79,12 +79,16 @@ final class SOPAPIClientTests: XCTestCase {
                         "photo_session_id": "session-id",
                         "sop_view_id": "view-id",
                     ])
-                    return Self.response(request, body: #"{"method":"PUT","upload_url":"https://example.test/upload","asset_url":"https://cdn.test/capture.jpg","object_key":"capture.jpg","expires_in":900,"headers":{"Content-Type":"image/jpeg"}}"#)
+                    return Self.response(request, body: #"{"method":"PUT","upload_url":"https://example.test/upload","asset_url":"https://cdn.test/capture.jpg","object_key":"capture.jpg","completion_token":"signed-ticket","expires_in":900,"headers":{"Content-Type":"image/jpeg"}}"#)
                 case "/api/v1/assets/complete":
                     let body = try Self.jsonBody(request)
                     XCTAssertEqual(body["photo_session_id"] as? String, "session-id")
                     XCTAssertEqual(body["sop_view_id"] as? String, "view-id")
+                    XCTAssertEqual(body["completion_token"] as? String, "signed-ticket")
                     XCTAssertNil(body["sku_id"])
+                    XCTAssertNil(body["object_key"])
+                    XCTAssertNil(body["original_url"])
+                    XCTAssertNil(body["thumbnail_url"])
                     return Self.response(request, status: 201, body: #"{"id":9,"sku_id":7,"photo_session_id":"session-id","sop_view_id":"view-id","object_key":"capture.jpg","original_url":"https://cdn.test/capture.jpg","thumbnail_url":"","review_status":"pending","captured_at":"2026-07-16T00:00:00Z"}"#)
                 default:
                     XCTFail("Unexpected request: \(request.url?.absoluteString ?? "nil")")

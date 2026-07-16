@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -8,11 +9,34 @@ import (
 	"strings"
 	"testing"
 
+	"cargoflow/api/internal/config"
 	"cargoflow/api/internal/models"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+type fakeAssetStorage struct {
+	exists bool
+	err    error
+}
+
+type assetUploadTicketResponse struct {
+	ObjectKey       string `json:"object_key"`
+	CompletionToken string `json:"completion_token"`
+}
+
+func (s *fakeAssetStorage) createUploadURL(_ context.Context, objectKey string) (string, string, error) {
+	return "https://upload.example.test/" + objectKey, s.assetURL(objectKey), s.err
+}
+
+func (s *fakeAssetStorage) assetURL(objectKey string) string {
+	return "https://assets.example.test/cargoflow/" + objectKey
+}
+
+func (s *fakeAssetStorage) objectExists(_ context.Context, _ string) (bool, error) {
+	return s.exists, s.err
+}
 
 func TestCreatePhotoSessionRequiresPublishedVersion(t *testing.T) {
 	db := newTestDB(t)
@@ -94,6 +118,24 @@ func TestCompleteAssetRejectsViewFromAnotherVersion(t *testing.T) {
 	}
 }
 
+func TestCompleteAssetRejectsUserWhoDoesNotOwnPhotoSession(t *testing.T) {
+	db := newTestDB(t)
+	version := createCaptureVersionFixture(t, db, models.SOPVersionPublished, "21212121-2121-4212-8212-212121212121")
+	view := createCaptureViewFixture(t, db, version.ID, "22222222-2222-4222-8222-222222222222", "正面", "Front")
+	session := createPhotoSessionFixture(t, db, version.ID, "23232323-2323-4232-8232-232323232323")
+
+	response := performCompleteAssetAsUser(t, db, session.PublicID, view.PublicID, session.PhotographerID+1)
+	assertErrorResponse(t, response, http.StatusForbidden, "photo_session_forbidden")
+
+	var count int64
+	if err := db.Model(&models.Asset{}).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no asset for a different user, got %d", count)
+	}
+}
+
 func TestCompleteAssetRejectsMalformedCapturedAtWithoutWriting(t *testing.T) {
 	db := newTestDB(t)
 	version := createCaptureVersionFixture(t, db, models.SOPVersionPublished, "15151515-1515-4515-8515-151515151515")
@@ -103,7 +145,7 @@ func TestCompleteAssetRejectsMalformedCapturedAtWithoutWriting(t *testing.T) {
 	response := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(response)
 	context.Request = httptest.NewRequest(http.MethodPost, "/assets/complete", strings.NewReader(fmt.Sprintf(
-		`{"photo_session_id":%q,"sop_view_id":%q,"object_key":"capture.jpg","original_url":"http://example.test/capture.jpg","captured_at":"not-a-date"}`,
+		`{"photo_session_id":%q,"sop_view_id":%q,"completion_token":"invalid","captured_at":"not-a-date"}`,
 		session.PublicID, view.PublicID,
 	)))
 	context.Request.Header.Set("Content-Type", "application/json")
@@ -133,10 +175,106 @@ func TestCreateUploadURLRejectsViewFromAnotherVersionBeforeStorage(t *testing.T)
 		session.PublicID, view.PublicID,
 	)))
 	context.Request.Header.Set("Content-Type", "application/json")
+	context.Set("user", models.User{ID: session.PhotographerID, Role: models.RolePhotographer})
 	server := &Server{db: db}
 	server.createUploadURL(context)
 
 	assertErrorResponse(t, response, http.StatusConflict, "view_version_mismatch")
+}
+
+func TestCreateUploadURLRejectsUserWhoDoesNotOwnPhotoSession(t *testing.T) {
+	db := newTestDB(t)
+	version := createCaptureVersionFixture(t, db, models.SOPVersionPublished, "24242424-2424-4242-8242-242424242424")
+	view := createCaptureViewFixture(t, db, version.ID, "25252525-2525-4252-8252-252525252525", "正面", "Front")
+	session := createPhotoSessionFixture(t, db, version.ID, "26262626-2626-4262-8262-262626262626")
+
+	response := performCreateAssetUploadURL(t, &Server{db: db, cfg: testAssetConfig(), storage: &fakeAssetStorage{exists: true}}, session.PublicID, view.PublicID, session.PhotographerID+1, "capture.jpg")
+	assertErrorResponse(t, response, http.StatusForbidden, "photo_session_forbidden")
+}
+
+func TestCompleteAssetUsesSignedTicketAndServerDerivedURL(t *testing.T) {
+	db := newTestDB(t)
+	version := createCaptureVersionFixture(t, db, models.SOPVersionPublished, "27272727-2727-4272-8272-272727272727")
+	view := createCaptureViewFixture(t, db, version.ID, "28282828-2828-4282-8282-282828282828", "正面", "Front")
+	session := createPhotoSessionFixture(t, db, version.ID, "29292929-2929-4292-8292-292929292929")
+	storage := &fakeAssetStorage{exists: true}
+	server := &Server{db: db, cfg: testAssetConfig(), storage: storage}
+	ticket := createAssetUploadTicket(t, server, session, view, "../../fake/name.jpg")
+
+	if !strings.HasPrefix(ticket.ObjectKey, "photo-sessions/"+session.PublicID+"/views/"+view.PublicID+"/") {
+		t.Fatalf("object key escaped its session/view scope: %q", ticket.ObjectKey)
+	}
+	if strings.Contains(ticket.ObjectKey, "..") || strings.Contains(ticket.ObjectKey, "fake") || !strings.HasSuffix(ticket.ObjectKey, ".jpg") {
+		t.Fatalf("object key must use a server-generated basename: %q", ticket.ObjectKey)
+	}
+
+	response := performCompleteAssetWithTicket(t, server, session, view, ticket.CompletionToken, "")
+	if response.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", response.Code, response.Body.String())
+	}
+	var receipt completedAssetResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &receipt); err != nil {
+		t.Fatal(err)
+	}
+	if receipt.ObjectKey != ticket.ObjectKey || receipt.OriginalURL != storage.assetURL(ticket.ObjectKey) {
+		t.Fatalf("asset location was not derived from the signed ticket: %#v", receipt)
+	}
+}
+
+func TestCompleteAssetRejectsForgedTicketAndClientSuppliedURL(t *testing.T) {
+	db := newTestDB(t)
+	version := createCaptureVersionFixture(t, db, models.SOPVersionPublished, "30303030-3030-4303-8303-303030303030")
+	view := createCaptureViewFixture(t, db, version.ID, "31313131-3131-4313-8313-313131313131", "正面", "Front")
+	session := createPhotoSessionFixture(t, db, version.ID, "32323232-3232-4323-8323-323232323232")
+	server := &Server{db: db, cfg: testAssetConfig(), storage: &fakeAssetStorage{exists: true}}
+	ticket := createAssetUploadTicket(t, server, session, view, "capture.jpg")
+
+	for name, test := range map[string]struct {
+		body string
+		code string
+	}{
+		"tampered ticket": {fmt.Sprintf(`{"photo_session_id":%q,"sop_view_id":%q,"completion_token":%q}`, session.PublicID, view.PublicID, ticket.CompletionToken+"x"), "invalid_upload_ticket"},
+		"client URL":      {fmt.Sprintf(`{"photo_session_id":%q,"sop_view_id":%q,"completion_token":%q,"original_url":"https://evil.test/fake.jpg"}`, session.PublicID, view.PublicID, ticket.CompletionToken), "invalid_request"},
+		"client key":      {fmt.Sprintf(`{"photo_session_id":%q,"sop_view_id":%q,"completion_token":%q,"object_key":"photo-sessions/%s/views/%s/fake.jpg"}`, session.PublicID, view.PublicID, ticket.CompletionToken, session.PublicID, view.PublicID), "invalid_request"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := performAssetCompleteBody(t, server, session.PhotographerID, test.body)
+			assertErrorResponse(t, response, http.StatusBadRequest, test.code)
+		})
+	}
+	var count int64
+	if err := db.Model(&models.Asset{}).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("expected no forged assets, count=%d err=%v", count, err)
+	}
+}
+
+func TestCompleteAssetRejectsTicketForAnotherBinding(t *testing.T) {
+	db := newTestDB(t)
+	version := createCaptureVersionFixture(t, db, models.SOPVersionPublished, "33333333-3333-4333-8333-333333333333")
+	view1 := createCaptureViewFixture(t, db, version.ID, "34343434-3434-4343-8343-343434343434", "正面", "Front")
+	view2 := models.SOPView{PublicID: "35353535-3535-4353-8353-353535353535", SOPVersionID: version.ID, Sequence: 2, Role: models.SOPViewCapture, ViewKind: models.SOPViewDetail, NameZH: "背面", NameEN: "Back", CameraPositionZ: -1, ImageUpX: 1, Composition: models.Composition{FrameOccupancy: .85, AspectRatio: "1:1", AllowRotationCorrection: true}}
+	if err := db.Create(&view2).Error; err != nil {
+		t.Fatal(err)
+	}
+	session := createPhotoSessionFixture(t, db, version.ID, "36363636-3636-4363-8363-363636363636")
+	server := &Server{db: db, cfg: testAssetConfig(), storage: &fakeAssetStorage{exists: true}}
+	ticket := createAssetUploadTicket(t, server, session, view1, "capture.jpg")
+
+	response := performCompleteAssetWithTicket(t, server, session, view2, ticket.CompletionToken, "")
+	assertErrorResponse(t, response, http.StatusBadRequest, "invalid_upload_ticket")
+}
+
+func TestCompleteAssetRejectsMissingUploadedObject(t *testing.T) {
+	db := newTestDB(t)
+	version := createCaptureVersionFixture(t, db, models.SOPVersionPublished, "37373737-3737-4373-8373-373737373737")
+	view := createCaptureViewFixture(t, db, version.ID, "38383838-3838-4383-8383-383838383838", "正面", "Front")
+	session := createPhotoSessionFixture(t, db, version.ID, "39393939-3939-4393-8393-393939393939")
+	storage := &fakeAssetStorage{exists: false}
+	server := &Server{db: db, cfg: testAssetConfig(), storage: storage}
+	ticket := createAssetUploadTicket(t, server, session, view, "capture.jpg")
+
+	response := performCompleteAssetWithTicket(t, server, session, view, ticket.CompletionToken, "")
+	assertErrorResponse(t, response, http.StatusConflict, "upload_not_found")
 }
 
 func TestAssetReviewHierarchyReturnsLocalizedViewName(t *testing.T) {
@@ -278,14 +416,75 @@ func assertPhotoSessionCount(t *testing.T, db *gorm.DB, want int64) {
 
 func performCompleteAsset(t *testing.T, db *gorm.DB, sessionID, viewID string) *httptest.ResponseRecorder {
 	t.Helper()
+	return performCompleteAssetAsUser(t, db, sessionID, viewID, 7)
+}
+
+func performCompleteAssetAsUser(t *testing.T, db *gorm.DB, sessionID, viewID string, userID uint) *httptest.ResponseRecorder {
+	t.Helper()
 	response := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(response)
 	context.Request = httptest.NewRequest(http.MethodPost, "/assets/complete", strings.NewReader(fmt.Sprintf(
-		`{"photo_session_id":%q,"sop_view_id":%q,"object_key":"capture.jpg","original_url":"http://example.test/capture.jpg"}`,
+		`{"photo_session_id":%q,"sop_view_id":%q,"completion_token":"invalid"}`,
 		sessionID, viewID,
 	)))
 	context.Request.Header.Set("Content-Type", "application/json")
+	context.Set("user", models.User{ID: userID, Role: models.RolePhotographer})
 	(&Server{db: db}).completeAssetUpload(context)
+	return response
+}
+
+func testAssetConfig() config.Config {
+	return config.Config{JWTSecret: "asset-upload-test-secret"}
+}
+
+func performCreateAssetUploadURL(t *testing.T, server *Server, sessionID, viewID string, userID uint, fileName string) *httptest.ResponseRecorder {
+	t.Helper()
+	response := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(response)
+	context.Request = httptest.NewRequest(http.MethodPost, "/assets/upload-url", strings.NewReader(fmt.Sprintf(
+		`{"file_name":%q,"content_type":"image/jpeg","photo_session_id":%q,"sop_view_id":%q}`,
+		fileName, sessionID, viewID,
+	)))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Set("user", models.User{ID: userID, Role: models.RolePhotographer})
+	server.createUploadURL(context)
+	return response
+}
+
+func createAssetUploadTicket(t *testing.T, server *Server, session models.PhotoSession, view models.SOPView, fileName string) assetUploadTicketResponse {
+	t.Helper()
+	response := performCreateAssetUploadURL(t, server, session.PublicID, view.PublicID, session.PhotographerID, fileName)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected upload ticket, got %d: %s", response.Code, response.Body.String())
+	}
+	var ticket assetUploadTicketResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &ticket); err != nil {
+		t.Fatal(err)
+	}
+	if ticket.ObjectKey == "" || ticket.CompletionToken == "" {
+		t.Fatalf("incomplete upload ticket: %s", response.Body.String())
+	}
+	return ticket
+}
+
+func performCompleteAssetWithTicket(t *testing.T, server *Server, session models.PhotoSession, view models.SOPView, completionToken, capturedAt string) *httptest.ResponseRecorder {
+	t.Helper()
+	body := fmt.Sprintf(`{"photo_session_id":%q,"sop_view_id":%q,"completion_token":%q`, session.PublicID, view.PublicID, completionToken)
+	if capturedAt != "" {
+		body += fmt.Sprintf(`,"captured_at":%q`, capturedAt)
+	}
+	body += "}"
+	return performAssetCompleteBody(t, server, session.PhotographerID, body)
+}
+
+func performAssetCompleteBody(t *testing.T, server *Server, userID uint, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	response := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(response)
+	context.Request = httptest.NewRequest(http.MethodPost, "/assets/complete", strings.NewReader(body))
+	context.Request.Header.Set("Content-Type", "application/json")
+	context.Set("user", models.User{ID: userID, Role: models.RolePhotographer})
+	server.completeAssetUpload(context)
 	return response
 }
 
