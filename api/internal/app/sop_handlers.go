@@ -30,10 +30,10 @@ type updateSOPVersionRequest struct {
 }
 
 type requestPose struct {
-	Space                   *string      `json:"space"`
-	CameraPositionDirection *sop.Vector3 `json:"camera_position_direction"`
-	ImageUpDirection        *sop.Vector3 `json:"image_up_direction"`
-	Target                  *sop.Vector3 `json:"target"`
+	Space                   *string    `json:"space"`
+	CameraPositionDirection *[]float64 `json:"camera_position_direction"`
+	ImageUpDirection        *[]float64 `json:"image_up_direction"`
+	Target                  *[]float64 `json:"target"`
 }
 
 type viewMutationRequest struct {
@@ -373,6 +373,10 @@ func (s *Server) addSOPReferenceImage(c *gin.Context) {
 		return
 	}
 	sortOrder := 0
+	if req.SortOrder != nil && *req.SortOrder < 1 {
+		respondSOPBadRequest(c, errors.New("sort_order must be at least 1"))
+		return
+	}
 	if req.SortOrder != nil {
 		sortOrder = *req.SortOrder
 	}
@@ -426,11 +430,30 @@ func viewInputFromRequest(req viewMutationRequest) (sop.ViewInput, error) {
 	if req.Pose.Space == nil || *req.Pose.Space != "object" || req.Pose.CameraPositionDirection == nil || req.Pose.ImageUpDirection == nil || req.Pose.Target == nil {
 		return sop.ViewInput{}, errors.New("pose.space must be object")
 	}
+	cameraPosition, err := requiredVector3(req.Pose.CameraPositionDirection, "pose.camera_position_direction")
+	if err != nil {
+		return sop.ViewInput{}, err
+	}
+	imageUp, err := requiredVector3(req.Pose.ImageUpDirection, "pose.image_up_direction")
+	if err != nil {
+		return sop.ViewInput{}, err
+	}
+	target, err := requiredVector3(req.Pose.Target, "pose.target")
+	if err != nil {
+		return sop.ViewInput{}, err
+	}
 	composition, err := requiredComposition(req.Composition)
 	if err != nil {
 		return sop.ViewInput{}, err
 	}
-	return sop.ViewInput{Role: *req.Role, Kind: *req.ViewKind, NameZH: name.ZHCN, NameEN: name.EN, InstructionZH: instruction.ZHCN, InstructionEN: instruction.EN, Required: *req.Required, CameraPosition: *req.Pose.CameraPositionDirection, ImageUp: *req.Pose.ImageUpDirection, Target: *req.Pose.Target, Composition: composition}, nil
+	return sop.ViewInput{Role: *req.Role, Kind: *req.ViewKind, NameZH: name.ZHCN, NameEN: name.EN, InstructionZH: instruction.ZHCN, InstructionEN: instruction.EN, Required: *req.Required, CameraPosition: cameraPosition, ImageUp: imageUp, Target: target, Composition: composition}, nil
+}
+
+func requiredVector3(value *[]float64, field string) (sop.Vector3, error) {
+	if value == nil || len(*value) != 3 {
+		return sop.Vector3{}, fmt.Errorf("%s must contain exactly 3 numbers", field)
+	}
+	return sop.Vector3{(*value)[0], (*value)[1], (*value)[2]}, nil
 }
 
 func requiredLocalized(value *localizedTextRequest, field string) (localizedTextDTO, error) {
@@ -443,6 +466,9 @@ func requiredLocalized(value *localizedTextRequest, field string) (localizedText
 func requiredComposition(value *compositionRequest) (models.Composition, error) {
 	if value == nil || value.FrameOccupancy == nil || value.AspectRatio == nil || value.AllowRotationCorrection == nil || value.AllowMirror == nil {
 		return models.Composition{}, errors.New("all composition fields are required")
+	}
+	if *value.FrameOccupancy <= 0 || *value.FrameOccupancy > 1 {
+		return models.Composition{}, errors.New("composition.frame_occupancy must be greater than 0 and at most 1")
 	}
 	return models.Composition{FrameOccupancy: *value.FrameOccupancy, AspectRatio: *value.AspectRatio, AllowRotationCorrection: *value.AllowRotationCorrection, AllowMirror: *value.AllowMirror}, nil
 }

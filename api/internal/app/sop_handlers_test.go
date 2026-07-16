@@ -326,6 +326,156 @@ func TestMutationBodiesEnforceNestedRequiredFields(t *testing.T) {
 	}
 }
 
+func TestCustomAndUpdateViewsRejectNonThreeElementVectorsWithoutMutation(t *testing.T) {
+	lengths := []int{0, 2, 4}
+	for _, endpoint := range []string{"create", "update"} {
+		for _, field := range []string{"camera_position_direction", "image_up_direction", "target"} {
+			for _, length := range lengths {
+				name := endpoint + "/" + field + "/length-" + jsonNumber(uint(length))
+				t.Run(name, func(t *testing.T) {
+					db := newTestDB(t)
+					category, user := seedSOPCategoryAndUser(t, db)
+					service := NewSOPService(db)
+					created := createTestSOP(t, service, category, user)
+					back, err := service.AddView(t.Context(), created.Version.PublicID, AddViewInput{PresetKey: "back"})
+					if err != nil {
+						t.Fatal(err)
+					}
+					server, token := authenticatedSOPRouter(t, db, user)
+					defer server.Close()
+
+					view := validViewRequestMap()
+					pose := view["pose"].(map[string]any)
+					pose[field] = make([]float64, length)
+					payload := any(view)
+					path := "/api/v1/sop-versions/" + created.Version.PublicID + "/views/" + back.PublicID
+					method := http.MethodPatch
+					if endpoint == "create" {
+						payload = map[string]any{"custom": view}
+						path = "/api/v1/sop-versions/" + created.Version.PublicID + "/views"
+						method = http.MethodPost
+					}
+					response := sopRequest(t, server, token, method, path, string(mustJSON(payload)))
+					response.Body.Close()
+					if response.StatusCode != http.StatusBadRequest {
+						t.Fatalf("status = %d", response.StatusCode)
+					}
+					version, err := service.GetVersion(t.Context(), created.Version.PublicID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if len(version.Views) != 2 || version.Views[1].PublicID != back.PublicID || version.Views[1].NameEN != "Back" || version.Views[1].TargetX != 0 {
+						t.Fatalf("invalid vector mutated aggregate: %#v", version.Views)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestReferenceImageExplicitInvalidSortOrderDoesNotAppend(t *testing.T) {
+	for _, sortOrder := range []int{0, -1} {
+		t.Run(jsonNumber(uint(sortOrder+1)), func(t *testing.T) {
+			db := newTestDB(t)
+			category, user := seedSOPCategoryAndUser(t, db)
+			service := NewSOPService(db)
+			created := createTestSOP(t, service, category, user)
+			view := created.Version.Views[0]
+			server, token := authenticatedSOPRouter(t, db, user)
+			defer server.Close()
+			prefix := "sop-references/" + created.Version.PublicID + "/" + view.PublicID + "/"
+			body := map[string]any{"object_key": prefix + "example.jpg", "thumbnail_url": "/example.jpg", "caption": map[string]any{"zh-CN": "", "en": ""}, "sort_order": sortOrder}
+			response := sopRequest(t, server, token, http.MethodPost, "/api/v1/sop-versions/"+created.Version.PublicID+"/views/"+view.PublicID+"/reference-images", string(mustJSON(body)))
+			response.Body.Close()
+			if response.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d", response.StatusCode)
+			}
+			version, err := service.GetVersion(t.Context(), created.Version.PublicID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(version.Views[0].ReferenceImages) != 0 {
+				t.Fatalf("invalid sort order appended image: %#v", version.Views[0].ReferenceImages)
+			}
+		})
+	}
+}
+
+func TestCustomViewRejectsOutOfRangeFrameOccupancyWithoutMutation(t *testing.T) {
+	for _, occupancy := range []float64{0, 1.1} {
+		t.Run(string(mustJSON(occupancy)), func(t *testing.T) {
+			db := newTestDB(t)
+			category, user := seedSOPCategoryAndUser(t, db)
+			service := NewSOPService(db)
+			created := createTestSOP(t, service, category, user)
+			server, token := authenticatedSOPRouter(t, db, user)
+			defer server.Close()
+			view := validViewRequestMap()
+			view["composition"].(map[string]any)["frame_occupancy"] = occupancy
+			response := sopRequest(t, server, token, http.MethodPost, "/api/v1/sop-versions/"+created.Version.PublicID+"/views", string(mustJSON(map[string]any{"custom": view})))
+			response.Body.Close()
+			if response.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d", response.StatusCode)
+			}
+			version, err := service.GetVersion(t.Context(), created.Version.PublicID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(version.Views) != 1 {
+				t.Fatalf("invalid occupancy added view: %#v", version.Views)
+			}
+		})
+	}
+}
+
+func validViewRequestMap() map[string]any {
+	return map[string]any{
+		"role": "capture", "view_kind": "detail", "name": map[string]any{"zh-CN": "细节", "en": "Detail"},
+		"instruction": map[string]any{"zh-CN": "", "en": ""}, "required": false,
+		"pose":        map[string]any{"space": "object", "camera_position_direction": []float64{0, 0, 1}, "image_up_direction": []float64{1, 0, 0}, "target": []float64{0, 0, 0}},
+		"composition": map[string]any{"frame_occupancy": .8, "aspect_ratio": "1:1", "allow_rotation_correction": true, "allow_mirror": false},
+	}
+}
+
+func TestThreeElementVectorsRoundTripAndOmittedSortOrderAppends(t *testing.T) {
+	db := newTestDB(t)
+	category, user := seedSOPCategoryAndUser(t, db)
+	service := NewSOPService(db)
+	created := createTestSOP(t, service, category, user)
+	server, token := authenticatedSOPRouter(t, db, user)
+	defer server.Close()
+	viewRequest := validViewRequestMap()
+	viewRequest["pose"].(map[string]any)["target"] = []float64{.1, .2, .3}
+	createdView := sopRequest(t, server, token, http.MethodPost, "/api/v1/sop-versions/"+created.Version.PublicID+"/views", string(mustJSON(map[string]any{"custom": viewRequest})))
+	createdView.Body.Close()
+	if createdView.StatusCode != http.StatusCreated {
+		t.Fatalf("view status = %d", createdView.StatusCode)
+	}
+	version, err := service.GetVersion(t.Context(), created.Version.PublicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(version.Views) != 2 || version.Views[1].TargetX != .1 || version.Views[1].TargetY != .2 || version.Views[1].TargetZ != .3 {
+		t.Fatalf("vectors did not round trip: %#v", version.Views)
+	}
+
+	view := version.Views[1]
+	prefix := "sop-references/" + created.Version.PublicID + "/" + view.PublicID + "/"
+	imageBody := map[string]any{"object_key": prefix + "example.jpg", "thumbnail_url": "/example.jpg", "caption": map[string]any{"zh-CN": "", "en": ""}}
+	createdImage := sopRequest(t, server, token, http.MethodPost, "/api/v1/sop-versions/"+created.Version.PublicID+"/views/"+view.PublicID+"/reference-images", string(mustJSON(imageBody)))
+	createdImage.Body.Close()
+	if createdImage.StatusCode != http.StatusCreated {
+		t.Fatalf("image status = %d", createdImage.StatusCode)
+	}
+	version, err = service.GetVersion(t.Context(), created.Version.PublicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(version.Views[1].ReferenceImages) != 1 || version.Views[1].ReferenceImages[0].SortOrder != 1 {
+		t.Fatalf("omitted sort_order did not append: %#v", version.Views[1].ReferenceImages)
+	}
+}
+
 func jsonNumber(value uint) string {
 	return strings.TrimSpace(string(mustJSON(value)))
 }
