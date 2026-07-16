@@ -261,106 +261,9 @@ func (s *Server) listInventoryHistory(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": adjustments})
 }
 
-func (s *Server) listSOPTemplates(c *gin.Context) {
-	var templates []models.SOPTemplate
-	query := s.db.Preload("Views", func(db *gorm.DB) *gorm.DB {
-		return db.Order("sort_order ASC")
-	}).Preload("CatalogCategory").Order("updated_at DESC")
-	if categoryID := c.Query("category_id"); categoryID != "" {
-		query = query.Where("category_id = ?", categoryID)
-	}
-	if category := c.Query("category"); category != "" {
-		query = query.Where("category = ?", category)
-	}
-	if err := query.Find(&templates).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"data": templates})
-}
-
-type sopTemplateRequest struct {
-	CategoryID uint             `json:"category_id"`
-	Name       string           `json:"name" binding:"required"`
-	Category   string           `json:"category"`
-	Status     string           `json:"status"`
-	Views      []sopViewRequest `json:"views"`
-}
-
-type sopViewRequest struct {
-	Name       string `json:"name" binding:"required"`
-	SortOrder  int    `json:"sort_order"`
-	Required   bool   `json:"required"`
-	Prompt     string `json:"prompt"`
-	ExampleURL string `json:"example_url"`
-}
-
-func (s *Server) createSOPTemplate(c *gin.Context) {
-	var req sopTemplateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
-		return
-	}
-	if req.Status == "" {
-		req.Status = "active"
-	}
-
-	category, err := s.resolveCategory(s.db, req.CategoryID, req.Category)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
-		return
-	}
-	template := models.SOPTemplate{CategoryID: category.ID, Name: req.Name, Category: category.Name, Status: req.Status}
-	if err := s.db.Create(&template).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
-		return
-	}
-	for _, view := range req.Views {
-		_ = s.db.Create(&models.SOPView{
-			SOPTemplateID: template.ID,
-			Name:          view.Name,
-			SortOrder:     view.SortOrder,
-			Required:      view.Required,
-			Prompt:        view.Prompt,
-			ExampleURL:    view.ExampleURL,
-		}).Error
-	}
-	_ = s.db.Preload("Views").Preload("CatalogCategory").First(&template, template.ID).Error
-	c.JSON(http.StatusCreated, template)
-}
-
-func (s *Server) updateSOPTemplate(c *gin.Context) {
-	var template models.SOPTemplate
-	if err := s.db.First(&template, c.Param("id")).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"message": "template not found"})
-		return
-	}
-	var req sopTemplateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
-		return
-	}
-	template.Name = req.Name
-	category, err := s.resolveCategory(s.db, req.CategoryID, req.Category)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
-		return
-	}
-	template.CategoryID = category.ID
-	template.Category = category.Name
-	if req.Status != "" {
-		template.Status = req.Status
-	}
-	if err := s.db.Save(&template).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, template)
-}
-
 type photoSessionRequest struct {
-	SKUID         uint `json:"sku_id" binding:"required"`
-	SOPTemplateID uint `json:"sop_template_id" binding:"required"`
+	SKUID        uint `json:"sku_id" binding:"required"`
+	SOPVersionID uint `json:"sop_version_id" binding:"required"`
 }
 
 func (s *Server) createPhotoSession(c *gin.Context) {
@@ -373,7 +276,7 @@ func (s *Server) createPhotoSession(c *gin.Context) {
 	session := models.PhotoSession{
 		Code:           fmt.Sprintf("PS-%s-%d", time.Now().Format("20060102"), time.Now().UnixNano()),
 		SKUID:          req.SKUID,
-		SOPTemplateID:  req.SOPTemplateID,
+		SOPVersionID:   req.SOPVersionID,
 		PhotographerID: user.ID,
 		Status:         "in_progress",
 	}

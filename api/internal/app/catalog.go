@@ -32,7 +32,7 @@ func (s *Server) listCategories(c *gin.Context) {
 	for _, category := range categories {
 		var skuCount, sopTemplateCount int64
 		_ = s.db.Model(&models.Product{}).Where("category_id = ?", category.ID).Count(&skuCount).Error
-		_ = s.db.Model(&models.SOPTemplate{}).Where("category_id = ?", category.ID).Count(&sopTemplateCount).Error
+		_ = s.db.Model(&models.CaptureSOP{}).Where("category_id = ?", category.ID).Count(&sopTemplateCount).Error
 		result = append(result, categorySummary{
 			ID:               category.ID,
 			Name:             category.Name,
@@ -84,7 +84,7 @@ func (s *Server) deleteCategory(c *gin.Context) {
 
 	var productCount, sopTemplateCount int64
 	_ = s.db.Model(&models.Product{}).Where("category_id = ?", category.ID).Count(&productCount).Error
-	_ = s.db.Model(&models.SOPTemplate{}).Where("category_id = ?", category.ID).Count(&sopTemplateCount).Error
+	_ = s.db.Model(&models.CaptureSOP{}).Where("category_id = ?", category.ID).Count(&sopTemplateCount).Error
 	if productCount > 0 || sopTemplateCount > 0 {
 		c.JSON(http.StatusConflict, gin.H{"message": "category is in use by SKU or SOP templates"})
 		return
@@ -214,7 +214,7 @@ func (s *Server) listAssetReviewHierarchy(c *gin.Context) {
 		categories[categoryPosition].SKUs[skuPosition].Assets = append(categories[categoryPosition].SKUs[skuPosition].Assets, assetReviewHierarchyAsset{
 			ID: asset.ID, OriginalURL: asset.OriginalURL, ThumbnailURL: asset.ThumbnailURL,
 			ReviewStatus: asset.ReviewStatus, CapturedAt: asset.CapturedAt.Format(time.RFC3339),
-			SOPViewName: asset.SOPView.Name, PhotoSessionCode: asset.PhotoSession.Code,
+			SOPViewName: asset.SOPView.NameEN, PhotoSessionCode: asset.PhotoSession.Code,
 		})
 	}
 

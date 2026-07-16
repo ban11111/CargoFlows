@@ -26,8 +26,10 @@ func Migrate(db *gorm.DB) error {
 		&models.Product{},
 		&models.SKU{},
 		&models.InventoryAdjustment{},
-		&models.SOPTemplate{},
+		&models.CaptureSOP{},
+		&models.SOPVersion{},
 		&models.SOPView{},
+		&models.SOPViewReferenceImage{},
 		&models.PhotoSession{},
 		&models.Asset{},
 		&models.AssetReview{},
@@ -85,19 +87,7 @@ func Seed(db *gorm.DB) error {
 		return err
 	}
 
-	template := models.SOPTemplate{CategoryID: phoneCase.ID, Name: "手机壳电商标准拍摄", Category: phoneCase.Name, Status: "active"}
-	if err := db.Create(&template).Error; err != nil {
-		return err
-	}
-
-	views := []models.SOPView{
-		{SOPTemplateID: template.ID, Name: "Front", SortOrder: 1, Required: true, Prompt: "商品正面居中，保留完整轮廓。"},
-		{SOPTemplateID: template.ID, Name: "Back", SortOrder: 2, Required: true, Prompt: "商品背面居中，避免反光。"},
-		{SOPTemplateID: template.ID, Name: "Left", SortOrder: 3, Required: true, Prompt: "左侧 90 度视角。"},
-		{SOPTemplateID: template.ID, Name: "Right", SortOrder: 4, Required: true, Prompt: "右侧 90 度视角。"},
-		{SOPTemplateID: template.ID, Name: "Label", SortOrder: 5, Required: true, Prompt: "拍清标签、条码和材质信息。"},
-	}
-	return db.Create(&views).Error
+	return nil
 }
 
 func seedCatalog(db *gorm.DB) error {
@@ -153,22 +143,6 @@ func seedCatalog(db *gorm.DB) error {
 		}
 	}
 
-	var templates []models.SOPTemplate
-	if err := db.Find(&templates).Error; err != nil {
-		return err
-	}
-	for _, template := range templates {
-		if template.CategoryID != 0 || strings.TrimSpace(template.Category) == "" {
-			continue
-		}
-		category, err := ensureCategory(db, template.Category)
-		if err != nil {
-			return err
-		}
-		if err := db.Model(&template).Update("category_id", category.ID).Error; err != nil {
-			return err
-		}
-	}
 	return nil
 }
 

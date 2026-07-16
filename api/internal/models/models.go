@@ -81,39 +81,17 @@ type InventoryAdjustment struct {
 	Operator      User      `json:"operator"`
 }
 
-type SOPTemplate struct {
-	ID              uint      `gorm:"primaryKey" json:"id"`
-	CategoryID      uint      `gorm:"index" json:"category_id"`
-	Name            string    `gorm:"size:160;not null" json:"name"`
-	Category        string    `gorm:"size:120;index" json:"category"`
-	Status          string    `gorm:"size:32;not null;default:active" json:"status"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
-	Views           []SOPView `json:"views,omitempty"`
-	CatalogCategory Category  `gorm:"foreignKey:CategoryID" json:"category_record"`
-}
-
-type SOPView struct {
-	ID            uint      `gorm:"primaryKey" json:"id"`
-	SOPTemplateID uint      `gorm:"index;not null" json:"sop_template_id"`
-	Name          string    `gorm:"size:120;not null" json:"name"`
-	SortOrder     int       `gorm:"not null" json:"sort_order"`
-	Required      bool      `gorm:"not null;default:true" json:"required"`
-	Prompt        string    `gorm:"type:text" json:"prompt"`
-	ExampleURL    string    `gorm:"size:500" json:"example_url"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
-}
-
 type PhotoSession struct {
-	ID             uint      `gorm:"primaryKey" json:"id"`
-	Code           string    `gorm:"size:80;uniqueIndex;not null" json:"code"`
-	SKUID          uint      `gorm:"index;not null" json:"sku_id"`
-	SOPTemplateID  uint      `gorm:"index;not null" json:"sop_template_id"`
-	PhotographerID uint      `gorm:"index;not null" json:"photographer_id"`
-	Status         string    `gorm:"size:32;not null;default:in_progress" json:"status"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             uint       `gorm:"primaryKey" json:"-"`
+	PublicID       string     `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
+	Code           string     `gorm:"size:80;uniqueIndex;not null" json:"code"`
+	SKUID          uint       `gorm:"index;not null" json:"sku_id"`
+	SOPVersionID   uint       `gorm:"index;not null" json:"-"`
+	PhotographerID uint       `gorm:"index;not null" json:"photographer_id"`
+	Status         string     `gorm:"size:32;not null;default:in_progress" json:"status"`
+	SOPVersion     SOPVersion `json:"sop_version"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 type Asset struct {
