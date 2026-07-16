@@ -5,16 +5,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useUnsavedNavigationGuard } from "./use-unsaved-navigation-guard";
 
 interface NavigateEventInit {
+  cancelable?: boolean;
+  downloadRequest?: string | null;
   navigationType?: "push" | "replace" | "reload" | "traverse";
   url?: string;
 }
 
 class FakeNavigateEvent extends Event {
+  downloadRequest: string | null;
   navigationType: NavigateEventInit["navigationType"];
   destination: { url: string; sameDocument: boolean };
 
-  constructor({ navigationType = "traverse", url = `${window.location.origin}/previous` }: NavigateEventInit = {}) {
-    super("navigate", { cancelable: true });
+  constructor({ cancelable = true, downloadRequest = null, navigationType = "traverse", url = `${window.location.origin}/previous` }: NavigateEventInit = {}) {
+    super("navigate", { cancelable });
+    this.downloadRequest = downloadRequest;
     this.navigationType = navigationType;
     this.destination = { url, sameDocument: true };
   }
@@ -124,6 +128,32 @@ describe("useUnsavedNavigationGuard", () => {
 
     expect(navigate).toHaveBeenCalledTimes(1);
     expect(confirm).toHaveBeenCalledTimes(1);
+  });
+
+  it("bypasses Navigation API download requests", () => {
+    const navigation = new FakeNavigation();
+    installNavigation(navigation);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<Harness />);
+
+    const download = new FakeNavigateEvent({ downloadRequest: "product-photo.jpg" });
+    navigation.dispatchEvent(download);
+
+    expect(confirm).not.toHaveBeenCalled();
+    expect(download.defaultPrevented).toBe(false);
+  });
+
+  it("bypasses non-cancelable Navigation API events", () => {
+    const navigation = new FakeNavigation();
+    installNavigation(navigation);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<Harness />);
+
+    const nonCancelable = new FakeNavigateEvent({ cancelable: false });
+    navigation.dispatchEvent(nonCancelable);
+
+    expect(confirm).not.toHaveBeenCalled();
+    expect(nonCancelable.defaultPrevented).toBe(false);
   });
 
   it("uses a non-corrupting fallback when Navigation API is unavailable", () => {

@@ -8,6 +8,7 @@ interface NavigationDestinationLike {
 
 interface NavigateEventLike extends Event {
   destination?: NavigationDestinationLike;
+  downloadRequest?: string | null;
 }
 
 interface NavigationLike {
@@ -75,6 +76,7 @@ export function useUnsavedNavigationGuard(active: boolean, message: string) {
 
     function navigationGuard(rawEvent: Event) {
       const event = rawEvent as NavigateEventLike;
+      if (!event.cancelable || event.downloadRequest !== null && event.downloadRequest !== undefined) return;
       if (!event.destination) return;
       const destination = new URL(event.destination.url, window.location.href);
       if (destination.origin !== window.location.origin || isSamePage(destination)) return;
