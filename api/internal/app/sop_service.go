@@ -19,6 +19,7 @@ var (
 	ErrDraftExists               = errors.New("an SOP draft already exists")
 	ErrReferenceLocked           = errors.New("reference-front view is locked")
 	ErrVersionNotFound           = errors.New("SOP version not found")
+	ErrCaptureSOPNotFound        = errors.New("capture SOP not found")
 	ErrSourceVersionNotPublished = errors.New("source SOP version is not published")
 )
 
@@ -49,6 +50,8 @@ type AddViewInput struct {
 }
 
 type UpdateViewInput struct {
+	Role                                         models.SOPViewRole
+	ViewKind                                     models.SOPViewKind
 	NameZH, NameEN, InstructionZH, InstructionEN string
 	Required                                     bool
 	CameraPosition, ImageUp, Target              sop.Vector3
@@ -107,19 +110,44 @@ func (s *SOPService) List(ctx context.Context, categoryID uint) ([]models.Captur
 	var result []models.CaptureSOP
 	db := s.db.WithContext(ctx).Model(&models.CaptureSOP{}).
 		Joins("JOIN sop_versions selectable_versions ON selectable_versions.capture_sop_id = capture_sops.id AND selectable_versions.status = ?", models.SOPVersionPublished).
-		Where("capture_sops.category_id = ?", categoryID).
 		Distinct("capture_sops.*").
 		Preload("Versions", "status = ?", models.SOPVersionPublished).
 		Preload("Versions.Views", func(db *gorm.DB) *gorm.DB { return db.Order("sequence ASC") }).
 		Preload("Versions.Views.ReferenceImages", func(db *gorm.DB) *gorm.DB { return db.Order("sort_order ASC") })
+	if categoryID != 0 {
+		db = db.Where("capture_sops.category_id = ?", categoryID)
+	}
 	if err := db.Find(&result).Error; err != nil {
 		return nil, err
 	}
 	return result, nil
 }
 
+func (s *SOPService) Get(ctx context.Context, publicID string) (*models.CaptureSOP, error) {
+	var result models.CaptureSOP
+	err := s.db.WithContext(ctx).
+		Preload("Versions", func(db *gorm.DB) *gorm.DB { return db.Order("version_number ASC") }).
+		Preload("Versions.Views", func(db *gorm.DB) *gorm.DB { return db.Order("sequence ASC") }).
+		Preload("Versions.Views.ReferenceImages", func(db *gorm.DB) *gorm.DB { return db.Order("sort_order ASC") }).
+		Where("public_id = ?", publicID).First(&result).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrCaptureSOPNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 func (s *SOPService) GetVersion(ctx context.Context, publicID string) (*models.SOPVersion, error) {
 	return getVersion(s.db.WithContext(ctx), publicID)
+}
+
+func (s *SOPService) RequireDraftView(ctx context.Context, versionPublicID, viewPublicID string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		_, _, err := draftVersionAndView(tx, versionPublicID, viewPublicID)
+		return err
+	})
 }
 
 func (s *SOPService) UpdateVersion(ctx context.Context, publicID string, input UpdateVersionInput) (*models.SOPVersion, error) {
@@ -191,6 +219,22 @@ func (s *SOPService) UpdateView(ctx context.Context, versionPublicID, viewPublic
 		if err := tx.Where("sop_version_id = ? AND public_id = ?", version.ID, viewPublicID).First(&view).Error; err != nil {
 			return err
 		}
+		role, kind := input.Role, input.ViewKind
+		if role == "" {
+			role = view.Role
+		}
+		if kind == "" {
+			kind = view.ViewKind
+		}
+		if view.Role == models.SOPViewReferenceFront && (role != models.SOPViewReferenceFront || kind != models.SOPViewStandard) {
+			return ErrReferenceLocked
+		}
+		if view.Role != models.SOPViewReferenceFront && role != models.SOPViewCapture {
+			return errors.New("capture view role must remain capture")
+		}
+		if kind != models.SOPViewStandard && kind != models.SOPViewDetail {
+			return errors.New("view_kind must be standard or detail")
+		}
 		pose, err := sop.CanonicalizePose(input.CameraPosition, input.ImageUp)
 		if err != nil {
 			if view.Role == models.SOPViewReferenceFront {
@@ -203,6 +247,8 @@ func (s *SOPService) UpdateView(ctx context.Context, versionPublicID, viewPublic
 			return ErrReferenceLocked
 		}
 		updates := viewUpdateMap(input, pose)
+		updates["role"] = role
+		updates["view_kind"] = kind
 		compositionJSON, err := json.Marshal(input.Composition)
 		if err != nil {
 			return err

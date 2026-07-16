@@ -1,0 +1,325 @@
+openapi: 3.0.3
+info:
+  title: CargoFlow API
+  version: 1.0.0
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+paths:
+  /capture-sops:
+    post:
+      operationId: createCaptureSOP
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateCaptureSOPRequest' } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/SOPVersion' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+    get:
+      operationId: listCaptureSOPs
+      parameters:
+        - { in: query, name: category_id, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: Capture SOPs
+          content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/CaptureSOPSummary' } } } } } }
+  /capture-sops/{sop_id}:
+    parameters: [ { $ref: '#/components/parameters/SOPID' } ]
+    get:
+      operationId: getCaptureSOP
+      responses:
+        '200': { description: Capture SOP, content: { application/json: { schema: { $ref: '#/components/schemas/CaptureSOPSummary' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /capture-sops/{sop_id}/versions:
+    parameters: [ { $ref: '#/components/parameters/SOPID' } ]
+    post:
+      operationId: copySOPVersion
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [source_version_id], properties: { source_version_id: { type: string, format: uuid } } } } }
+      responses:
+        '201': { description: Copied draft, content: { application/json: { schema: { $ref: '#/components/schemas/SOPVersion' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /sop-versions/{version_id}:
+    parameters: [ { $ref: '#/components/parameters/VersionID' } ]
+    get:
+      operationId: getSOPVersion
+      responses:
+        '200': { description: SOP version, content: { application/json: { schema: { $ref: '#/components/schemas/SOPVersion' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateSOPVersion
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/VersionMetadataRequest' } } }
+      responses:
+        '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/SOPVersion' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /sop-versions/{version_id}/views:
+    parameters: [ { $ref: '#/components/parameters/VersionID' } ]
+    post:
+      operationId: addSOPView
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AddViewRequest' } } }
+      responses:
+        '201': { description: View added, content: { application/json: { schema: { $ref: '#/components/schemas/SOPVersion' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /sop-versions/{version_id}/views/{view_id}:
+    parameters: [ { $ref: '#/components/parameters/VersionID' }, { $ref: '#/components/parameters/ViewID' } ]
+    patch:
+      operationId: updateSOPView
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ViewMutation' } } }
+      responses:
+        '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/SOPVersion' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      operationId: deleteSOPView
+      responses:
+        '204': { description: Deleted }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /sop-versions/{version_id}/view-order:
+    parameters: [ { $ref: '#/components/parameters/VersionID' } ]
+    put:
+      operationId: reorderSOPViews
+      requestBody: { $ref: '#/components/requestBodies/UUIDOrder' }
+      responses:
+        '200': { description: Reordered, content: { application/json: { schema: { $ref: '#/components/schemas/SOPVersion' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /sop-versions/{version_id}/validate:
+    parameters: [ { $ref: '#/components/parameters/VersionID' } ]
+    post:
+      operationId: validateSOPVersion
+      responses:
+        '200': { description: Validation result, content: { application/json: { schema: { $ref: '#/components/schemas/ValidationResponse' } } } }
+  /sop-versions/{version_id}/publish:
+    parameters: [ { $ref: '#/components/parameters/VersionID' } ]
+    post:
+      operationId: publishSOPVersion
+      responses:
+        '200': { description: Published, content: { application/json: { schema: { $ref: '#/components/schemas/SOPVersion' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { description: Validation failed, content: { application/json: { schema: { $ref: '#/components/schemas/ValidationResponse' } } } }
+  /sop-versions/{version_id}/archive:
+    parameters: [ { $ref: '#/components/parameters/VersionID' } ]
+    post:
+      operationId: archiveSOPVersion
+      responses:
+        '200': { description: Archived, content: { application/json: { schema: { $ref: '#/components/schemas/SOPVersion' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /sop-versions/{version_id}/views/{view_id}/reference-images/upload-url:
+    parameters: [ { $ref: '#/components/parameters/VersionID' }, { $ref: '#/components/parameters/ViewID' } ]
+    post:
+      operationId: createSOPReferenceUploadURL
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: false, required: [file_name, content_type], properties: { file_name: { type: string }, content_type: { type: string, pattern: '^image/' } } } } }
+      responses:
+        '200': { description: Upload details, content: { application/json: { schema: { $ref: '#/components/schemas/UploadEnvelope' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /sop-versions/{version_id}/views/{view_id}/reference-images:
+    parameters: [ { $ref: '#/components/parameters/VersionID' }, { $ref: '#/components/parameters/ViewID' } ]
+    post:
+      operationId: addSOPReferenceImage
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AddReferenceImageRequest' } } }
+      responses:
+        '201': { description: Reference image, content: { application/json: { schema: { $ref: '#/components/schemas/ReferenceImage' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /sop-versions/{version_id}/views/{view_id}/reference-images/{image_id}:
+    parameters: [ { $ref: '#/components/parameters/VersionID' }, { $ref: '#/components/parameters/ViewID' }, { $ref: '#/components/parameters/ImageID' } ]
+    delete:
+      operationId: deleteSOPReferenceImage
+      responses:
+        '204': { description: Deleted }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /sop-versions/{version_id}/views/{view_id}/reference-image-order:
+    parameters: [ { $ref: '#/components/parameters/VersionID' }, { $ref: '#/components/parameters/ViewID' } ]
+    put:
+      operationId: reorderSOPReferenceImages
+      requestBody: { $ref: '#/components/requestBodies/UUIDOrder' }
+      responses:
+        '200': { description: Reordered, content: { application/json: { schema: { $ref: '#/components/schemas/SOPVersion' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    SOPID: { in: path, name: sop_id, required: true, schema: { type: string, format: uuid } }
+    VersionID: { in: path, name: version_id, required: true, schema: { type: string, format: uuid } }
+    ViewID: { in: path, name: view_id, required: true, schema: { type: string, format: uuid } }
+    ImageID: { in: path, name: image_id, required: true, schema: { type: string, format: uuid } }
+  requestBodies:
+    UUIDOrder:
+      required: true
+      content: { application/json: { schema: { type: object, additionalProperties: false, required: [public_ids], properties: { public_ids: { type: array, items: { type: string, format: uuid }, uniqueItems: true } } } } }
+  responses:
+    BadRequest: { description: Invalid input, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+    NotFound: { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+    Conflict: { description: Lifecycle conflict, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+  schemas:
+    LocalizedText:
+      type: object
+      additionalProperties: false
+      required: [zh-CN, en]
+      properties: { zh-CN: { type: string }, en: { type: string } }
+    Vector3:
+      type: array
+      minItems: 3
+      maxItems: 3
+      items: { type: number, format: double }
+    Composition:
+      type: object
+      additionalProperties: false
+      required: [frame_occupancy, aspect_ratio, allow_rotation_correction, allow_mirror]
+      properties:
+        frame_occupancy: { type: number, exclusiveMinimum: 0, maximum: 1 }
+        aspect_ratio: { type: string, pattern: '^[1-9][0-9]*:[1-9][0-9]*$' }
+        allow_rotation_correction: { type: boolean }
+        allow_mirror: { type: boolean, enum: [false] }
+    Pose:
+      type: object
+      additionalProperties: false
+      required: [space, camera_position_direction, image_up_direction, target]
+      properties:
+        space: { type: string, enum: [object] }
+        camera_position_direction: { $ref: '#/components/schemas/Vector3' }
+        image_up_direction: { $ref: '#/components/schemas/Vector3' }
+        target: { $ref: '#/components/schemas/Vector3' }
+    ReferenceImage:
+      type: object
+      required: [public_id, object_key, thumbnail_url, sort_order, caption]
+      properties:
+        public_id: { type: string, format: uuid }
+        object_key: { type: string }
+        thumbnail_url: { type: string }
+        sort_order: { type: integer, minimum: 1 }
+        caption: { $ref: '#/components/schemas/LocalizedText' }
+        created_at: { type: string, format: date-time }
+    SOPView:
+      type: object
+      required: [public_id, sequence, role, view_kind, name, instruction, required, pose, composition, reference_images]
+      properties:
+        public_id: { type: string, format: uuid }
+        sequence: { type: integer, minimum: 1 }
+        role: { type: string, enum: [reference_front, capture] }
+        view_kind: { type: string, enum: [standard, detail] }
+        preset_key: { type: string }
+        name: { $ref: '#/components/schemas/LocalizedText' }
+        instruction: { $ref: '#/components/schemas/LocalizedText' }
+        required: { type: boolean }
+        pose: { $ref: '#/components/schemas/Pose' }
+        composition: { $ref: '#/components/schemas/Composition' }
+        reference_images: { type: array, items: { $ref: '#/components/schemas/ReferenceImage' } }
+    CoordinateSystem:
+      type: object
+      additionalProperties: false
+      required: [id, handedness, origin, unit, axes]
+      properties:
+        id: { type: string, enum: [pcs_object_v1] }
+        handedness: { type: string, enum: [right_handed] }
+        origin: { type: string, enum: [bounding_box_center] }
+        unit: { type: string, enum: [normalized] }
+        axes:
+          type: object
+          additionalProperties: false
+          required: [x_positive, y_positive, z_positive]
+          properties:
+            x_positive: { type: string, enum: [object_top] }
+            y_positive: { type: string, enum: [object_left] }
+            z_positive: { type: string, enum: [object_front] }
+    SOPVersion:
+      type: object
+      required: [schema_version, public_id, sop_public_id, version_number, status, name, description, coordinate_system, views]
+      properties:
+        schema_version: { type: string, enum: ['1.0'] }
+        public_id: { type: string, format: uuid }
+        sop_public_id: { type: string, format: uuid }
+        version_number: { type: integer, minimum: 1 }
+        status: { type: string, enum: [draft, published, archived] }
+        name: { $ref: '#/components/schemas/LocalizedText' }
+        description: { $ref: '#/components/schemas/LocalizedText' }
+        coordinate_system: { $ref: '#/components/schemas/CoordinateSystem' }
+        published_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        views: { type: array, items: { $ref: '#/components/schemas/SOPView' } }
+    CaptureSOPSummary:
+      type: object
+      required: [public_id, category_id, versions]
+      properties:
+        public_id: { type: string, format: uuid }
+        category_id: { type: integer, minimum: 1 }
+        versions: { type: array, items: { $ref: '#/components/schemas/SOPVersion' } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ViewMutation:
+      type: object
+      additionalProperties: false
+      required: [role, view_kind, name, instruction, required, pose, composition]
+      properties:
+        role: { type: string, enum: [reference_front, capture] }
+        view_kind: { type: string, enum: [standard, detail] }
+        name: { $ref: '#/components/schemas/LocalizedText' }
+        instruction: { $ref: '#/components/schemas/LocalizedText' }
+        required: { type: boolean }
+        pose: { $ref: '#/components/schemas/Pose' }
+        composition: { $ref: '#/components/schemas/Composition' }
+    AddViewRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        preset_key: { type: string, enum: [back, left, bottom, right, top, detail_label, packaging_front] }
+        custom: { $ref: '#/components/schemas/ViewMutation' }
+    CreateCaptureSOPRequest:
+      type: object
+      additionalProperties: false
+      required: [category_id, name]
+      properties:
+        category_id: { type: integer, minimum: 1 }
+        name: { $ref: '#/components/schemas/LocalizedText' }
+        description: { $ref: '#/components/schemas/LocalizedText' }
+    VersionMetadataRequest:
+      type: object
+      additionalProperties: false
+      required: [name, description]
+      properties:
+        name: { $ref: '#/components/schemas/LocalizedText' }
+        description: { $ref: '#/components/schemas/LocalizedText' }
+    AddReferenceImageRequest:
+      type: object
+      additionalProperties: false
+      required: [object_key, thumbnail_url, caption]
+      properties:
+        object_key: { type: string }
+        thumbnail_url: { type: string }
+        caption: { $ref: '#/components/schemas/LocalizedText' }
+        sort_order: { type: integer, minimum: 1 }
+    ValidationError:
+      type: object
+      required: [code, path, message]
+      properties: { code: { type: string }, path: { type: string }, message: { $ref: '#/components/schemas/LocalizedText' } }
+    ValidationResponse:
+      type: object
+      required: [code, errors]
+      properties:
+        code: { type: string, enum: [sop_valid, sop_validation_failed] }
+        errors: { type: array, items: { $ref: '#/components/schemas/ValidationError' } }
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties: { code: { type: string }, message: { type: string } }
+    UploadEnvelope:
+      type: object
+      required: [method, upload_url, asset_url, object_key, expires_in, headers]
+      properties:
+        method: { type: string, enum: [PUT] }
+        upload_url: { type: string, format: uri }
+        asset_url: { type: string, format: uri }
+        object_key: { type: string }
+        expires_in: { type: integer }
+        headers: { type: object, additionalProperties: { type: string } }
