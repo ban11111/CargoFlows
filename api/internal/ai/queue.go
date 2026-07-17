@@ -33,8 +33,9 @@ type LeasedItem struct {
 }
 
 type Queue struct {
-	db    *gorm.DB
-	clock Clock
+	db             *gorm.DB
+	clock          Clock
+	runTransaction func(context.Context, func(*gorm.DB) error) error
 }
 
 func NewQueue(db *gorm.DB) *Queue { return newQueueWithClock(db, SystemClock{}) }
@@ -43,7 +44,13 @@ func newQueueWithClock(db *gorm.DB, clock Clock) *Queue {
 	if clock == nil {
 		clock = SystemClock{}
 	}
-	return &Queue{db: db, clock: clock}
+	return &Queue{
+		db:    db,
+		clock: clock,
+		runTransaction: func(ctx context.Context, fn func(*gorm.DB) error) error {
+			return db.WithContext(ctx).Transaction(fn)
+		},
+	}
 }
 
 func (q *Queue) LeaseNext(ctx context.Context, workerID string, now time.Time, ttl time.Duration) (*LeasedItem, error) {
@@ -55,7 +62,8 @@ func (q *Queue) LeaseNext(ctx context.Context, workerID string, now time.Time, t
 	}
 	var leased *LeasedItem
 	for attempt := 0; attempt < sqliteLeaseAttempts; attempt++ {
-		err := q.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		leased = nil
+		err := q.runTransaction(ctx, func(tx *gorm.DB) error {
 			item, found, err := selectLeaseCandidate(tx, now)
 			if err != nil || !found {
 				return err

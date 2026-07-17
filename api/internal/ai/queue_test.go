@@ -1,6 +1,8 @@
 package ai
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -20,20 +22,55 @@ func seedQueueItems(t *testing.T, count int) (*gorm.DB, models.AIJob, []models.A
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&models.AIJob{}, &models.AIJobItem{}, &models.AIExecution{}, &models.AIAuditEvent{}); err != nil {
+	if err := db.AutoMigrate(&models.AIContentTemplate{}, &models.AIContentTemplateVersion{}, &models.AIContentSlot{}, &models.AIJob{}, &models.AIJobItem{}, &models.AIExecution{}, &models.AIAuditEvent{}); err != nil {
 		t.Fatal(err)
 	}
-	job := models.AIJob{PublicID: uuid.NewString(), SKUID: 1, AIContentTemplateVersionID: 1, TargetPlatform: "lazada", Locale: "zh-CN", Status: models.AIJobQueued, SnapshotSchema: ProductSnapshotSchemaV1, InputSnapshotJSON: []byte(`{"schema":"ai_product_snapshot.v1"}`), CreatedByID: 1}
+	template := models.AIContentTemplate{PublicID: uuid.NewString(), NameZH: "测试模板", NameEN: "Test template", TargetPlatform: "lazada", Status: models.AIContentTemplateActive, CreatedByID: 1}
+	if err := db.Create(&template).Error; err != nil {
+		t.Fatal(err)
+	}
+	version := models.AIContentTemplateVersion{PublicID: uuid.NewString(), AIContentTemplateID: template.ID, VersionNumber: 1, Status: models.AITemplatePublished, DefaultLocale: "zh-CN", PromptCompilerVersion: "v1", PlatformPrompt: "test", CreatedByID: 1}
+	if err := db.Create(&version).Error; err != nil {
+		t.Fatal(err)
+	}
+	slots := make([]models.AIContentSlot, count)
+	slotSnapshots := make([]SlotFacts, count)
+	selectedAssets := []AssetFacts{}
+	for i := range slots {
+		kind := models.AIContentSlotTitle
+		if i%2 == 1 {
+			kind = models.AIContentSlotImage
+			if len(selectedAssets) == 0 {
+				selectedAssets = append(selectedAssets, AssetFacts{ID: 101})
+			}
+		}
+		slotKey := fmt.Sprintf("slot-%d", i)
+		slots[i] = models.AIContentSlot{PublicID: uuid.NewString(), AIContentTemplateVersionID: version.ID, SlotKey: slotKey, Kind: kind, NameZH: slotKey, NameEN: slotKey, Sequence: i + 1, PromptFragment: slotKey, ConstraintsJSON: []byte(`{}`), GenerationConfigJSON: []byte(`{}`), LayoutConfigJSON: []byte(`{}`)}
+		if err := db.Create(&slots[i]).Error; err != nil {
+			t.Fatal(err)
+		}
+		slotSnapshots[i] = SlotFacts{PublicID: slots[i].PublicID, SlotKey: slotKey, Kind: kind, Sequence: i + 1, PromptFragment: slotKey, Constraints: json.RawMessage(`{}`), GenerationConfig: json.RawMessage(`{}`), LayoutConfig: json.RawMessage(`{}`)}
+	}
+	snapshot := ProductSnapshotV1{Schema: ProductSnapshotSchemaV1, Template: TemplateFacts{TemplatePublicID: template.PublicID, VersionPublicID: version.PublicID, VersionNumber: version.VersionNumber, SelectedSlots: slotSnapshots}, SelectedAssets: selectedAssets}
+	snapshotJSON, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := models.AIJob{PublicID: uuid.NewString(), SKUID: 1, AIContentTemplateVersionID: version.ID, TargetPlatform: "lazada", Locale: "zh-CN", Status: models.AIJobQueued, SnapshotSchema: ProductSnapshotSchemaV1, InputSnapshotJSON: snapshotJSON, CreatedByID: 1}
 	if err := db.Create(&job).Error; err != nil {
 		t.Fatal(err)
 	}
 	items := make([]models.AIJobItem, count)
 	for i := range items {
-		kind := models.AIContentSlotTitle
-		if i%2 == 1 {
-			kind = models.AIContentSlotImage
+		slotSnapshotJSON, err := json.Marshal(slotSnapshots[i])
+		if err != nil {
+			t.Fatal(err)
 		}
-		items[i] = models.AIJobItem{PublicID: uuid.NewString(), AIJobID: job.ID, AIContentSlotID: uint(i + 10), SlotKey: fmt.Sprintf("slot-%d", i), SlotSnapshotJSON: []byte(fmt.Sprintf(`{"public_id":"%s"}`, uuid.NewString())), Kind: kind, Status: models.AIJobItemQueued, SelectedInputAssetIDsJSON: []byte(`[]`)}
+		assetIDsJSON := []byte(`[]`)
+		if slots[i].Kind == models.AIContentSlotImage {
+			assetIDsJSON = []byte(`[101]`)
+		}
+		items[i] = models.AIJobItem{PublicID: uuid.NewString(), AIJobID: job.ID, AIContentSlotID: slots[i].ID, SlotKey: slots[i].SlotKey, SlotSnapshotJSON: slotSnapshotJSON, Kind: slots[i].Kind, Status: models.AIJobItemQueued, SelectedInputAssetIDsJSON: assetIDsJSON}
 		if err := db.Create(&items[i]).Error; err != nil {
 			t.Fatal(err)
 		}
@@ -98,6 +135,29 @@ func TestConcurrentLeaseReturnsEachItemOnce(t *testing.T) {
 	}
 	if len(got) != len(items) {
 		t.Fatalf("leased %d distinct items, want %d", len(got), len(items))
+	}
+}
+
+func TestLeaseNextClearsStaleResultBeforeNoCandidateRetry(t *testing.T) {
+	db, _, _ := seedQueueItems(t, 1)
+	queue := NewQueue(db)
+	calls := 0
+	queue.runTransaction = func(ctx context.Context, fn func(*gorm.DB) error) error {
+		calls++
+		if err := fn(db.WithContext(ctx)); err != nil {
+			return err
+		}
+		if calls == 1 {
+			return errLeaseContended
+		}
+		return nil
+	}
+	leased, err := queue.LeaseNext(t.Context(), "worker-a", time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leased != nil {
+		t.Fatalf("lease after retryable commit failure and empty retry = %#v, want nil", leased)
 	}
 }
 
