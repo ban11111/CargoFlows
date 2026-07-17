@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestLoadUsesDefaults(t *testing.T) {
 	t.Setenv("API_PORT", "")
@@ -26,5 +29,22 @@ func TestLoadReadsAIConfiguration(t *testing.T) {
 	cfg := Load()
 	if cfg.SecretsMasterKey == "" || cfg.OpenAIBaseURL != "https://example.test/v1" || !cfg.AIWorkerDryRun {
 		t.Fatalf("unexpected AI config: %#v", cfg)
+	}
+}
+
+func TestLoadUsesAndReadsOpenAITextDefaults(t *testing.T) {
+	t.Setenv("OPENAI_TEXT_MODEL", "")
+	t.Setenv("OPENAI_REASONING_EFFORT", "")
+	t.Setenv("OPENAI_REQUEST_TIMEOUT", "")
+	cfg := Load()
+	if cfg.OpenAITextModel != "gpt-5.6-terra" || cfg.OpenAIReasoningEffort != "low" || cfg.OpenAIRequestTimeout != 120*time.Second {
+		t.Fatalf("unexpected defaults: %#v", cfg)
+	}
+	t.Setenv("OPENAI_TEXT_MODEL", "test-model")
+	t.Setenv("OPENAI_REASONING_EFFORT", "medium")
+	t.Setenv("OPENAI_REQUEST_TIMEOUT", "45s")
+	cfg = Load()
+	if cfg.OpenAITextModel != "test-model" || cfg.OpenAIReasoningEffort != "medium" || cfg.OpenAIRequestTimeout != 45*time.Second {
+		t.Fatalf("unexpected configured values: %#v", cfg)
 	}
 }

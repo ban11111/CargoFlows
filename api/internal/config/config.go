@@ -6,36 +6,42 @@ import (
 )
 
 type Config struct {
-	Port                 string
-	DatabaseDSN          string
-	JWTSecret            string
-	AppEnv               string
-	MinIOEndpoint        string
-	MinIOPublicEndpoint  string
-	MinIOAccessKey       string
-	MinIOSecretKey       string
-	MinIOBucket          string
-	SecretsMasterKey     string
-	OpenAIBaseURL        string
-	AIWorkerDryRun       bool
-	AIWorkerPollInterval time.Duration
+	Port                  string
+	DatabaseDSN           string
+	JWTSecret             string
+	AppEnv                string
+	MinIOEndpoint         string
+	MinIOPublicEndpoint   string
+	MinIOAccessKey        string
+	MinIOSecretKey        string
+	MinIOBucket           string
+	SecretsMasterKey      string
+	OpenAIBaseURL         string
+	OpenAITextModel       string
+	OpenAIReasoningEffort string
+	OpenAIRequestTimeout  time.Duration
+	AIWorkerDryRun        bool
+	AIWorkerPollInterval  time.Duration
 }
 
 func Load() Config {
 	return Config{
-		Port:                 getEnv("API_PORT", "8080"),
-		DatabaseDSN:          getEnv("DB_DSN", "cargoflow:cargoflow@tcp(127.0.0.1:3306)/cargoflow?charset=utf8mb4&parseTime=True&loc=Local"),
-		JWTSecret:            getEnv("JWT_SECRET", "dev-secret-change-me"),
-		AppEnv:               getEnv("APP_ENV", "development"),
-		MinIOEndpoint:        getEnv("MINIO_ENDPOINT", "127.0.0.1:9000"),
-		MinIOPublicEndpoint:  getEnv("MINIO_PUBLIC_ENDPOINT", "127.0.0.1:9000"),
-		MinIOAccessKey:       getEnv("MINIO_ROOT_USER", "cargoflow"),
-		MinIOSecretKey:       getEnv("MINIO_ROOT_PASSWORD", "cargoflow123"),
-		MinIOBucket:          getEnv("MINIO_BUCKET", "cargoflow"),
-		SecretsMasterKey:     getEnv("CARGOFLOW_SECRETS_MASTER_KEY", ""),
-		OpenAIBaseURL:        getEnv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-		AIWorkerDryRun:       getEnv("AI_WORKER_DRY_RUN", "false") == "true",
-		AIWorkerPollInterval: getDurationEnv("AI_WORKER_POLL_INTERVAL", time.Second),
+		Port:                  getEnv("API_PORT", "8080"),
+		DatabaseDSN:           getEnv("DB_DSN", "cargoflow:cargoflow@tcp(127.0.0.1:3306)/cargoflow?charset=utf8mb4&parseTime=True&loc=Local"),
+		JWTSecret:             getEnv("JWT_SECRET", "dev-secret-change-me"),
+		AppEnv:                getEnv("APP_ENV", "development"),
+		MinIOEndpoint:         getEnv("MINIO_ENDPOINT", "127.0.0.1:9000"),
+		MinIOPublicEndpoint:   getEnv("MINIO_PUBLIC_ENDPOINT", "127.0.0.1:9000"),
+		MinIOAccessKey:        getEnv("MINIO_ROOT_USER", "cargoflow"),
+		MinIOSecretKey:        getEnv("MINIO_ROOT_PASSWORD", "cargoflow123"),
+		MinIOBucket:           getEnv("MINIO_BUCKET", "cargoflow"),
+		SecretsMasterKey:      getEnv("CARGOFLOW_SECRETS_MASTER_KEY", ""),
+		OpenAIBaseURL:         getEnv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+		OpenAITextModel:       getEnv("OPENAI_TEXT_MODEL", "gpt-5.6-terra"),
+		OpenAIReasoningEffort: getEnv("OPENAI_REASONING_EFFORT", "low"),
+		OpenAIRequestTimeout:  getDurationEnv("OPENAI_REQUEST_TIMEOUT", 120*time.Second),
+		AIWorkerDryRun:        getEnv("AI_WORKER_DRY_RUN", "false") == "true",
+		AIWorkerPollInterval:  getDurationEnv("AI_WORKER_POLL_INTERVAL", time.Second),
 	}
 }
 
