@@ -92,6 +92,57 @@ API key from the administrator OpenAI settings page, then start the worker with
 environment files, source code, logs, or chat. Real image slots are rejected
 without a provider call until image execution is implemented.
 
+All normal AI jobs use that single administrator-managed credential. The API
+encrypts it in the database, never returns the plaintext, and the worker decrypts
+it only immediately before a provider call. Product text candidates remain
+separate from formal platform content until an operator edits (optionally),
+approves, previews, and explicitly applies one candidate; each application creates
+an immutable revision.
+
+### OpenAI verification
+
+The default verification suite is deterministic and does not contact OpenAI:
+
+```bash
+cd api
+go test ./internal/ai ./cmd/openai-smoke
+
+cd ../web
+../scripts/run-ai-text-e2e.sh
+```
+
+The Go integration test sends a real Responses-format request to a local fake
+provider and verifies request sanitization, candidate persistence, token audit,
+credential clearing, and zero provider calls for image slots. The Playwright
+harness starts a clean MySQL/API/live worker/fake-provider stack, configures the
+fake credential through the administrator page, and exercises the real Web,
+authentication, API, encrypted credential, queue, provider, persistence, edit,
+approval, preview, application, and revision workflow. It tears down its isolated
+Compose project and volumes after the test.
+
+An optional real-provider smoke command exists only for a developer-controlled
+local check. It is disabled unless `OPENAI_SMOKE_TEST=1`, accepts a newly rotated
+key only through the process environment, refuses non-official API base URLs,
+uses `store=false`, and prints only validated
+provider IDs, model, and token counts—never generated content, prompts, or the
+credential. Do not run it in CI. Prefer the admin settings page for all normal
+configuration. If a key has ever been pasted into chat, logs, source, or a command,
+revoke it before doing anything else.
+
+For a one-off local smoke check, enter the rotated key without terminal echo and
+run the command in the same shell:
+
+```bash
+read -rs OPENAI_API_KEY
+export OPENAI_API_KEY OPENAI_SMOKE_TEST=1
+cd api
+go run ./cmd/openai-smoke
+unset OPENAI_API_KEY OPENAI_SMOKE_TEST
+```
+
+The same opt-in harness is available through the Compose `smoke` profile after
+setting those environment values: `docker compose --profile smoke run --rm openai-smoke`.
+
 The Web product-capture SOP routes are:
 
 - `/sop-templates` for lifecycle management;

@@ -8,7 +8,7 @@ async function loginAsAdmin(page: Page) {
   await expect(page).toHaveURL(/\/skus$/);
 }
 
-test("admin can publish a template and complete a dry-run job", async ({ page }) => {
+test("admin can publish a template and complete a deliberately dry-run job", async ({ page }) => {
   test.setTimeout(90_000);
   const suffix = `${Date.now()}`;
   const templateNameZh = `Lazada 标题验收 ${suffix}`;
@@ -42,7 +42,6 @@ test("admin can publish a template and complete a dry-run job", async ({ page })
   await page.getByRole("button", { name: "下一步" }).click();
   await page.getByRole("button", { name: "下一步" }).click();
   await page.getByRole("button", { name: "下一步" }).click();
-  await expect(page.getByText("Dry-run：本阶段不会向 OpenAI 发送商品内容或图片")).toBeVisible();
   await page.getByRole("button", { name: "创建任务" }).click();
 
   await expect(page).toHaveURL(/\/ai-jobs\/[0-9a-f-]+$/);

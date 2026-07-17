@@ -358,21 +358,24 @@ type textResultBinding struct {
 }
 
 func loadTextResultBinding(db *gorm.DB, jobPublicID, itemPublicID, resultPublicID string, lock bool) (textResultBinding, error) {
-	query := db
-	if lock && db.Dialector.Name() == "mysql" {
-		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	newQuery := func() *gorm.DB {
+		query := db.Session(&gorm.Session{NewDB: true})
+		if lock && db.Dialector.Name() == "mysql" {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		return query
 	}
 	var binding textResultBinding
-	if err := query.Where("public_id = ?", jobPublicID).First(&binding.job).Error; err != nil {
+	if err := newQuery().Where("public_id = ?", jobPublicID).First(&binding.job).Error; err != nil {
 		return binding, textResultNotFound(err)
 	}
-	if err := query.Where("public_id = ? AND ai_job_id = ?", itemPublicID, binding.job.ID).First(&binding.item).Error; err != nil {
+	if err := newQuery().Where("public_id = ? AND ai_job_id = ?", itemPublicID, binding.job.ID).First(&binding.item).Error; err != nil {
 		return binding, textResultNotFound(err)
 	}
-	if err := query.Where("public_id = ?", resultPublicID).First(&binding.result).Error; err != nil {
+	if err := newQuery().Where("public_id = ?", resultPublicID).First(&binding.result).Error; err != nil {
 		return binding, textResultNotFound(err)
 	}
-	if err := query.Where("id = ? AND ai_job_item_id = ?", binding.result.AIExecutionID, binding.item.ID).First(&binding.execution).Error; err != nil {
+	if err := newQuery().Where("id = ? AND ai_job_item_id = ?", binding.result.AIExecutionID, binding.item.ID).First(&binding.execution).Error; err != nil {
 		return binding, ErrTextResultNotFound
 	}
 	return binding, nil
