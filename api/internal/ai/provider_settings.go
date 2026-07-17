@@ -37,6 +37,12 @@ type ProviderSettingView struct {
 	LastUsedAt                *time.Time `json:"last_used_at"`
 }
 
+type ActiveOpenAICredential struct {
+	SettingID      uint
+	KeyFingerprint string
+	APIKey         []byte
+}
+
 type ProviderSettingsService struct {
 	db       *gorm.DB
 	box      *secrets.AESGCM
@@ -138,19 +144,31 @@ func (s *ProviderSettingsService) Disable(ctx context.Context, actorID uint) (Pr
 }
 
 func (s *ProviderSettingsService) DecryptActiveKey(ctx context.Context) ([]byte, error) {
-	var row models.OpenAIProviderSetting
-	err := s.db.WithContext(ctx).Where("provider = ? AND status = ?", openAIProvider, "active").First(&row).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, ErrProviderNotActive
-	}
+	credential, err := s.DecryptActiveCredential(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return s.box.Open(secrets.EncryptedValue{
+	return credential.APIKey, nil
+}
+
+func (s *ProviderSettingsService) DecryptActiveCredential(ctx context.Context) (ActiveOpenAICredential, error) {
+	var row models.OpenAIProviderSetting
+	err := s.db.WithContext(ctx).Where("provider = ? AND status = ?", openAIProvider, "active").First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ActiveOpenAICredential{}, ErrProviderNotActive
+	}
+	if err != nil {
+		return ActiveOpenAICredential{}, err
+	}
+	plain, err := s.box.Open(secrets.EncryptedValue{
 		Ciphertext: row.EncryptedAPIKey,
 		Nonce:      row.EncryptionNonce,
 		KeyVersion: row.EncryptionKeyVersion,
 	})
+	if err != nil {
+		return ActiveOpenAICredential{}, err
+	}
+	return ActiveOpenAICredential{SettingID: row.ID, KeyFingerprint: row.KeyFingerprint, APIKey: plain}, nil
 }
 
 func fingerprint(apiKey string) string {

@@ -1,0 +1,543 @@
+package ai
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"cargoflow/api/internal/models"
+	"gorm.io/gorm"
+)
+
+type fakeActiveCredentialSource struct {
+	calls      atomic.Int32
+	credential ActiveOpenAICredential
+	err        error
+}
+
+func (source *fakeActiveCredentialSource) DecryptActiveCredential(context.Context) (ActiveOpenAICredential, error) {
+	source.calls.Add(1)
+	return source.credential, source.err
+}
+
+type textProviderFunc func(context.Context, []byte, TextRequest) (TextResponse, error)
+
+func (function textProviderFunc) Generate(ctx context.Context, key []byte, request TextRequest) (TextResponse, error) {
+	return function(ctx, key, request)
+}
+
+type rotatingCredentialSource struct {
+	db         *gorm.DB
+	credential ActiveOpenAICredential
+}
+
+func (source *rotatingCredentialSource) DecryptActiveCredential(context.Context) (ActiveOpenAICredential, error) {
+	if err := source.db.Model(&models.OpenAIProviderSetting{}).Where("id = ?", source.credential.SettingID).Update("key_fingerprint", "NEW1").Error; err != nil {
+		return ActiveOpenAICredential{}, err
+	}
+	return source.credential, nil
+}
+
+func prepareTextExecutorLease(t *testing.T, candidateCount int) (*gorm.DB, LeasedItem, models.OpenAIProviderSetting) {
+	t.Helper()
+	db, _, items := seedQueueItems(t, 1)
+	if err := db.AutoMigrate(&models.OpenAIProviderSetting{}, &models.AIExecution{}, &models.AIUsageLedger{}, &models.AITextResult{}); err != nil {
+		t.Fatal(err)
+	}
+	var job models.AIJob
+	if err := db.First(&job, items[0].AIJobID).Error; err != nil {
+		t.Fatal(err)
+	}
+	var snapshot ProductSnapshotV1
+	if err := json.Unmarshal(job.InputSnapshotJSON, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	snapshot.Locale = "zh-CN"
+	snapshot.TargetPlatform = "lazada"
+	snapshot.Template.PlatformPrompt = "Create accurate Lazada product content."
+	snapshot.Product.Name = "Protective phone case"
+	snapshot.SKU.Code = "CASE-001"
+	countJSON, _ := json.Marshal(map[string]int{"candidate_count": candidateCount})
+	snapshot.Template.SelectedSlots[0].GenerationConfig = countJSON
+	snapshotJSON, _ := json.Marshal(snapshot)
+	slotJSON, _ := json.Marshal(snapshot.Template.SelectedSlots[0])
+	if err := db.Model(&models.AIJob{}).Where("id = ?", job.ID).Update("input_snapshot_json", snapshotJSON).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&models.AIJobItem{}).Where("id = ?", items[0].ID).Update("slot_snapshot_json", slotJSON).Error; err != nil {
+		t.Fatal(err)
+	}
+	setting := models.OpenAIProviderSetting{
+		Provider: "openai", EncryptedAPIKey: []byte("ciphertext"), EncryptionNonce: []byte("123456789012"), EncryptionKeyVersion: "v1",
+		KeyFingerprint: "TEST", Status: "active", CreatedByID: 1, UpdatedByID: 1,
+	}
+	if err := db.Create(&setting).Error; err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
+	leased, err := NewQueue(db).LeaseNext(t.Context(), "worker-real", now, time.Minute)
+	if err != nil || leased == nil {
+		t.Fatalf("lease=%#v err=%v", leased, err)
+	}
+	return db, *leased, setting
+}
+
+func TestTextExecutorPersistsCandidatesUsageAuditAndClearsCredential(t *testing.T) {
+	db, leased, setting := prepareTextExecutorLease(t, 2)
+	key := []byte("temporary-fake-api-key")
+	source := &fakeActiveCredentialSource{credential: ActiveOpenAICredential{SettingID: setting.ID, KeyFingerprint: setting.KeyFingerprint, APIKey: key}}
+	var providerCalls atomic.Int32
+	provider := textProviderFunc(func(_ context.Context, received []byte, request TextRequest) (TextResponse, error) {
+		providerCalls.Add(1)
+		if !bytes.Equal(received, []byte("temporary-fake-api-key")) || request.Prompt.CandidateCount != 2 || request.Metadata["execution_id"] == "" {
+			t.Fatalf("provider input key=%q request=%#v", received, request)
+		}
+		return TextResponse{
+			ResponseID: "resp_executor", RequestID: "req_executor", Model: "fake-model",
+			OutputJSON: json.RawMessage(`{"candidates":[{"title":"Accurate phone case","keywords":["case"],"source_fields":["product.name"]},{"title":"Protective phone case","keywords":["protective"],"source_fields":["sku.code"]}]}`),
+			Usage:      TextUsage{InputTextTokens: 100, OutputTextTokens: 40, TotalTokens: 140, ReasoningTokens: 5},
+		}, nil
+	})
+	now := time.Date(2026, 7, 17, 10, 0, 10, 0, time.UTC)
+	executor := newTextExecutorWithClock(db, source, provider, TextExecutorConfig{Model: "fake-model", ReasoningEffort: "low"}, fixedClock{now: now})
+	if err := executor.Execute(t.Context(), leased); err != nil {
+		t.Fatal(err)
+	}
+	if err := executor.Execute(t.Context(), leased); err != nil {
+		t.Fatalf("completed execution must be idempotent: %v", err)
+	}
+	if providerCalls.Load() != 1 || source.calls.Load() != 1 {
+		t.Fatalf("provider calls=%d credential calls=%d", providerCalls.Load(), source.calls.Load())
+	}
+	if !bytes.Equal(key, make([]byte, len(key))) {
+		t.Fatalf("credential bytes were not cleared: %q", key)
+	}
+
+	var execution models.AIExecution
+	if err := db.First(&execution).Error; err != nil {
+		t.Fatal(err)
+	}
+	if execution.Status != models.AIExecutionCompleted || execution.OpenAIResponseID != "resp_executor" || execution.OpenAIRequestID != "req_executor" || execution.Model != "fake-model" || execution.InputTextTokens != 100 || execution.OutputTextTokens != 40 || execution.TotalTokens != 140 || execution.ReasoningTokens != 5 || execution.CompletedAt == nil || execution.CompiledPromptSHA256 == "" {
+		t.Fatalf("execution=%#v", execution)
+	}
+	if stringsContainCredential(execution.CompiledPrompt, execution.NormalizedInputJSON, execution.RequestConfigJSON) {
+		t.Fatal("plaintext credential persisted in execution")
+	}
+	var results []models.AITextResult
+	if err := db.Order("candidate_index").Find(&results).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 2 || results[0].CandidateIndex != 1 || results[1].CandidateIndex != 2 || results[0].Kind != models.AIContentSlotTitle || results[0].State != models.AITextResultCandidate {
+		t.Fatalf("results=%#v", results)
+	}
+	var ledger models.AIUsageLedger
+	if err := db.First(&ledger).Error; err != nil {
+		t.Fatal(err)
+	}
+	if ledger.AIExecutionID != execution.ID || ledger.InputTextTokens != 100 || ledger.OutputTextTokens != 40 || ledger.TotalTokens != 140 || ledger.ReasoningTokens != 5 || ledger.OpenAIRequestID != "req_executor" || ledger.EstimatedAmount != nil || ledger.ReportedAmount != nil {
+		t.Fatalf("ledger=%#v", ledger)
+	}
+	var audit models.AIAuditEvent
+	if err := db.Where("event_type = ?", "ai_execution.text_completed").First(&audit).Error; err != nil {
+		t.Fatal(err)
+	}
+	var dispatchAudit models.AIAuditEvent
+	if err := db.Where("event_type = ?", "ai_execution.text_dispatched").First(&dispatchAudit).Error; err != nil {
+		t.Fatal(err)
+	}
+	var updatedSetting models.OpenAIProviderSetting
+	if err := db.First(&updatedSetting, setting.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if updatedSetting.LastUsedAt == nil || !updatedSetting.LastUsedAt.Equal(now) {
+		t.Fatalf("last_used_at=%v", updatedSetting.LastUsedAt)
+	}
+}
+
+func TestTextExecutorMarksAmbiguousProviderFailureNeedsAttention(t *testing.T) {
+	db, leased, setting := prepareTextExecutorLease(t, 1)
+	key := []byte("temporary-fake-api-key")
+	source := &fakeActiveCredentialSource{credential: ActiveOpenAICredential{SettingID: setting.ID, KeyFingerprint: setting.KeyFingerprint, APIKey: key}}
+	provider := textProviderFunc(func(context.Context, []byte, TextRequest) (TextResponse, error) {
+		return TextResponse{}, &TextProviderError{Kind: ErrTextProviderAmbiguousTimeout}
+	})
+	executor := newTextExecutorWithClock(db, source, provider, TextExecutorConfig{Model: "fake-model"}, fixedClock{now: time.Date(2026, 7, 17, 10, 0, 10, 0, time.UTC)})
+	err := executor.Execute(t.Context(), leased)
+	if !errors.Is(err, ErrTextProviderAmbiguousTimeout) || !bytes.Equal(key, make([]byte, len(key))) {
+		t.Fatalf("error=%v key=%q", err, key)
+	}
+	var execution models.AIExecution
+	if db.First(&execution).Error != nil || execution.Status != models.AIExecutionNeedsAttention || execution.SafeError == "" {
+		t.Fatalf("execution=%#v", execution)
+	}
+	if execution.OpenAIProviderSettingID == nil || *execution.OpenAIProviderSettingID != setting.ID || execution.OpenAIKeyFingerprint != setting.KeyFingerprint {
+		t.Fatalf("provider attribution missing: %#v", execution)
+	}
+	var failureAudit models.AIAuditEvent
+	if err := db.Where("event_type = ?", "ai_execution.text_needs_attention").First(&failureAudit).Error; err != nil {
+		t.Fatal(err)
+	}
+	var updatedSetting models.OpenAIProviderSetting
+	if err := db.First(&updatedSetting, setting.ID).Error; err != nil || updatedSetting.LastUsedAt == nil {
+		t.Fatalf("setting=%#v err=%v", updatedSetting, err)
+	}
+	var results, ledgers int64
+	db.Model(&models.AITextResult{}).Count(&results)
+	db.Model(&models.AIUsageLedger{}).Count(&ledgers)
+	if results != 0 || ledgers != 0 {
+		t.Fatalf("results=%d ledgers=%d", results, ledgers)
+	}
+}
+
+func TestTextExecutorPersistsAmbiguousOutcomeAfterRequestContextCancellation(t *testing.T) {
+	db, leased, setting := prepareTextExecutorLease(t, 1)
+	key := []byte("temporary-fake-api-key")
+	source := &fakeActiveCredentialSource{credential: ActiveOpenAICredential{SettingID: setting.ID, KeyFingerprint: setting.KeyFingerprint, APIKey: key}}
+	ctx, cancel := context.WithCancel(t.Context())
+	provider := textProviderFunc(func(context.Context, []byte, TextRequest) (TextResponse, error) {
+		cancel()
+		return TextResponse{}, &TextProviderError{Kind: ErrTextProviderAmbiguousTransport, RequestID: "req_cancelled"}
+	})
+	executor := newTextExecutorWithClock(db, source, provider, TextExecutorConfig{Model: "fake-model"}, fixedClock{now: time.Date(2026, 7, 17, 10, 0, 10, 0, time.UTC)})
+	err := executor.Execute(ctx, leased)
+	if !errors.Is(err, ErrTextProviderAmbiguousTransport) {
+		t.Fatalf("error=%v", err)
+	}
+	var execution models.AIExecution
+	if db.First(&execution).Error != nil || execution.Status != models.AIExecutionNeedsAttention || execution.OpenAIRequestID != "req_cancelled" {
+		t.Fatalf("execution=%#v", execution)
+	}
+	var audit models.AIAuditEvent
+	if err := db.Where("event_type = ?", "ai_execution.text_needs_attention").First(&audit).Error; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTextExecutorClassifiesProviderFailuresAndRejectsMalformedSuccess(t *testing.T) {
+	tests := []struct {
+		name        string
+		response    TextResponse
+		providerErr error
+		wantStatus  models.AIExecutionStatus
+		wantError   error
+	}{
+		{"authentication", TextResponse{}, &TextProviderError{Kind: ErrTextProviderAuthentication, RequestID: "req_auth"}, models.AIExecutionFailed, ErrTextProviderAuthentication},
+		{"refusal", TextResponse{}, &TextProviderError{Kind: ErrTextProviderRefusal, RequestID: "req_refusal"}, models.AIExecutionFailed, ErrTextProviderRefusal},
+		{"malformed success", TextResponse{ResponseID: "resp_bad", RequestID: "req_bad", Model: "fake-model", OutputJSON: json.RawMessage(`{"candidates":[null]}`), Usage: TextUsage{InputTextTokens: 1, OutputTextTokens: 1, TotalTokens: 2}}, nil, models.AIExecutionFailed, ErrTextProviderInvalidResponse},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db, leased, setting := prepareTextExecutorLease(t, 1)
+			key := []byte("temporary-fake-api-key")
+			source := &fakeActiveCredentialSource{credential: ActiveOpenAICredential{SettingID: setting.ID, KeyFingerprint: setting.KeyFingerprint, APIKey: key}}
+			provider := textProviderFunc(func(context.Context, []byte, TextRequest) (TextResponse, error) { return tc.response, tc.providerErr })
+			executor := newTextExecutorWithClock(db, source, provider, TextExecutorConfig{Model: "fake-model"}, fixedClock{now: time.Date(2026, 7, 17, 10, 0, 10, 0, time.UTC)})
+			err := executor.Execute(t.Context(), leased)
+			if !errors.Is(err, tc.wantError) || !bytes.Equal(key, make([]byte, len(key))) {
+				t.Fatalf("error=%v key=%q", err, key)
+			}
+			var execution models.AIExecution
+			if db.First(&execution).Error != nil || execution.Status != tc.wantStatus || execution.SafeError == "" {
+				t.Fatalf("execution=%#v", execution)
+			}
+			if execution.OpenAIRequestID == "" && tc.name != "malformed success" {
+				t.Fatalf("provider request ID not audited: %#v", execution)
+			}
+		})
+	}
+}
+
+func TestTextExecutorAuditsCredentialRotationBetweenDecryptAndDispatch(t *testing.T) {
+	db, leased, setting := prepareTextExecutorLease(t, 1)
+	key := []byte("temporary-fake-api-key")
+	source := &rotatingCredentialSource{db: db, credential: ActiveOpenAICredential{SettingID: setting.ID, KeyFingerprint: setting.KeyFingerprint, APIKey: key}}
+	var providerCalls atomic.Int32
+	provider := textProviderFunc(func(context.Context, []byte, TextRequest) (TextResponse, error) {
+		providerCalls.Add(1)
+		return TextResponse{}, nil
+	})
+	executor := newTextExecutorWithClock(db, source, provider, TextExecutorConfig{Model: "fake-model"}, fixedClock{now: time.Date(2026, 7, 17, 10, 0, 10, 0, time.UTC)})
+	err := executor.Execute(t.Context(), leased)
+	if !errors.Is(err, ErrProviderNotActive) || providerCalls.Load() != 0 || !bytes.Equal(key, make([]byte, len(key))) {
+		t.Fatalf("error=%v calls=%d key=%q", err, providerCalls.Load(), key)
+	}
+	var execution models.AIExecution
+	if db.First(&execution).Error != nil || execution.Status != models.AIExecutionFailed || execution.SafeError == "" {
+		t.Fatalf("execution=%#v", execution)
+	}
+	var audit models.AIAuditEvent
+	if err := db.Where("event_type = ?", "ai_execution.text_failed").First(&audit).Error; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTextExecutorRecoversStoredResponseWithoutAnotherProviderCall(t *testing.T) {
+	db, leased, setting := prepareTextExecutorLease(t, 1)
+	source := &fakeActiveCredentialSource{}
+	var providerCalls atomic.Int32
+	provider := textProviderFunc(func(context.Context, []byte, TextRequest) (TextResponse, error) {
+		providerCalls.Add(1)
+		return TextResponse{}, errors.New("must not call provider")
+	})
+	now := time.Date(2026, 7, 17, 10, 0, 10, 0, time.UTC)
+	executor := newTextExecutorWithClock(db, source, provider, TextExecutorConfig{Model: "fake-model"}, fixedClock{now: now})
+	prepared, err := executor.prepare(t.Context(), leased)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := []byte(`{"candidates":[{"title":"Recovered phone case","keywords":[],"source_fields":["product.name"]}]}`)
+	if err := db.Model(&models.AIExecution{}).Where("id = ?", prepared.execution.ID).Updates(map[string]any{
+		"status": models.AIExecutionStoring, "provider_output_json": output, "open_ai_response_id": "resp_recovered", "open_ai_request_id": "req_recovered",
+		"model": "fake-model", "input_text_tokens": 8, "output_text_tokens": 4, "openai_provider_setting_id": setting.ID, "openai_key_fingerprint": setting.KeyFingerprint,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
+	recovered, err := NewQueue(db).LeaseNext(t.Context(), "worker-recovery", base.Add(2*time.Minute), time.Minute)
+	if err != nil || recovered == nil || recovered.Attempt != leased.Attempt+1 {
+		t.Fatalf("recovered=%#v err=%v", recovered, err)
+	}
+	recoveryExecutor := newTextExecutorWithClock(db, source, provider, TextExecutorConfig{Model: "fake-model"}, fixedClock{now: base.Add(2*time.Minute + 10*time.Second)})
+	if err := recoveryExecutor.Execute(t.Context(), *recovered); err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls.Load() != 0 || source.calls.Load() != 0 {
+		t.Fatalf("provider calls=%d credential calls=%d", providerCalls.Load(), source.calls.Load())
+	}
+	var execution models.AIExecution
+	if db.First(&execution, prepared.execution.ID).Error != nil || execution.Status != models.AIExecutionCompleted {
+		t.Fatalf("execution=%#v", execution)
+	}
+	var count int64
+	db.Model(&models.AITextResult{}).Count(&count)
+	if count != 1 {
+		t.Fatalf("candidate count=%d", count)
+	}
+}
+
+func TestTextExecutorDoesNotRepeatUnresolvedCallingExecution(t *testing.T) {
+	db, leased, _ := prepareTextExecutorLease(t, 1)
+	source := &fakeActiveCredentialSource{}
+	provider := textProviderFunc(func(context.Context, []byte, TextRequest) (TextResponse, error) {
+		t.Fatal("provider must not be called for unresolved calling execution")
+		return TextResponse{}, nil
+	})
+	executor := newTextExecutorWithClock(db, source, provider, TextExecutorConfig{Model: "fake-model"}, fixedClock{now: time.Date(2026, 7, 17, 10, 0, 10, 0, time.UTC)})
+	prepared, err := executor.prepare(t.Context(), leased)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&models.AIExecution{}).Where("id = ?", prepared.execution.ID).Update("status", models.AIExecutionCallingOpenAI).Error; err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
+	recovered, err := NewQueue(db).LeaseNext(t.Context(), "worker-recovery", base.Add(2*time.Minute), time.Minute)
+	if err != nil || recovered == nil || recovered.Attempt != leased.Attempt+1 {
+		t.Fatalf("recovered=%#v err=%v", recovered, err)
+	}
+	recoveryExecutor := newTextExecutorWithClock(db, source, provider, TextExecutorConfig{Model: "fake-model"}, fixedClock{now: base.Add(2*time.Minute + 10*time.Second)})
+	err = recoveryExecutor.Execute(t.Context(), *recovered)
+	if !errors.Is(err, ErrExecutionNeedsAttention) || source.calls.Load() != 0 {
+		t.Fatalf("error=%v credential calls=%d", err, source.calls.Load())
+	}
+	var execution models.AIExecution
+	if db.First(&execution, prepared.execution.ID).Error != nil || execution.Status != models.AIExecutionNeedsAttention {
+		t.Fatalf("execution=%#v", execution)
+	}
+}
+
+func TestTextExecutorDoesNotRepeatCompletedExecutionAfterStaleReLease(t *testing.T) {
+	db, leased, setting := prepareTextExecutorLease(t, 1)
+	key := []byte("temporary-fake-api-key")
+	source := &fakeActiveCredentialSource{credential: ActiveOpenAICredential{SettingID: setting.ID, KeyFingerprint: setting.KeyFingerprint, APIKey: key}}
+	var calls atomic.Int32
+	provider := textProviderFunc(func(context.Context, []byte, TextRequest) (TextResponse, error) {
+		calls.Add(1)
+		return TextResponse{ResponseID: "resp_once", RequestID: "req_once", Model: "fake-model", OutputJSON: json.RawMessage(`{"candidates":[{"title":"One completed title","keywords":[],"source_fields":["product.name"]}]}`), Usage: TextUsage{InputTextTokens: 2, OutputTextTokens: 2, TotalTokens: 4}}, nil
+	})
+	base := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
+	executor := newTextExecutorWithClock(db, source, provider, TextExecutorConfig{Model: "fake-model"}, fixedClock{now: base.Add(10 * time.Second)})
+	if err := executor.Execute(t.Context(), leased); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := NewQueue(db).LeaseNext(t.Context(), "worker-recovery", base.Add(2*time.Minute), time.Minute)
+	if err != nil || recovered == nil {
+		t.Fatalf("recovered=%#v err=%v", recovered, err)
+	}
+	recoveryExecutor := newTextExecutorWithClock(db, source, provider, TextExecutorConfig{Model: "fake-model"}, fixedClock{now: base.Add(2*time.Minute + 10*time.Second)})
+	if err := recoveryExecutor.Execute(t.Context(), *recovered); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("provider calls=%d", calls.Load())
+	}
+}
+
+func TestTextExecutorPersistsPaidResponseAfterLeaseWasReclaimed(t *testing.T) {
+	db, leased, setting := prepareTextExecutorLease(t, 1)
+	key := []byte("temporary-fake-api-key")
+	source := &fakeActiveCredentialSource{credential: ActiveOpenAICredential{SettingID: setting.ID, KeyFingerprint: setting.KeyFingerprint, APIKey: key}}
+	base := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
+	var recovered *LeasedItem
+	var calls atomic.Int32
+	provider := textProviderFunc(func(context.Context, []byte, TextRequest) (TextResponse, error) {
+		calls.Add(1)
+		var err error
+		recovered, err = NewQueue(db).LeaseNext(t.Context(), "worker-recovery", base.Add(2*time.Minute), time.Minute)
+		if err != nil || recovered == nil {
+			t.Fatalf("recovered=%#v err=%v", recovered, err)
+		}
+		return TextResponse{ResponseID: "resp_late", RequestID: "req_late", Model: "fake-model", OutputJSON: json.RawMessage(`{"candidates":[{"title":"Late paid response","keywords":[],"source_fields":["product.name"]}]}`), Usage: TextUsage{InputTextTokens: 3, OutputTextTokens: 2, TotalTokens: 5, ReasoningTokens: 1}}, nil
+	})
+	executor := newTextExecutorWithClock(db, source, provider, TextExecutorConfig{Model: "fake-model"}, fixedClock{now: base.Add(10 * time.Second)})
+	if err := executor.Execute(t.Context(), leased); err != nil {
+		t.Fatal(err)
+	}
+	var execution models.AIExecution
+	if db.First(&execution).Error != nil || execution.Status != models.AIExecutionCompleted || execution.OpenAIResponseID != "resp_late" || execution.TotalTokens != 5 || execution.ReasoningTokens != 1 {
+		t.Fatalf("execution=%#v", execution)
+	}
+	var results, ledgers int64
+	db.Model(&models.AITextResult{}).Count(&results)
+	db.Model(&models.AIUsageLedger{}).Count(&ledgers)
+	if results != 1 || ledgers != 1 || calls.Load() != 1 {
+		t.Fatalf("results=%d ledgers=%d calls=%d", results, ledgers, calls.Load())
+	}
+	recoveryExecutor := newTextExecutorWithClock(db, source, provider, TextExecutorConfig{Model: "fake-model"}, fixedClock{now: base.Add(2*time.Minute + 10*time.Second)})
+	if err := recoveryExecutor.Execute(t.Context(), *recovered); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("provider repeated after late response: %d", calls.Load())
+	}
+}
+
+func TestLatePaidResponseReconcilesItemFailedByRecoveryWorker(t *testing.T) {
+	db, leased, setting := prepareTextExecutorLease(t, 1)
+	key := []byte("temporary-fake-api-key")
+	source := &fakeActiveCredentialSource{credential: ActiveOpenAICredential{SettingID: setting.ID, KeyFingerprint: setting.KeyFingerprint, APIKey: key}}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	provider := textProviderFunc(func(context.Context, []byte, TextRequest) (TextResponse, error) {
+		close(started)
+		<-release
+		return TextResponse{ResponseID: "resp_after_failure", RequestID: "req_after_failure", Model: "fake-model", OutputJSON: json.RawMessage(`{"candidates":[{"title":"Recovered paid title","keywords":[],"source_fields":["product.name"]}]}`), Usage: TextUsage{InputTextTokens: 4, OutputTextTokens: 3, TotalTokens: 7, ReasoningTokens: 1}}, nil
+	})
+	base := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
+	oldExecutor := newTextExecutorWithClock(db, source, provider, TextExecutorConfig{Model: "fake-model"}, fixedClock{now: base.Add(10 * time.Second)})
+	oldCtx, cancelOld := context.WithCancel(t.Context())
+	oldResult := make(chan error, 1)
+	go func() { oldResult <- oldExecutor.Execute(oldCtx, leased) }()
+	<-started
+	recoveryQueue := NewQueue(db)
+	recovered, err := recoveryQueue.LeaseNext(t.Context(), "worker-recovery", base.Add(2*time.Minute), time.Minute)
+	if err != nil || recovered == nil {
+		t.Fatalf("recovered=%#v err=%v", recovered, err)
+	}
+	recoveryExecutor := newTextExecutorWithClock(db, source, provider, TextExecutorConfig{Model: "fake-model"}, fixedClock{now: base.Add(2*time.Minute + 10*time.Second)})
+	if err := recoveryExecutor.Execute(t.Context(), *recovered); !errors.Is(err, ErrExecutionNeedsAttention) {
+		t.Fatalf("recovery error=%v", err)
+	}
+	if err := recoveryQueue.failAt(t.Context(), *recovered, defaultSafeExecutionError, base.Add(2*time.Minute+11*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var failedItem models.AIJobItem
+	if db.First(&failedItem, recovered.itemID).Error != nil || failedItem.Status != models.AIJobItemFailed {
+		t.Fatalf("item before late response=%#v", failedItem)
+	}
+	cancelOld()
+	close(release)
+	if err := <-oldResult; err != nil {
+		t.Fatal(err)
+	}
+	var item models.AIJobItem
+	if db.First(&item, recovered.itemID).Error != nil || item.Status != models.AIJobItemCompleted || item.SafeError != "" {
+		t.Fatalf("reconciled item=%#v", item)
+	}
+	var job models.AIJob
+	if db.First(&job, recovered.jobID).Error != nil || job.Status != models.AIJobCompleted {
+		t.Fatalf("reconciled job=%#v", job)
+	}
+	var execution models.AIExecution
+	if db.First(&execution).Error != nil || execution.Status != models.AIExecutionCompleted || execution.OpenAIResponseID != "resp_after_failure" {
+		t.Fatalf("execution=%#v", execution)
+	}
+}
+
+func TestTextExecutorFailureAuditIsIdempotentAndPreservesStrongRequestID(t *testing.T) {
+	db, leased, _ := prepareTextExecutorLease(t, 1)
+	executor := newTextExecutorWithClock(db, &fakeActiveCredentialSource{}, textProviderFunc(nil), TextExecutorConfig{Model: "fake-model"}, fixedClock{now: time.Date(2026, 7, 17, 10, 0, 10, 0, time.UTC)})
+	prepared, err := executor.prepare(t.Context(), leased)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&models.AIExecution{}).Where("id = ?", prepared.execution.ID).Update("status", models.AIExecutionCallingOpenAI).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := executor.markProviderFailure(t.Context(), prepared.execution.ID, models.AIExecutionNeedsAttention, "ambiguous", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := executor.markProviderFailure(t.Context(), prepared.execution.ID, models.AIExecutionFailed, "authentication failed", "req_strong"); err != nil {
+		t.Fatal(err)
+	}
+	var execution models.AIExecution
+	if db.First(&execution, prepared.execution.ID).Error != nil || execution.OpenAIRequestID != "req_strong" {
+		t.Fatalf("execution=%#v", execution)
+	}
+	var count int64
+	db.Model(&models.AIAuditEvent{}).Where("ai_execution_id = ? AND event_type = ?", prepared.execution.ID, "ai_execution.text_needs_attention").Count(&count)
+	if count != 1 {
+		t.Fatalf("terminal audit count=%d", count)
+	}
+	db.Model(&models.AIAuditEvent{}).Where("ai_execution_id = ? AND event_type = ?", prepared.execution.ID, "ai_execution.text_failed").Count(&count)
+	if count != 0 {
+		t.Fatalf("mismatched failed audit count=%d", count)
+	}
+}
+
+func TestRealRoutingExecutorRejectsImageWithoutCredentialOrProviderCall(t *testing.T) {
+	db, _, _ := seedQueueItems(t, 2)
+	now := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
+	queue := NewQueue(db)
+	textItem, _ := queue.LeaseNext(t.Context(), "worker-real", now, time.Minute)
+	if err := queue.completeAt(t.Context(), *textItem, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	imageItem, err := queue.LeaseNext(t.Context(), "worker-real", now, time.Minute)
+	if err != nil || imageItem == nil || imageItem.Kind != models.AIContentSlotImage {
+		t.Fatalf("image lease=%#v err=%v", imageItem, err)
+	}
+	source := &fakeActiveCredentialSource{}
+	var providerCalls atomic.Int32
+	provider := textProviderFunc(func(context.Context, []byte, TextRequest) (TextResponse, error) {
+		providerCalls.Add(1)
+		return TextResponse{}, nil
+	})
+	router := NewKindRoutingExecutor(false, NewDryRunExecutor(db), NewTextExecutor(db, source, provider, TextExecutorConfig{Model: "fake-model"}))
+	if err := router.Execute(t.Context(), *imageItem); !errors.Is(err, ErrRealImageGenerationUnsupported) {
+		t.Fatalf("error=%v", err)
+	}
+	if source.calls.Load() != 0 || providerCalls.Load() != 0 {
+		t.Fatalf("credential calls=%d provider calls=%d", source.calls.Load(), providerCalls.Load())
+	}
+}
+
+func stringsContainCredential(values ...any) bool {
+	for _, value := range values {
+		var raw []byte
+		switch typed := value.(type) {
+		case string:
+			raw = []byte(typed)
+		case []byte:
+			raw = typed
+		}
+		if bytes.Contains(raw, []byte("temporary-fake-api-key")) {
+			return true
+		}
+	}
+	return false
+}

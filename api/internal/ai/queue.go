@@ -164,6 +164,19 @@ func (q *Queue) finish(ctx context.Context, leased LeasedItem, status models.AIJ
 		return ErrInvalidLease
 	}
 	return q.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if status == models.AIJobItemFailed {
+			var latest models.AIExecution
+			executionQuery := tx.Where("ai_job_item_id = ?", leased.itemID).Order("attempt_number DESC, id DESC")
+			if tx.Dialector.Name() == "mysql" {
+				executionQuery = executionQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+			}
+			err := executionQuery.First(&latest).Error
+			if err == nil && latest.Status == models.AIExecutionCompleted {
+				status, safeError = models.AIJobItemCompleted, ""
+			} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("load latest AI execution before failure: %w", err)
+			}
+		}
 		var item models.AIJobItem
 		query := tx
 		if tx.Dialector.Name() == "mysql" {

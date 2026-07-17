@@ -96,7 +96,7 @@ func TestResponsesTextClientRetriesOnlySafeProviderStatuses(t *testing.T) {
 		wantError    error
 	}{
 		{"rate limit", http.StatusTooManyRequests, 2, nil},
-		{"server error", http.StatusBadGateway, 2, nil},
+		{"server error", http.StatusBadGateway, 1, ErrTextProviderAmbiguousTransport},
 		{"authentication", http.StatusUnauthorized, 1, ErrTextProviderAuthentication},
 	}
 	for _, tc := range tests {

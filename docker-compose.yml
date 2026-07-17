@@ -52,6 +52,8 @@ services:
       MINIO_ROOT_USER: cargoflow
       MINIO_ROOT_PASSWORD: cargoflow123
       MINIO_BUCKET: cargoflow
+      CARGOFLOW_SECRETS_MASTER_KEY: ${CARGOFLOW_SECRETS_MASTER_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
     ports:
       - "8080:8080"
     depends_on:
@@ -67,8 +69,13 @@ services:
     environment:
       DB_DSN: cargoflow:cargoflow@tcp(mysql:3306)/cargoflow?charset=utf8mb4&parseTime=True&loc=Local
       APP_ENV: development
-      AI_WORKER_DRY_RUN: "true"
+      AI_WORKER_DRY_RUN: ${AI_WORKER_DRY_RUN:-true}
       AI_WORKER_POLL_INTERVAL: 1s
+      CARGOFLOW_SECRETS_MASTER_KEY: ${CARGOFLOW_SECRETS_MASTER_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_TEXT_MODEL: ${OPENAI_TEXT_MODEL:-gpt-5.6-terra}
+      OPENAI_REASONING_EFFORT: ${OPENAI_REASONING_EFFORT:-low}
+      OPENAI_REQUEST_TIMEOUT: ${OPENAI_REQUEST_TIMEOUT:-120s}
     depends_on:
       migrate:
         condition: service_completed_successfully

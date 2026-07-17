@@ -2,27 +2,28 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"cargoflow/api/internal/ai"
 	"cargoflow/api/internal/config"
 	"cargoflow/api/internal/database"
+	"cargoflow/api/internal/secrets"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 const leaseTTL = time.Minute
 
 func main() {
 	cfg := config.Load()
-	if !cfg.AIWorkerDryRun {
-		log.Fatal("AI worker startup refused: Phase 1 requires AI_WORKER_DRY_RUN=true")
-	}
 	if cfg.AIWorkerPollInterval <= 0 {
 		log.Fatal("AI worker startup refused: AI_WORKER_POLL_INTERVAL must be positive")
 	}
@@ -32,13 +33,49 @@ func main() {
 		log.Fatalf("open database: %v", err)
 	}
 	workerID := newWorkerID()
-	worker := ai.NewWorker(ai.NewQueue(db), workerID, leaseTTL, ai.SystemClock{}, ai.NewDryRunExecutor(db))
+	executor, err := buildExecutor(cfg, db)
+	if err != nil {
+		log.Fatalf("configure AI worker: %v", err)
+	}
+	worker := ai.NewWorker(ai.NewQueue(db), workerID, leaseTTL, ai.SystemClock{}, executor)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	log.Printf("AI dry-run worker %s started", workerID)
+	mode := "real text"
+	if cfg.AIWorkerDryRun {
+		mode = "dry-run"
+	}
+	log.Printf("AI %s worker %s started", mode, workerID)
 	if err := run(ctx, worker, cfg.AIWorkerPollInterval); err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatalf("run AI worker: %v", err)
 	}
+}
+
+func buildExecutor(cfg config.Config, db *gorm.DB) (ai.ItemExecutor, error) {
+	dryRun := ai.NewDryRunExecutor(db)
+	if cfg.AIWorkerDryRun {
+		return ai.NewKindRoutingExecutor(true, dryRun, nil), nil
+	}
+	encoded := strings.TrimSpace(cfg.SecretsMasterKey)
+	if encoded == "" {
+		return nil, fmt.Errorf("CARGOFLOW_SECRETS_MASTER_KEY is required when AI_WORKER_DRY_RUN=false")
+	}
+	masterKey, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil || len(masterKey) != 32 {
+		return nil, fmt.Errorf("CARGOFLOW_SECRETS_MASTER_KEY must be base64 for exactly 32 bytes")
+	}
+	box, err := secrets.NewAESGCM(masterKey)
+	for index := range masterKey {
+		masterKey[index] = 0
+	}
+	if err != nil {
+		return nil, fmt.Errorf("initialize credential encryption: %w", err)
+	}
+	settings := ai.NewProviderSettingsService(db, box, nil)
+	provider := ai.NewOpenAIResponsesClient(cfg.OpenAIBaseURL, nil, ai.OpenAIResponsesConfig{
+		Model: cfg.OpenAITextModel, ReasoningEffort: cfg.OpenAIReasoningEffort, RequestTimeout: cfg.OpenAIRequestTimeout,
+	})
+	text := ai.NewTextExecutor(db, settings, provider, ai.TextExecutorConfig{Model: cfg.OpenAITextModel, ReasoningEffort: cfg.OpenAIReasoningEffort})
+	return ai.NewKindRoutingExecutor(false, dryRun, text), nil
 }
 
 type runOnceWorker interface {

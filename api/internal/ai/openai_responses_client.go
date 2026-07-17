@@ -93,13 +93,7 @@ func (client *OpenAIResponsesClient) Generate(ctx context.Context, apiKey []byte
 			}
 			return TextResponse{}, &TextProviderError{Kind: ErrTextProviderRateLimit, StatusCode: response.StatusCode, RequestID: requestID}
 		case response.StatusCode >= http.StatusInternalServerError:
-			if attempt < client.config.MaxAttempts {
-				if err := client.sleep(ctx, retryDelay(attempt, response.Header)); err != nil {
-					return TextResponse{}, err
-				}
-				continue
-			}
-			return TextResponse{}, &TextProviderError{Kind: ErrTextProviderRetryable, StatusCode: response.StatusCode, RequestID: requestID}
+			return TextResponse{}, &TextProviderError{Kind: ErrTextProviderAmbiguousTransport, StatusCode: response.StatusCode, RequestID: requestID}
 		default:
 			return TextResponse{}, &TextProviderError{Kind: ErrTextProviderInvalidRequest, StatusCode: response.StatusCode, RequestID: requestID}
 		}

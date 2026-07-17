@@ -190,11 +190,11 @@ type AIJobItem struct {
 type AIExecution struct {
 	ID                        uint                 `gorm:"primaryKey" json:"-"`
 	PublicID                  string               `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
-	AIJobItemID               uint                 `gorm:"index;not null" json:"-"`
+	AIJobItemID               uint                 `gorm:"index;uniqueIndex:idx_ai_execution_item_attempt,priority:1;not null" json:"-"`
 	ParentExecutionID         *uint                `gorm:"index" json:"-"`
 	Operation                 AIExecutionOperation `gorm:"size:32;index;not null" json:"operation"`
 	Status                    AIExecutionStatus    `gorm:"size:32;index;not null" json:"status"`
-	AttemptNumber             int                  `gorm:"not null" json:"attempt_number"`
+	AttemptNumber             int                  `gorm:"uniqueIndex:idx_ai_execution_item_attempt,priority:2;not null" json:"attempt_number"`
 	L0PolicyVersion           string               `gorm:"size:64;not null" json:"l0_policy_version"`
 	L1ProductContextVersion   string               `gorm:"size:64;not null" json:"l1_product_context_version"`
 	L2TemplateVersionPublicID string               `gorm:"size:36;index;not null" json:"l2_template_version_public_id"`
@@ -206,12 +206,17 @@ type AIExecution struct {
 	UserInstruction           string               `gorm:"type:text" json:"user_instruction"`
 	OpenAIResponseID          string               `gorm:"size:255;index" json:"openai_response_id"`
 	OpenAIRequestID           string               `gorm:"size:255;index" json:"openai_request_id"`
+	OpenAIProviderSettingID   *uint                `gorm:"column:openai_provider_setting_id;index" json:"-"`
+	OpenAIKeyFingerprint      string               `gorm:"column:openai_key_fingerprint;size:16" json:"-"`
+	ProviderOutputJSON        []byte               `gorm:"type:json" json:"-"`
 	Model                     string               `gorm:"size:120;index;not null" json:"model"`
 	RequestConfigJSON         []byte               `gorm:"type:json;not null" json:"request_config"`
 	InputTextTokens           int64                `gorm:"not null;default:0" json:"input_text_tokens"`
 	InputImageTokens          int64                `gorm:"not null;default:0" json:"input_image_tokens"`
 	OutputTextTokens          int64                `gorm:"not null;default:0" json:"output_text_tokens"`
 	OutputImageTokens         int64                `gorm:"not null;default:0" json:"output_image_tokens"`
+	ReasoningTokens           int64                `gorm:"not null;default:0" json:"reasoning_tokens"`
+	TotalTokens               int64                `gorm:"not null;default:0" json:"total_tokens"`
 	ReportedAmount            *float64             `json:"reported_amount"`
 	EstimatedCost             *float64             `json:"estimated_cost"`
 	Currency                  string               `gorm:"size:8" json:"currency"`
@@ -228,13 +233,13 @@ type AIExecution struct {
 type AIAuditEvent struct {
 	ID             uint      `gorm:"primaryKey" json:"-"`
 	PublicID       string    `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
-	EventType      string    `gorm:"size:80;index;not null" json:"event_type"`
+	EventType      string    `gorm:"size:80;index;uniqueIndex:idx_ai_audit_execution_event,priority:2;not null" json:"event_type"`
 	EntityType     string    `gorm:"size:80;index;not null" json:"entity_type"`
 	EntityPublicID string    `gorm:"size:36;index;not null" json:"entity_public_id"`
 	ActorID        *uint     `gorm:"index" json:"-"`
 	AIJobID        *uint     `gorm:"index" json:"-"`
 	AIJobItemID    *uint     `gorm:"index" json:"-"`
-	AIExecutionID  *uint     `gorm:"index" json:"-"`
+	AIExecutionID  *uint     `gorm:"index;uniqueIndex:idx_ai_audit_execution_event,priority:1" json:"-"`
 	MetadataJSON   []byte    `gorm:"type:json;not null" json:"metadata"`
 	CreatedAt      time.Time `gorm:"index" json:"created_at"`
 }
@@ -247,6 +252,8 @@ type AIUsageLedger struct {
 	InputImageTokens  int64     `gorm:"not null;default:0" json:"input_image_tokens"`
 	OutputTextTokens  int64     `gorm:"not null;default:0" json:"output_text_tokens"`
 	OutputImageTokens int64     `gorm:"not null;default:0" json:"output_image_tokens"`
+	ReasoningTokens   int64     `gorm:"not null;default:0" json:"reasoning_tokens"`
+	TotalTokens       int64     `gorm:"not null;default:0" json:"total_tokens"`
 	ReportedAmount    *float64  `json:"reported_amount"`
 	EstimatedAmount   *float64  `json:"estimated_amount"`
 	Currency          string    `gorm:"size:8;not null" json:"currency"`
