@@ -102,7 +102,7 @@ describe("OpenAI settings", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("无法载入 OpenAI 设置");
     expect(document.body).not.toHaveTextContent("sk-proj-leaked-server-detail");
-    expect(JSON.stringify(queryClient.getQueryCache().getAll().map((query) => query.state.error))).not.toContain("sk-proj-leaked-server-detail");
+    expect(queryClient.getQueryCache().getAll().map((query) => errorMessage(query.state.error)).join(" ")).not.toContain("sk-proj-leaked-server-detail");
     fireEvent.click(screen.getByRole("button", { name: "重试载入 OpenAI 设置" }));
     expect(await screen.findByText("尚未配置凭据")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -152,7 +152,7 @@ describe("OpenAI settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存并验证" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("OpenAI 未接受该凭据");
     expect(document.body).not.toHaveTextContent("sk-proj-unsafe-rejection-ABCD");
-    expect(JSON.stringify(queryClient.getMutationCache().getAll().map((mutation) => mutation.state.error))).not.toContain("sk-proj-unsafe-rejection");
+    expect(queryClient.getMutationCache().getAll().map((mutation) => errorMessage(mutation.state.error)).join(" ")).not.toContain("sk-proj-unsafe-rejection");
 
     fireEvent.click(screen.getByRole("button", { name: "保存并验证" }));
     expect(await screen.findByText("凭据已保存并验证")).toBeInTheDocument();
@@ -191,3 +191,7 @@ describe("OpenAI settings", () => {
     expect(links[0]).toHaveAttribute("href", "/settings/openai");
   });
 });
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error ?? "");
+}
