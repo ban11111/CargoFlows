@@ -1,0 +1,104 @@
+package database
+
+import (
+	"testing"
+	"time"
+
+	"cargoflow/api/internal/models"
+)
+
+func TestMigrateCreatesModelFamilyIdentityTables(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range []any{
+		&models.ModelFamily{}, &models.ModelFamilyMember{}, &models.VariantIdentityManifest{},
+		&models.VariantIdentityManifestVersion{}, &models.VariantDifferenceRegion{},
+		&models.VariantDifferenceRegionEvidenceAsset{},
+	} {
+		if !db.Migrator().HasTable(model) {
+			t.Fatalf("missing table for %T", model)
+		}
+	}
+	for _, model := range []any{&models.SKU{}, &models.Asset{}} {
+		if !db.Migrator().HasColumn(model, "public_id") {
+			t.Fatalf("missing opaque public ID for %T", model)
+		}
+	}
+	for _, column := range []string{"mime_type", "width", "height", "byte_count", "sha256"} {
+		if !db.Migrator().HasColumn(&models.Asset{}, column) {
+			t.Fatalf("missing immutable asset metadata column %q", column)
+		}
+	}
+}
+
+func TestModelFamilyAndVariantIdentityConstraints(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+
+	active := "active"
+	first := models.ModelFamilyMember{PublicID: "member-a", ModelFamilyID: 1, SKUID: 101, ActiveGuard: &active, AddedByID: 1}
+	if err := db.Create(&first).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&models.ModelFamilyMember{PublicID: "member-b", ModelFamilyID: 2, SKUID: first.SKUID, ActiveGuard: &active, AddedByID: 2}).Error; err == nil {
+		t.Fatal("one SKU must have only one active family membership")
+	}
+	removedAt := time.Now().UTC()
+	if err := db.Create(&models.ModelFamilyMember{PublicID: "member-c", ModelFamilyID: 2, SKUID: first.SKUID, AddedByID: 2, RemovedAt: &removedAt}).Error; err != nil {
+		t.Fatalf("removed family membership should remain auditable: %v", err)
+	}
+
+	draft := "draft"
+	version := models.VariantIdentityManifestVersion{PublicID: "version-a", VariantIdentityManifestID: 1, VersionNumber: 1, Status: models.VariantManifestDraft, DraftGuard: &draft, IdentityJSON: []byte(`{}`), CreatedByID: 1}
+	if err := db.Create(&version).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&models.VariantIdentityManifestVersion{PublicID: "version-b", VariantIdentityManifestID: 1, VersionNumber: 2, Status: models.VariantManifestDraft, DraftGuard: &draft, IdentityJSON: []byte(`{}`), CreatedByID: 1}).Error; err == nil {
+		t.Fatal("one manifest must have only one draft version")
+	}
+	if err := db.Create(&models.VariantIdentityManifestVersion{PublicID: "version-zero", VariantIdentityManifestID: 2, VersionNumber: 0, Status: models.VariantManifestPublished, IdentityJSON: []byte(`{}`), CreatedByID: 1}).Error; err == nil {
+		t.Fatal("manifest version number must be positive")
+	}
+
+	region := models.VariantDifferenceRegion{PublicID: "region-a", VariantIdentityManifestVersionID: version.ID, Key: "right_ports", DifferenceKind: models.DifferenceKindPorts, Strictness: models.DifferenceRegionExact, ShapeJSON: []byte(`{}`), ForbiddenInheritanceJSON: []byte(`[]`), RequiredViewKeysJSON: []byte(`["right_ports"]`)}
+	if err := db.Create(&region).Error; err != nil {
+		t.Fatal(err)
+	}
+	evidence := models.VariantDifferenceRegionEvidenceAsset{VariantDifferenceRegionID: region.ID, AssetID: 11}
+	if err := db.Create(&evidence).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&evidence).Error; err == nil {
+		t.Fatal("difference region evidence mapping must be unique")
+	}
+}
+
+func TestAssetMetadataIsImmutableAfterCreation(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	asset := models.Asset{SKUID: 1, ObjectKey: "photo-sessions/one/views/front/capture.jpg", OriginalURL: "https://assets.example.test/capture.jpg", ReviewStatus: "pending", MIMEType: "image/jpeg", Width: 10, Height: 20, ByteCount: 30, SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+	if err := db.Create(&asset).Error; err != nil {
+		t.Fatal(err)
+	}
+	asset.MIMEType = "image/png"
+	asset.Width = 11
+	asset.Height = 21
+	asset.ByteCount = 31
+	asset.SHA256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	if err := db.Save(&asset).Error; err != nil {
+		t.Fatal(err)
+	}
+	var persisted models.Asset
+	if err := db.First(&persisted, asset.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if persisted.MIMEType != "image/jpeg" || persisted.Width != 10 || persisted.Height != 20 || persisted.ByteCount != 30 || persisted.SHA256 != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("asset metadata changed after creation: %#v", persisted)
+	}
+}

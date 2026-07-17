@@ -1,9 +1,14 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/jpeg"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"cargoflow/api/internal/ai"
 	"cargoflow/api/internal/config"
 	"cargoflow/api/internal/models"
 	"github.com/gin-gonic/gin"
@@ -21,7 +27,16 @@ import (
 type fakeAssetStorage struct {
 	exists bool
 	err    error
+	source []byte
 }
+
+var defaultFakeAssetImage = func() []byte {
+	var output bytes.Buffer
+	if err := jpeg.Encode(&output, image.NewRGBA(image.Rect(0, 0, 1, 1)), nil); err != nil {
+		panic(err)
+	}
+	return output.Bytes()
+}()
 
 type assetUploadTicketResponse struct {
 	ObjectKey       string `json:"object_key"`
@@ -38,6 +53,25 @@ func (s *fakeAssetStorage) assetURL(objectKey string) string {
 
 func (s *fakeAssetStorage) objectExists(_ context.Context, _ string) (bool, error) {
 	return s.exists, s.err
+}
+
+func (s *fakeAssetStorage) ReadSource(_ context.Context, _ string) (ai.ImageInput, error) {
+	if s.err != nil {
+		return ai.ImageInput{}, s.err
+	}
+	if len(s.source) == 0 {
+		return ai.ImageInput{Bytes: defaultFakeAssetImage}, nil
+	}
+	return ai.ImageInput{Bytes: s.source}, nil
+}
+
+func assetImageFixture(t *testing.T, width, height int, encode func(*bytes.Buffer, image.Image) error) []byte {
+	t.Helper()
+	var output bytes.Buffer
+	if err := encode(&output, image.NewRGBA(image.Rect(0, 0, width, height))); err != nil {
+		t.Fatal(err)
+	}
+	return output.Bytes()
 }
 
 func TestCreatePhotoSessionRequiresPublishedVersion(t *testing.T) {
@@ -220,6 +254,46 @@ func TestCompleteAssetUsesSignedTicketAndServerDerivedURL(t *testing.T) {
 	}
 	if receipt.ObjectKey != ticket.ObjectKey || receipt.OriginalURL != storage.assetURL(ticket.ObjectKey) {
 		t.Fatalf("asset location was not derived from the signed ticket: %#v", receipt)
+	}
+}
+
+func TestCompleteAssetPersistsValidatedAssetMetadata(t *testing.T) {
+	db := newTestDB(t)
+	version := createCaptureVersionFixture(t, db, models.SOPVersionPublished, "26262626-2626-4262-8262-262626262627")
+	view := createCaptureViewFixture(t, db, version.ID, "27272727-2727-4272-8272-272727272728", "正面", "Front")
+	session := createPhotoSessionFixture(t, db, version.ID, "28282828-2828-4282-8282-282828282829")
+	source := assetImageFixture(t, 2, 3, func(output *bytes.Buffer, value image.Image) error { return jpeg.Encode(output, value, nil) })
+	server := &Server{db: db, cfg: testAssetConfig(), storage: &fakeAssetStorage{exists: true, source: source}}
+	ticket := createAssetUploadTicket(t, server, session, view, "capture.jpg")
+
+	response := performCompleteAssetWithTicket(t, server, session, view, ticket.CompletionToken, "")
+	if response.Code != http.StatusCreated {
+		t.Fatalf("expected validated asset completion, got %d: %s", response.Code, response.Body.String())
+	}
+	var asset models.Asset
+	if err := db.Where("object_key = ?", ticket.ObjectKey).First(&asset).Error; err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.Sum256(source)
+	if asset.MIMEType != "image/jpeg" || asset.Width != 2 || asset.Height != 3 || asset.ByteCount != int64(len(source)) || asset.SHA256 != fmt.Sprintf("%x", hash) {
+		t.Fatalf("persisted asset metadata = %#v", asset)
+	}
+}
+
+func TestCompleteAssetRejectsMismatchedDeclaredContentType(t *testing.T) {
+	db := newTestDB(t)
+	version := createCaptureVersionFixture(t, db, models.SOPVersionPublished, "29292929-2929-4292-8292-292929292930")
+	view := createCaptureViewFixture(t, db, version.ID, "30303030-3030-4303-8303-303030303031", "正面", "Front")
+	session := createPhotoSessionFixture(t, db, version.ID, "31313131-3131-4313-8313-313131313132")
+	source := assetImageFixture(t, 1, 1, func(output *bytes.Buffer, value image.Image) error { return png.Encode(output, value) })
+	server := &Server{db: db, cfg: testAssetConfig(), storage: &fakeAssetStorage{exists: true, source: source}}
+	ticket := createAssetUploadTicket(t, server, session, view, "capture.jpg")
+
+	response := performCompleteAssetWithTicket(t, server, session, view, ticket.CompletionToken, "")
+	assertErrorResponse(t, response, http.StatusBadRequest, "invalid_uploaded_image")
+	var count int64
+	if err := db.Model(&models.Asset{}).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("invalid image must not create an asset: count=%d err=%v", count, err)
 	}
 }
 

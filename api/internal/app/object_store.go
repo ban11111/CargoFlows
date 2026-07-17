@@ -40,6 +40,7 @@ type assetStorage interface {
 	createUploadURL(context.Context, string) (string, string, error)
 	assetURL(string) string
 	objectExists(context.Context, string) (bool, error)
+	ReadSource(context.Context, string) (ai.ImageInput, error)
 }
 
 func newObjectStore(cfg config.Config) (*objectStore, error) {

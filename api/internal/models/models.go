@@ -1,6 +1,11 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+)
 
 type Role string
 
@@ -53,7 +58,8 @@ type Product struct {
 }
 
 type SKU struct {
-	ID                uint      `gorm:"primaryKey" json:"id"`
+	ID                uint      `gorm:"primaryKey" json:"-"`
+	PublicID          string    `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
 	ProductID         uint      `gorm:"index;not null" json:"product_id"`
 	Code              string    `gorm:"size:80;uniqueIndex;not null" json:"code"`
 	Color             string    `gorm:"size:80" json:"color"`
@@ -95,7 +101,8 @@ type PhotoSession struct {
 }
 
 type Asset struct {
-	ID             uint         `gorm:"primaryKey" json:"id"`
+	ID             uint         `gorm:"primaryKey" json:"-"`
+	PublicID       string       `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
 	SKUID          uint         `gorm:"index;not null" json:"sku_id"`
 	PhotoSessionID uint         `gorm:"index" json:"photo_session_id"`
 	SOPViewID      uint         `gorm:"index" json:"sop_view_id"`
@@ -103,12 +110,31 @@ type Asset struct {
 	OriginalURL    string       `gorm:"size:500;not null" json:"original_url"`
 	ThumbnailURL   string       `gorm:"size:500" json:"thumbnail_url"`
 	ReviewStatus   string       `gorm:"size:32;not null;default:pending" json:"review_status"`
+	MIMEType       string       `gorm:"size:80;not null;default:'';<-:create" json:"mime_type"`
+	Width          int          `gorm:"not null;default:0;<-:create" json:"width"`
+	Height         int          `gorm:"not null;default:0;<-:create" json:"height"`
+	ByteCount      int64        `gorm:"not null;default:0;<-:create" json:"byte_count"`
+	SHA256         string       `gorm:"size:64;not null;default:'';<-:create" json:"sha256"`
 	CapturedAt     time.Time    `json:"captured_at"`
 	CreatedAt      time.Time    `json:"created_at"`
 	UpdatedAt      time.Time    `json:"updated_at"`
 	SKU            SKU          `json:"sku"`
 	SOPView        SOPView      `json:"sop_view"`
 	PhotoSession   PhotoSession `json:"photo_session"`
+}
+
+func (sku *SKU) BeforeCreate(*gorm.DB) error {
+	if sku.PublicID == "" {
+		sku.PublicID = uuid.NewString()
+	}
+	return nil
+}
+
+func (asset *Asset) BeforeCreate(*gorm.DB) error {
+	if asset.PublicID == "" {
+		asset.PublicID = uuid.NewString()
+	}
+	return nil
 }
 
 type AssetReview struct {

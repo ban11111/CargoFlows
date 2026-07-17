@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"cargoflow/api/internal/ai"
 	"cargoflow/api/internal/models"
 	"github.com/gin-gonic/gin"
 	mysqlDriver "github.com/go-sql-driver/mysql"
@@ -353,6 +354,7 @@ type assetUploadClaims struct {
 	PhotoSessionID string `json:"photo_session_id"`
 	SOPViewID      string `json:"sop_view_id"`
 	ObjectKey      string `json:"object_key"`
+	ContentType    string `json:"content_type"`
 	UserID         uint   `json:"user_id"`
 	jwt.RegisteredClaims
 }
@@ -383,7 +385,7 @@ func (s *Server) createUploadURL(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "object_storage_unavailable", "message": "prepare object storage upload failed"})
 		return
 	}
-	completionToken, err := s.issueAssetUploadTicket(currentUser(c).ID, req.PhotoSessionID, req.SOPViewID, objectKey)
+	completionToken, err := s.issueAssetUploadTicket(currentUser(c).ID, req.PhotoSessionID, req.SOPViewID, objectKey, normalizedImageContentType(req.ContentType))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "issue upload completion ticket failed"})
 		return
@@ -465,6 +467,16 @@ func (s *Server) completeAssetUpload(c *gin.Context) {
 		respondCaptureError(c, errUploadedObjectNotFound)
 		return
 	}
+	source, err := s.storage.ReadSource(c.Request.Context(), claims.ObjectKey)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "object_storage_unavailable", "message": "read uploaded object failed"})
+		return
+	}
+	metadata, err := new(ai.ImageStorage).Validate(ai.ImageValidationRequest{Bytes: source.Bytes})
+	if err != nil || metadata.MIMEType != claims.ContentType {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_uploaded_image", "message": "uploaded image is invalid"})
+		return
+	}
 	asset := models.Asset{
 		SKUID:          session.SKUID,
 		PhotoSessionID: session.ID,
@@ -472,6 +484,11 @@ func (s *Server) completeAssetUpload(c *gin.Context) {
 		ObjectKey:      claims.ObjectKey,
 		OriginalURL:    s.storage.assetURL(claims.ObjectKey),
 		ReviewStatus:   "pending",
+		MIMEType:       metadata.MIMEType,
+		Width:          metadata.Width,
+		Height:         metadata.Height,
+		ByteCount:      metadata.ByteCount,
+		SHA256:         metadata.SHA256,
 		CapturedAt:     capturedAt,
 	}
 	asset, created, err := s.createCompletedAsset(asset)
@@ -557,7 +574,7 @@ func writeCompletedAsset(c *gin.Context, status int, asset models.Asset, session
 }
 
 func imageExtension(contentType string) (string, bool) {
-	switch strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0])) {
+	switch normalizedImageContentType(contentType) {
 	case "image/jpeg":
 		return ".jpg", true
 	case "image/png":
@@ -571,12 +588,17 @@ func imageExtension(contentType string) (string, bool) {
 	}
 }
 
-func (s *Server) issueAssetUploadTicket(userID uint, sessionID, viewID, objectKey string) (string, error) {
+func normalizedImageContentType(contentType string) string {
+	return strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+}
+
+func (s *Server) issueAssetUploadTicket(userID uint, sessionID, viewID, objectKey, contentType string) (string, error) {
 	now := time.Now()
 	claims := assetUploadClaims{
 		PhotoSessionID: sessionID,
 		SOPViewID:      viewID,
 		ObjectKey:      objectKey,
+		ContentType:    contentType,
 		UserID:         userID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
