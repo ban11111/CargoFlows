@@ -16,10 +16,6 @@ func main() {
 		log.Fatalf("open database: %v", err)
 	}
 
-	if err := database.Migrate(db); err != nil {
-		log.Fatalf("migrate database: %v", err)
-	}
-
 	if err := database.Seed(db); err != nil {
 		log.Fatalf("seed database: %v", err)
 	}

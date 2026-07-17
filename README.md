@@ -72,6 +72,7 @@ master key:
 ```bash
 docker compose up -d --wait mysql minio
 cd api
+go run ./cmd/migrate
 go run ./cmd/server
 ```
 

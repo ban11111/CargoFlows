@@ -132,6 +132,76 @@ func TestMigrateCreatesAIFoundationTables(t *testing.T) {
 	}
 }
 
+func TestMigrateBackfillsLegacyBlankSOPViewPublicIDs(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	views := []models.SOPView{
+		{PublicID: uuid.NewString(), SOPVersionID: 1, Sequence: 1, Role: models.SOPViewReferenceFront, ViewKind: models.SOPViewStandard, PresetKey: "reference_front", NameZH: "正面", NameEN: "Front", Required: true},
+		{PublicID: uuid.NewString(), SOPVersionID: 1, Sequence: 2, Role: models.SOPViewCapture, ViewKind: models.SOPViewStandard, PresetKey: "back", NameZH: "背面", NameEN: "Back"},
+	}
+	if err := db.Create(&views).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrator().DropIndex(&models.SOPView{}, "idx_sop_views_public_id"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&models.SOPView{}).Where("id IN ?", []uint{views[0].ID, views[1].ID}).Update("public_id", "").Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Migrate(db); err != nil {
+		t.Fatalf("legacy migration failed: %v", err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatalf("repeated migration failed: %v", err)
+	}
+
+	var migrated []models.SOPView
+	if err := db.Where("id IN ?", []uint{views[0].ID, views[1].ID}).Order("id").Find(&migrated).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(migrated) != 2 || migrated[0].PublicID == migrated[1].PublicID {
+		t.Fatalf("migrated public IDs are not unique: %#v", migrated)
+	}
+	for _, view := range migrated {
+		parsed, err := uuid.Parse(view.PublicID)
+		if err != nil || parsed == uuid.Nil {
+			t.Fatalf("invalid migrated public ID %q: %v", view.PublicID, err)
+		}
+	}
+}
+
+func TestRunWithMigrationLockHoldsDedicatedLockAroundNormalMigration(t *testing.T) {
+	locked := false
+	order := make([]string, 0, 3)
+	err := runWithMigrationLock(func() (func() error, error) {
+		locked = true
+		order = append(order, "lock")
+		return func() error {
+			if !locked {
+				t.Fatal("lock released twice")
+			}
+			locked = false
+			order = append(order, "unlock")
+			return nil
+		}, nil
+	}, func() error {
+		if !locked {
+			t.Fatal("migration ran without advisory lock")
+		}
+		order = append(order, "migrate")
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(order, ","); got != "lock,migrate,unlock" {
+		t.Fatalf("order = %q", got)
+	}
+}
+
 func TestMigrateAIJobIdempotencyIndexIsActorScopedAndLegacySafe(t *testing.T) {
 	db := openTestDB(t)
 	if err := Migrate(db); err != nil {

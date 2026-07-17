@@ -1,6 +1,8 @@
 package database
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -33,6 +35,56 @@ func newProductionLogger(writer logger.Writer) logger.Interface {
 }
 
 func Migrate(db *gorm.DB) error {
+	if db.Dialector.Name() != "mysql" {
+		return migrateSchema(db)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return fmt.Errorf("access database pool for schema migration: %w", err)
+	}
+	ctx := db.Statement.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	conn, err := sqlDB.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("reserve schema migration lock connection: %w", err)
+	}
+	defer conn.Close()
+	return runWithMigrationLock(func() (func() error, error) {
+		var acquired int
+		if err := conn.QueryRowContext(ctx, "SELECT GET_LOCK(?, ?)", "cargoflow_schema_migrate", 60).Scan(&acquired); err != nil {
+			return nil, fmt.Errorf("acquire schema migration lock: %w", err)
+		}
+		if acquired != 1 {
+			return nil, fmt.Errorf("acquire schema migration lock: timed out")
+		}
+		return func() error {
+			var released int
+			if err := conn.QueryRowContext(ctx, "SELECT RELEASE_LOCK(?)", "cargoflow_schema_migrate").Scan(&released); err != nil {
+				return fmt.Errorf("release schema migration lock: %w", err)
+			}
+			if released != 1 {
+				return fmt.Errorf("release schema migration lock: lock was not held")
+			}
+			return nil
+		}, nil
+	}, func() error { return migrateSchema(db) })
+}
+
+func runWithMigrationLock(acquire func() (func() error, error), migrate func() error) error {
+	unlock, err := acquire()
+	if err != nil {
+		return err
+	}
+	migrateErr := migrate()
+	return errors.Join(migrateErr, unlock())
+}
+
+func migrateSchema(db *gorm.DB) error {
+	if err := backfillLegacyPublicIDs(db); err != nil {
+		return err
+	}
 	if err := migrateAIContentTemplateSchema(db); err != nil {
 		return err
 	}
@@ -60,6 +112,30 @@ func Migrate(db *gorm.DB) error {
 		&models.AIAuditEvent{},
 		&models.AIUsageLedger{},
 	)
+}
+
+func backfillLegacyPublicIDs(db *gorm.DB) error {
+	for _, table := range []string{
+		"capture_sops",
+		"sop_versions",
+		"sop_views",
+		"sop_view_reference_images",
+		"photo_sessions",
+	} {
+		if !db.Migrator().HasTable(table) || !db.Migrator().HasColumn(table, "public_id") {
+			continue
+		}
+		var ids []uint
+		if err := db.Table(table).Where("public_id IS NULL OR TRIM(public_id) = ''").Pluck("id", &ids).Error; err != nil {
+			return fmt.Errorf("find legacy blank public IDs in %s: %w", table, err)
+		}
+		for _, id := range ids {
+			if err := db.Table(table).Where("id = ? AND (public_id IS NULL OR TRIM(public_id) = '')", id).Update("public_id", uuid.NewString()).Error; err != nil {
+				return fmt.Errorf("backfill legacy public ID in %s: %w", table, err)
+			}
+		}
+	}
+	return nil
 }
 
 func migrateAIContentTemplateSchema(db *gorm.DB) error {

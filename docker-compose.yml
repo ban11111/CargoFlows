@@ -28,6 +28,17 @@ services:
     volumes:
       - minio-data:/data
 
+  migrate:
+    build:
+      context: ./api
+    entrypoint: ["/app/cargoflow-migrate"]
+    environment:
+      DB_DSN: cargoflow:cargoflow@tcp(mysql:3306)/cargoflow?charset=utf8mb4&parseTime=True&loc=Local
+      APP_ENV: development
+    depends_on:
+      mysql:
+        condition: service_healthy
+
   api:
     build:
       context: ./api
@@ -44,8 +55,8 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      mysql:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       minio:
         condition: service_started
 
@@ -59,8 +70,8 @@ services:
       AI_WORKER_DRY_RUN: "true"
       AI_WORKER_POLL_INTERVAL: 1s
     depends_on:
-      mysql:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   mysql-data:

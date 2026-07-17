@@ -31,10 +31,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("open database: %v", err)
 	}
-	if err := database.Migrate(db); err != nil {
-		log.Fatalf("migrate database: %v", err)
-	}
-
 	workerID := newWorkerID()
 	worker := ai.NewWorker(ai.NewQueue(db), workerID, leaseTTL, ai.SystemClock{}, ai.NewDryRunExecutor(db))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

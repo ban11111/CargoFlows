@@ -17,11 +17,12 @@
 - Model-generated facts are untrusted. The server enforces structured schemas, length limits, forbidden terms, and candidate counts independently.
 - No candidate automatically updates SKU or platform content. Application is an explicit audited action.
 - Image slots remain unsupported by the real executor in this phase and fail safely without an OpenAI call.
+- Pre-release legacy SOP data is not upgraded; the user will re-upload it after the new version is ready.
 - Every behavior change follows RED-GREEN-REFACTOR and receives focused plus full verification.
 
 ---
 
-### Task 1: Make Database Upgrades Single-Owner and Legacy-Safe
+### Task 1: Make Database Migrations Single-Owner
 
 **Files:**
 - Create: `api/cmd/migrate/main.go`
@@ -36,9 +37,9 @@
 - Produces: `database.Migrate(ctx context.Context, db *gorm.DB) error` and a one-shot `cargoflow-migrate` command.
 - Guarantees: API and worker never run migrations; Compose does not start either until the migrator exits successfully.
 
-- [ ] **Step 1: Write failing legacy and ownership tests**
+- [ ] **Step 1: Write failing identity and ownership tests**
 
-Add tests that create legacy SOP tables with empty `public_id` values, call `Migrate` twice, and assert every public identifier is a non-zero unique UUID. Add a source/config test asserting server and worker do not call `database.Migrate`, while Compose has a `migrate` service and `service_completed_successfully` dependencies.
+Add tests that blank existing-schema `public_id` values, call `Migrate` twice, and assert every public identifier is a non-zero unique UUID. Add a source/config test asserting server and worker do not call `database.Migrate`, while Compose has a `migrate` service and `service_completed_successfully` dependencies. Old pre-release SOP schemas are intentionally outside the upgrade contract.
 
 - [ ] **Step 2: Run RED**
 
@@ -54,7 +55,7 @@ Before `AutoMigrate`, inspect existing public-identity tables (`capture_sops`, `
 
 Run: `cd api && go test ./internal/database ./cmd/server ./cmd/worker -count=1 && go test ./... -count=1`
 
-Expected: PASS; repeated migration is idempotent and old rows retain data with new UUIDs.
+Expected: PASS; repeated migration is idempotent for the current schema.
 
 - [ ] **Step 5: Commit**
 
