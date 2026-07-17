@@ -11,9 +11,9 @@ export const openAIKeySchema = z.object({
 export type OpenAIKeyInput = z.infer<typeof openAIKeySchema>;
 
 const baseSlot = z.object({
-  slot_key: z.string().trim().regex(/^[a-z][a-z0-9_]*$/, "invalidSlotKey"),
-  name_zh: z.string().trim().min(1, "requiredNameZh"),
-  name_en: z.string().trim().min(1, "requiredNameEn"),
+  slot_key: z.string().trim().max(80, "slotKeyTooLong").regex(/^[a-z][a-z0-9_]*$/, "invalidSlotKey"),
+  name_zh: z.string().trim().min(1, "requiredNameZh").max(180, "nameTooLong"),
+  name_en: z.string().trim().min(1, "requiredNameEn").max(180, "nameTooLong"),
   prompt_fragment: z.string().trim().min(1, "requiredPromptFragment"),
 });
 
@@ -38,9 +38,9 @@ const seoSlot = baseSlot.extend({
 export const aiTemplateSlotSchema = z.union([imageSlot, titleSlot, seoSlot]);
 
 export const aiTemplateDraftSchema = z.object({
-  name_zh: z.string().trim().min(1, "requiredNameZh"),
-  name_en: z.string().trim().min(1, "requiredNameEn"),
-  target_platform: z.string().trim().min(1, "requiredPlatform"),
+  name_zh: z.string().trim().min(1, "requiredNameZh").max(180, "nameTooLong"),
+  name_en: z.string().trim().min(1, "requiredNameEn").max(180, "nameTooLong"),
+  target_platform: z.string().trim().min(1, "requiredPlatform").max(80, "platformTooLong"),
   slots: z.array(aiTemplateSlotSchema).min(1, "requiredSlot"),
 }).superRefine((draft, context) => {
   const seen = new Set<string>();
