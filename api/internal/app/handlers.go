@@ -1,6 +1,9 @@
 package app
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -71,6 +74,55 @@ type createSKURequest struct {
 	Tags              []string `json:"tags"`
 }
 
+type skuProductDTO struct {
+	CategoryID      uint            `json:"category_id"`
+	Name            string          `json:"name"`
+	Brand           string          `json:"brand"`
+	Category        string          `json:"category"`
+	Description     string          `json:"description"`
+	CatalogCategory models.Category `json:"category_record"`
+}
+
+type skuDTO struct {
+	PublicID          string         `json:"public_id"`
+	Code              string         `json:"code"`
+	Color             string         `json:"color"`
+	Size              string         `json:"size"`
+	Barcode           string         `json:"barcode"`
+	Stock             int            `json:"stock"`
+	LowStockThreshold int            `json:"low_stock_threshold"`
+	PlatformTitle     string         `json:"platform_title"`
+	SellingPoints     string         `json:"selling_points"`
+	Status            string         `json:"status"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
+	Product           skuProductDTO  `json:"product"`
+	Tags              []publicTagDTO `json:"tags"`
+}
+
+type publicTagDTO struct {
+	Name string `json:"name"`
+}
+
+func publicTagDTOs(tags []models.Tag) []publicTagDTO {
+	result := make([]publicTagDTO, 0, len(tags))
+	for _, tag := range tags {
+		result = append(result, publicTagDTO{Name: tag.Name})
+	}
+	return result
+}
+
+func skuDTOFromModel(value models.SKU) skuDTO {
+	return skuDTO{
+		PublicID: value.PublicID, Code: value.Code, Color: value.Color, Size: value.Size, Barcode: value.Barcode,
+		Stock: value.Stock, LowStockThreshold: value.LowStockThreshold, PlatformTitle: value.PlatformTitle,
+		SellingPoints: value.SellingPoints, Status: value.Status, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+		Product: skuProductDTO{CategoryID: value.Product.CategoryID, Name: value.Product.Name, Brand: value.Product.Brand,
+			Category: value.Product.Category, Description: value.Product.Description, CatalogCategory: value.Product.CatalogCategory},
+		Tags: publicTagDTOs(value.Tags),
+	}
+}
+
 func (s *Server) listSKUs(c *gin.Context) {
 	var skus []models.SKU
 	query := s.db.Preload("Product.CatalogCategory").Preload("Tags").Joins("JOIN products ON products.id = skus.product_id").Order("skus.updated_at DESC")
@@ -85,7 +137,11 @@ func (s *Server) listSKUs(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": skus})
+	data := make([]skuDTO, 0, len(skus))
+	for _, sku := range skus {
+		data = append(data, skuDTOFromModel(sku))
+	}
+	c.JSON(http.StatusOK, gin.H{"data": data})
 }
 
 func (s *Server) createSKU(c *gin.Context) {
@@ -138,21 +194,29 @@ func (s *Server) createSKU(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, sku)
+	c.JSON(http.StatusCreated, skuDTOFromModel(sku))
 }
 
 func (s *Server) getSKU(c *gin.Context) {
+	publicID, ok := requireSKUPublicID(c)
+	if !ok {
+		return
+	}
 	var sku models.SKU
-	if err := s.db.Preload("Product.CatalogCategory").Preload("Tags").First(&sku, c.Param("id")).Error; err != nil {
+	if err := s.db.Preload("Product.CatalogCategory").Preload("Tags").Where("public_id = ?", publicID).First(&sku).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"message": "sku not found"})
 		return
 	}
-	c.JSON(http.StatusOK, sku)
+	c.JSON(http.StatusOK, skuDTOFromModel(sku))
 }
 
 func (s *Server) updateSKU(c *gin.Context) {
+	publicID, ok := requireSKUPublicID(c)
+	if !ok {
+		return
+	}
 	var sku models.SKU
-	if err := s.db.Preload("Product.CatalogCategory").Preload("Tags").First(&sku, c.Param("id")).Error; err != nil {
+	if err := s.db.Preload("Product.CatalogCategory").Preload("Tags").Where("public_id = ?", publicID).First(&sku).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"message": "sku not found"})
 		return
 	}
@@ -204,7 +268,7 @@ func (s *Server) updateSKU(c *gin.Context) {
 	}
 
 	_ = s.db.Preload("Product.CatalogCategory").Preload("Tags").First(&sku, sku.ID).Error
-	c.JSON(http.StatusOK, sku)
+	c.JSON(http.StatusOK, skuDTOFromModel(sku))
 }
 
 type inventoryAdjustmentRequest struct {
@@ -214,9 +278,8 @@ type inventoryAdjustmentRequest struct {
 }
 
 func (s *Server) createInventoryAdjustment(c *gin.Context) {
-	skuID, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid sku id"})
+	publicID, ok := requireSKUPublicID(c)
+	if !ok {
 		return
 	}
 
@@ -228,9 +291,9 @@ func (s *Server) createInventoryAdjustment(c *gin.Context) {
 
 	user := currentUser(c)
 	var adjustment models.InventoryAdjustment
-	err = s.db.Transaction(func(tx *gorm.DB) error {
-		var sku models.SKU
-		if err := tx.First(&sku, skuID).Error; err != nil {
+	var sku models.SKU
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("public_id = ?", publicID).First(&sku).Error; err != nil {
 			return err
 		}
 		sku.Stock += req.QuantityDelta
@@ -241,7 +304,7 @@ func (s *Server) createInventoryAdjustment(c *gin.Context) {
 			return err
 		}
 		adjustment = models.InventoryAdjustment{
-			SKUID:         uint(skuID),
+			SKUID:         sku.ID,
 			QuantityDelta: req.QuantityDelta,
 			Reason:        req.Reason,
 			Note:          req.Note,
@@ -254,27 +317,63 @@ func (s *Server) createInventoryAdjustment(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, adjustment)
+	c.JSON(http.StatusCreated, inventoryAdjustmentDTOFromModel(adjustment, sku.PublicID))
 }
 
 func (s *Server) listInventoryHistory(c *gin.Context) {
+	publicID, ok := requireSKUPublicID(c)
+	if !ok {
+		return
+	}
+	var sku models.SKU
+	if err := s.db.Select("id", "public_id").Where("public_id = ?", publicID).First(&sku).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "sku not found"})
+		return
+	}
 	var adjustments []models.InventoryAdjustment
-	if err := s.db.Preload("Operator").Where("sku_id = ?", c.Param("id")).Order("created_at DESC").Find(&adjustments).Error; err != nil {
+	if err := s.db.Preload("Operator").Where("sku_id = ?", sku.ID).Order("created_at DESC").Find(&adjustments).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": adjustments})
+	data := make([]inventoryAdjustmentDTO, 0, len(adjustments))
+	for _, adjustment := range adjustments {
+		data = append(data, inventoryAdjustmentDTOFromModel(adjustment, sku.PublicID))
+	}
+	c.JSON(http.StatusOK, gin.H{"data": data})
+}
+
+type inventoryAdjustmentDTO struct {
+	SKUID         string    `json:"sku_id"`
+	QuantityDelta int       `json:"quantity_delta"`
+	Reason        string    `json:"reason"`
+	Note          string    `json:"note"`
+	OperatorName  string    `json:"operator_name"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+func inventoryAdjustmentDTOFromModel(value models.InventoryAdjustment, skuPublicID string) inventoryAdjustmentDTO {
+	return inventoryAdjustmentDTO{SKUID: skuPublicID, QuantityDelta: value.QuantityDelta, Reason: value.Reason, Note: value.Note, OperatorName: value.Operator.Name, CreatedAt: value.CreatedAt}
+}
+
+func requireSKUPublicID(c *gin.Context) (string, bool) {
+	value := c.Param("sku_id")
+	parsed, err := uuid.Parse(value)
+	if err != nil || parsed == uuid.Nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": "sku_id must be a UUID"})
+		return "", false
+	}
+	return parsed.String(), true
 }
 
 type createPhotoSessionRequest struct {
-	SKUID        uint   `json:"sku_id"`
+	SKUID        string `json:"sku_id"`
 	SOPVersionID string `json:"sop_version_id"`
 }
 
 type photoSessionResponse struct {
 	PublicID     string    `json:"public_id"`
 	Code         string    `json:"code"`
-	SKUID        uint      `json:"sku_id"`
+	SKUID        string    `json:"sku_id"`
 	SOPVersionID string    `json:"sop_version_id"`
 	Status       string    `json:"status"`
 	CreatedAt    time.Time `json:"created_at"`
@@ -295,13 +394,14 @@ var (
 
 func (s *Server) createPhotoSession(c *gin.Context) {
 	var req createPhotoSessionRequest
-	if err := decodeJSONStrict(c, &req); err != nil || req.SKUID == 0 || !isUUID(req.SOPVersionID) {
-		respondSOPBadRequest(c, errOr(err, "sku_id and a UUID sop_version_id are required"))
+	if err := decodeJSONStrict(c, &req); err != nil || !isUUID(req.SKUID) || !isUUID(req.SOPVersionID) {
+		respondSOPBadRequest(c, errOr(err, "sku_id and sop_version_id must be UUIDs"))
 		return
 	}
 	user := currentUser(c)
 	var session models.PhotoSession
 	var selectedVersionPublicID string
+	var selectedSKUPublicID string
 	err := s.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		var version models.SOPVersion
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("public_id = ?", req.SOPVersionID).First(&version).Error; err != nil {
@@ -320,7 +420,7 @@ func (s *Server) createPhotoSession(c *gin.Context) {
 		var sku models.SKU
 		if err := tx.Model(&models.SKU{}).Select("skus.*").
 			Joins("JOIN products ON products.id = skus.product_id").
-			Preload("Product").Where("skus.id = ?", req.SKUID).First(&sku).Error; err != nil {
+			Preload("Product").Where("skus.public_id = ?", req.SKUID).First(&sku).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return errSKUNotFound
 			}
@@ -330,9 +430,10 @@ func (s *Server) createPhotoSession(c *gin.Context) {
 			return errSKUCategoryMismatch
 		}
 		selectedVersionPublicID = version.PublicID
+		selectedSKUPublicID = sku.PublicID
 		session = models.PhotoSession{
 			PublicID: uuid.NewString(), Code: fmt.Sprintf("PS-%s-%d", time.Now().Format("20060102"), time.Now().UnixNano()),
-			SKUID: req.SKUID, SOPVersionID: version.ID, PhotographerID: user.ID, Status: "in_progress",
+			SKUID: sku.ID, SOPVersionID: version.ID, PhotographerID: user.ID, Status: "in_progress",
 		}
 		return tx.Create(&session).Error
 	})
@@ -340,7 +441,7 @@ func (s *Server) createPhotoSession(c *gin.Context) {
 		respondCaptureError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, photoSessionResponse{PublicID: session.PublicID, Code: session.Code, SKUID: session.SKUID, SOPVersionID: selectedVersionPublicID, Status: session.Status, CreatedAt: session.CreatedAt})
+	c.JSON(http.StatusCreated, photoSessionResponse{PublicID: session.PublicID, Code: session.Code, SKUID: selectedSKUPublicID, SOPVersionID: selectedVersionPublicID, Status: session.Status, CreatedAt: session.CreatedAt})
 }
 
 type uploadURLRequest struct {
@@ -353,9 +454,9 @@ type uploadURLRequest struct {
 type assetUploadClaims struct {
 	PhotoSessionID string `json:"photo_session_id"`
 	SOPViewID      string `json:"sop_view_id"`
-	ObjectKey      string `json:"object_key"`
+	UploadID       string `json:"upload_id"`
 	ContentType    string `json:"content_type"`
-	UserID         uint   `json:"user_id"`
+	ActorBinding   string `json:"actor_binding"`
 	jwt.RegisteredClaims
 }
 
@@ -365,7 +466,7 @@ func (s *Server) createUploadURL(c *gin.Context) {
 		respondSOPBadRequest(c, errOr(err, "file_name, photo_session_id, and sop_view_id are required; identifiers must be UUIDs"))
 		return
 	}
-	if !strings.HasPrefix(req.ContentType, "image/") {
+	if !strings.HasPrefix(normalizedImageContentType(req.ContentType), "image/") {
 		respondSOPBadRequest(c, errors.New("only image uploads are supported"))
 		return
 	}
@@ -379,13 +480,14 @@ func (s *Server) createUploadURL(c *gin.Context) {
 		respondSOPBadRequest(c, errors.New("unsupported image content type"))
 		return
 	}
-	objectKey := fmt.Sprintf("photo-sessions/%s/views/%s/%s%s", req.PhotoSessionID, req.SOPViewID, uuid.NewString(), extension)
-	uploadURL, assetURL, err := s.storage.createUploadURL(c.Request.Context(), objectKey)
+	uploadID := uuid.NewString()
+	objectKey := fmt.Sprintf("photo-sessions/%s/views/%s/%s%s", req.PhotoSessionID, req.SOPViewID, uploadID, extension)
+	uploadURL, _, err := s.storage.createUploadURL(c.Request.Context(), objectKey)
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "object_storage_unavailable", "message": "prepare object storage upload failed"})
 		return
 	}
-	completionToken, err := s.issueAssetUploadTicket(currentUser(c).ID, req.PhotoSessionID, req.SOPViewID, objectKey, normalizedImageContentType(req.ContentType))
+	completionToken, err := s.issueAssetUploadTicket(currentUser(c).ID, req.PhotoSessionID, req.SOPViewID, uploadID, normalizedImageContentType(req.ContentType))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "issue upload completion ticket failed"})
 		return
@@ -393,8 +495,6 @@ func (s *Server) createUploadURL(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"method":           "PUT",
 		"upload_url":       uploadURL,
-		"asset_url":        assetURL,
-		"object_key":       objectKey,
 		"completion_token": completionToken,
 		"expires_in":       900,
 		"headers":          gin.H{"content-type": req.ContentType},
@@ -409,13 +509,11 @@ type completeAssetRequest struct {
 }
 
 type completedAssetResponse struct {
-	ID             uint      `json:"id"`
-	SKUID          uint      `json:"sku_id"`
+	PublicID       string    `json:"public_id"`
+	SKUID          string    `json:"sku_id"`
 	PhotoSessionID string    `json:"photo_session_id"`
 	SOPViewID      string    `json:"sop_view_id"`
-	ObjectKey      string    `json:"object_key"`
-	OriginalURL    string    `json:"original_url"`
-	ThumbnailURL   string    `json:"thumbnail_url"`
+	MediaURL       string    `json:"media_url"`
 	ReviewStatus   string    `json:"review_status"`
 	CapturedAt     time.Time `json:"captured_at"`
 }
@@ -441,11 +539,21 @@ func (s *Server) completeAssetUpload(c *gin.Context) {
 		return
 	}
 	claims, err := s.verifyAssetUploadTicket(req.CompletionToken)
-	if err != nil || claims.UserID != currentUser(c).ID || claims.PhotoSessionID != session.PublicID || claims.SOPViewID != view.PublicID || !isScopedAssetObjectKey(claims.ObjectKey, session.PublicID, view.PublicID) {
+	if err != nil {
 		respondCaptureError(c, errInvalidUploadTicket)
 		return
 	}
-	existing, found, err := s.findCompletedAsset(claims.ObjectKey)
+	extension, supported := imageExtension(claims.ContentType)
+	if !supported || !isUUID(claims.UploadID) || !hmac.Equal([]byte(claims.ActorBinding), []byte(s.assetUploadActorBinding(currentUser(c).ID))) || claims.PhotoSessionID != session.PublicID || claims.SOPViewID != view.PublicID {
+		respondCaptureError(c, errInvalidUploadTicket)
+		return
+	}
+	objectKey := fmt.Sprintf("photo-sessions/%s/views/%s/%s%s", session.PublicID, view.PublicID, claims.UploadID, extension)
+	if !isScopedAssetObjectKey(objectKey, session.PublicID, view.PublicID) {
+		respondCaptureError(c, errInvalidUploadTicket)
+		return
+	}
+	existing, found, err := s.findCompletedAsset(objectKey)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "internal server error"})
 		return
@@ -455,10 +563,10 @@ func (s *Server) completeAssetUpload(c *gin.Context) {
 			respondCaptureError(c, errInvalidUploadTicket)
 			return
 		}
-		writeCompletedAsset(c, http.StatusOK, existing, session.PublicID, view.PublicID)
+		s.writeCompletedAsset(c, http.StatusOK, existing, session.PublicID, view.PublicID)
 		return
 	}
-	exists, err := s.storage.objectExists(c.Request.Context(), claims.ObjectKey)
+	exists, err := s.storage.objectExists(c.Request.Context(), objectKey)
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "object_storage_unavailable", "message": "verify uploaded object failed"})
 		return
@@ -467,7 +575,7 @@ func (s *Server) completeAssetUpload(c *gin.Context) {
 		respondCaptureError(c, errUploadedObjectNotFound)
 		return
 	}
-	source, err := s.storage.ReadSource(c.Request.Context(), claims.ObjectKey)
+	source, err := s.storage.ReadSource(c.Request.Context(), objectKey)
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "object_storage_unavailable", "message": "read uploaded object failed"})
 		return
@@ -481,8 +589,8 @@ func (s *Server) completeAssetUpload(c *gin.Context) {
 		SKUID:          session.SKUID,
 		PhotoSessionID: session.ID,
 		SOPViewID:      view.ID,
-		ObjectKey:      claims.ObjectKey,
-		OriginalURL:    s.storage.assetURL(claims.ObjectKey),
+		ObjectKey:      objectKey,
+		OriginalURL:    "",
 		ReviewStatus:   "pending",
 		MIMEType:       metadata.MIMEType,
 		Width:          metadata.Width,
@@ -504,7 +612,7 @@ func (s *Server) completeAssetUpload(c *gin.Context) {
 	if created {
 		status = http.StatusCreated
 	}
-	writeCompletedAsset(c, status, asset, session.PublicID, view.PublicID)
+	s.writeCompletedAsset(c, status, asset, session.PublicID, view.PublicID)
 }
 
 func (s *Server) findCompletedAsset(objectKey string) (models.Asset, bool, error) {
@@ -569,8 +677,13 @@ func (s *Server) retryableAssetDBError(err error) bool {
 	return false
 }
 
-func writeCompletedAsset(c *gin.Context, status int, asset models.Asset, sessionPublicID, viewPublicID string) {
-	c.JSON(status, completedAssetResponse{ID: asset.ID, SKUID: asset.SKUID, PhotoSessionID: sessionPublicID, SOPViewID: viewPublicID, ObjectKey: asset.ObjectKey, OriginalURL: asset.OriginalURL, ThumbnailURL: asset.ThumbnailURL, ReviewStatus: asset.ReviewStatus, CapturedAt: asset.CapturedAt})
+func (s *Server) writeCompletedAsset(c *gin.Context, status int, asset models.Asset, sessionPublicID, viewPublicID string) {
+	var sku models.SKU
+	if err := s.db.Select("public_id").First(&sku, asset.SKUID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "internal server error"})
+		return
+	}
+	c.JSON(status, completedAssetResponse{PublicID: asset.PublicID, SKUID: sku.PublicID, PhotoSessionID: sessionPublicID, SOPViewID: viewPublicID, MediaURL: "/api/v1/assets/" + asset.PublicID + "/media", ReviewStatus: asset.ReviewStatus, CapturedAt: asset.CapturedAt})
 }
 
 func imageExtension(contentType string) (string, bool) {
@@ -579,8 +692,6 @@ func imageExtension(contentType string) (string, bool) {
 		return ".jpg", true
 	case "image/png":
 		return ".png", true
-	case "image/heic", "image/heif":
-		return ".heic", true
 	case "image/webp":
 		return ".webp", true
 	default:
@@ -592,20 +703,26 @@ func normalizedImageContentType(contentType string) string {
 	return strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
 }
 
-func (s *Server) issueAssetUploadTicket(userID uint, sessionID, viewID, objectKey, contentType string) (string, error) {
+func (s *Server) issueAssetUploadTicket(userID uint, sessionID, viewID, uploadID, contentType string) (string, error) {
 	now := time.Now()
 	claims := assetUploadClaims{
 		PhotoSessionID: sessionID,
 		SOPViewID:      viewID,
-		ObjectKey:      objectKey,
+		UploadID:       uploadID,
 		ContentType:    contentType,
-		UserID:         userID,
+		ActorBinding:   s.assetUploadActorBinding(userID),
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(15 * time.Minute)),
 		},
 	}
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(s.cfg.JWTSecret))
+}
+
+func (s *Server) assetUploadActorBinding(userID uint) string {
+	mac := hmac.New(sha256.New, []byte(s.cfg.JWTSecret))
+	_, _ = mac.Write([]byte("asset-upload-actor:" + strconv.FormatUint(uint64(userID), 10)))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func (s *Server) verifyAssetUploadTicket(value string) (*assetUploadClaims, error) {
@@ -625,7 +742,7 @@ func isScopedAssetObjectKey(objectKey, sessionID, viewID string) bool {
 	if base == objectKey || base == "" || strings.Contains(base, "/") || strings.Contains(base, "\\") {
 		return false
 	}
-	for _, extension := range []string{".jpg", ".png", ".heic", ".webp"} {
+	for _, extension := range []string{".jpg", ".png", ".webp"} {
 		if strings.HasSuffix(base, extension) {
 			_, err := uuid.Parse(strings.TrimSuffix(base, extension))
 			return err == nil
@@ -698,7 +815,7 @@ func (s *Server) listAssetsForReview(c *gin.Context) {
 	items := make([]assetReviewItem, 0, len(assets))
 	for _, asset := range assets {
 		items = append(items, assetReviewItem{
-			ID: asset.ID, SKUID: asset.SKUID, OriginalURL: asset.OriginalURL, ThumbnailURL: asset.ThumbnailURL,
+			PublicID: asset.PublicID, SKUID: asset.SKU.PublicID, MediaURL: "/api/v1/assets/" + asset.PublicID + "/media",
 			ReviewStatus: asset.ReviewStatus, CapturedAt: asset.CapturedAt,
 			SOPViewName:      localizedViewName{ZHCN: asset.SOPView.NameZH, EN: asset.SOPView.NameEN},
 			PhotoSessionCode: asset.PhotoSession.Code,
@@ -708,10 +825,9 @@ func (s *Server) listAssetsForReview(c *gin.Context) {
 }
 
 type assetReviewItem struct {
-	ID               uint              `json:"id"`
-	SKUID            uint              `json:"sku_id"`
-	OriginalURL      string            `json:"original_url"`
-	ThumbnailURL     string            `json:"thumbnail_url"`
+	PublicID         string            `json:"public_id"`
+	SKUID            string            `json:"sku_id"`
+	MediaURL         string            `json:"media_url"`
 	ReviewStatus     string            `json:"review_status"`
 	CapturedAt       time.Time         `json:"captured_at"`
 	SOPViewName      localizedViewName `json:"sop_view_name"`
@@ -731,7 +847,8 @@ func (s *Server) reviewAsset(c *gin.Context) {
 	}
 	user := currentUser(c)
 	var asset models.Asset
-	if err := s.db.First(&asset, c.Param("id")).Error; err != nil {
+	assetPublicID := c.Param("asset_id")
+	if !isUUID(assetPublicID) || s.db.Where("public_id = ?", assetPublicID).First(&asset).Error != nil {
 		c.JSON(http.StatusNotFound, gin.H{"message": "asset not found"})
 		return
 	}
@@ -741,7 +858,28 @@ func (s *Server) reviewAsset(c *gin.Context) {
 		return
 	}
 	_ = s.db.Create(&models.AssetReview{AssetID: asset.ID, ReviewerID: user.ID, Status: req.Status, Reason: req.Reason}).Error
-	c.JSON(http.StatusOK, asset)
+	c.JSON(http.StatusOK, gin.H{"public_id": asset.PublicID, "review_status": asset.ReviewStatus})
+}
+
+func (s *Server) assetMedia(c *gin.Context) {
+	if !isUUID(c.Param("asset_id")) {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": "asset_id must be a UUID"})
+		return
+	}
+	var asset models.Asset
+	if err := s.db.Where("public_id = ?", c.Param("asset_id")).First(&asset).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "asset not found"})
+		return
+	}
+	source, err := s.storage.ReadSource(c.Request.Context(), asset.ObjectKey)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "object_storage_unavailable", "message": "read asset failed"})
+		return
+	}
+	c.Header("Cache-Control", "private, no-store")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("Content-Disposition", "inline")
+	c.Data(http.StatusOK, asset.MIMEType, source.Bytes)
 }
 
 func (s *Server) listUsers(c *gin.Context) {

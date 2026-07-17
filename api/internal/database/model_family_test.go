@@ -40,31 +40,31 @@ func TestModelFamilyAndVariantIdentityConstraints(t *testing.T) {
 	}
 
 	active := "active"
-	first := models.ModelFamilyMember{PublicID: "member-a", ModelFamilyID: 1, SKUID: 101, ActiveGuard: &active, AddedByID: 1}
+	first := models.ModelFamilyMember{PublicID: "11111111-1111-4111-8111-111111111111", ModelFamilyID: 1, SKUID: 101, ActiveGuard: &active, AddedByID: 1}
 	if err := db.Create(&first).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&models.ModelFamilyMember{PublicID: "member-b", ModelFamilyID: 2, SKUID: first.SKUID, ActiveGuard: &active, AddedByID: 2}).Error; err == nil {
+	if err := db.Create(&models.ModelFamilyMember{PublicID: "22222222-2222-4222-8222-222222222222", ModelFamilyID: 2, SKUID: first.SKUID, ActiveGuard: &active, AddedByID: 2}).Error; err == nil {
 		t.Fatal("one SKU must have only one active family membership")
 	}
 	removedAt := time.Now().UTC()
-	if err := db.Create(&models.ModelFamilyMember{PublicID: "member-c", ModelFamilyID: 2, SKUID: first.SKUID, AddedByID: 2, RemovedAt: &removedAt}).Error; err != nil {
+	if err := db.Create(&models.ModelFamilyMember{PublicID: "33333333-3333-4333-8333-333333333333", ModelFamilyID: 2, SKUID: first.SKUID, AddedByID: 2, RemovedAt: &removedAt}).Error; err != nil {
 		t.Fatalf("removed family membership should remain auditable: %v", err)
 	}
 
 	draft := "draft"
-	version := models.VariantIdentityManifestVersion{PublicID: "version-a", VariantIdentityManifestID: 1, VersionNumber: 1, Status: models.VariantManifestDraft, DraftGuard: &draft, IdentityJSON: []byte(`{}`), CreatedByID: 1}
+	version := models.VariantIdentityManifestVersion{PublicID: "44444444-4444-4444-8444-444444444444", VariantIdentityManifestID: 1, VersionNumber: 1, Status: models.VariantManifestDraft, DraftGuard: &draft, IdentityJSON: []byte(`{}`), CreatedByID: 1}
 	if err := db.Create(&version).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&models.VariantIdentityManifestVersion{PublicID: "version-b", VariantIdentityManifestID: 1, VersionNumber: 2, Status: models.VariantManifestDraft, DraftGuard: &draft, IdentityJSON: []byte(`{}`), CreatedByID: 1}).Error; err == nil {
+	if err := db.Create(&models.VariantIdentityManifestVersion{PublicID: "55555555-5555-4555-8555-555555555555", VariantIdentityManifestID: 1, VersionNumber: 2, Status: models.VariantManifestDraft, DraftGuard: &draft, IdentityJSON: []byte(`{}`), CreatedByID: 1}).Error; err == nil {
 		t.Fatal("one manifest must have only one draft version")
 	}
-	if err := db.Create(&models.VariantIdentityManifestVersion{PublicID: "version-zero", VariantIdentityManifestID: 2, VersionNumber: 0, Status: models.VariantManifestPublished, IdentityJSON: []byte(`{}`), CreatedByID: 1}).Error; err == nil {
+	if err := db.Create(&models.VariantIdentityManifestVersion{PublicID: "66666666-6666-4666-8666-666666666666", VariantIdentityManifestID: 2, VersionNumber: 0, Status: models.VariantManifestPublished, IdentityJSON: []byte(`{}`), CreatedByID: 1}).Error; err == nil {
 		t.Fatal("manifest version number must be positive")
 	}
 
-	region := models.VariantDifferenceRegion{PublicID: "region-a", VariantIdentityManifestVersionID: version.ID, Key: "right_ports", DifferenceKind: models.DifferenceKindPorts, Strictness: models.DifferenceRegionExact, ShapeJSON: []byte(`{}`), ForbiddenInheritanceJSON: []byte(`[]`), RequiredViewKeysJSON: []byte(`["right_ports"]`)}
+	region := models.VariantDifferenceRegion{PublicID: "77777777-7777-4777-8777-777777777777", VariantIdentityManifestVersionID: version.ID, Key: "right_ports", DifferenceKind: models.DifferenceKindPorts, Strictness: models.DifferenceRegionExact, ShapeJSON: []byte(`{}`), ForbiddenInheritanceJSON: []byte(`[]`), RequiredViewKeysJSON: []byte(`["right_ports"]`)}
 	if err := db.Create(&region).Error; err != nil {
 		t.Fatal(err)
 	}

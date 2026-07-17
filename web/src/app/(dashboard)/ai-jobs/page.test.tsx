@@ -12,7 +12,7 @@ function Providers({ children }: { children: ReactNode }) {
 
 describe("AIJobsPage", () => {
   it("renders jobs from the API and links to the real job detail", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ data: [{ public_id: "job-real", sku_id: 11, template_version_id: "version-1", target_platform: "lazada", locale: "zh-CN", status: "queued", snapshot_schema: "cargoflow_product_generation_v1", input_snapshot: { sku: { code: "CF-REAL-001" }, selected_assets: [{ id: 31 }], template: { selected_slots: [{ slot_key: "hero" }] } }, started_at: null, completed_at: null, cancelled_at: null, created_at: "2026-07-17T00:00:00Z", updated_at: "2026-07-17T00:00:00Z", items: [] }] }), { status: 200 }));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ data: [{ public_id: "job-real", sku_id: "11111111-1111-4111-8111-111111111111", template_version_id: "version-1", target_platform: "lazada", locale: "zh-CN", status: "queued", snapshot_schema: "cargoflow_product_generation_v1", input_snapshot: { sku: { public_id: "11111111-1111-4111-8111-111111111111", code: "CF-REAL-001" }, selected_assets: [{ public_id: "22222222-2222-4222-8222-222222222222" }], template: { selected_slots: [{ slot_key: "hero" }] } }, started_at: null, completed_at: null, cancelled_at: null, created_at: "2026-07-17T00:00:00Z", updated_at: "2026-07-17T00:00:00Z", items: [] }] }), { status: 200 }));
     render(<AIJobsPage />, { wrapper: Providers });
     const sku = await screen.findByRole("link", { name: "CF-REAL-001" });
     expect(sku).toHaveAttribute("href", "/ai-jobs/job-real");

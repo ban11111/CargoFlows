@@ -15,6 +15,7 @@
       }
     },
     "sku": {
+      "public_id": "99999999-9999-4999-8999-999999999999",
       "code": "CASE-17-PRO",
       "color": "透明",
       "size": "iPhone 17 Pro",
@@ -177,5 +178,5 @@
     "l3": "33333333-3333-4333-8333-333333333333"
   },
   "candidate_count": 2,
-  "sha256": "f1edbca05ca5a234249ffb0f96b612e8b1f3f180a8d88eb42620ecb29b2cf2df"
+  "sha256": "2b2515e3073e17bd6ac528b96103eec1a1031cc7a9ce861fe6243580bde223e1"
 }

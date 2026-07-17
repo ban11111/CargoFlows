@@ -15,7 +15,7 @@ import { useLanguage } from "@/lib/i18n";
 import { formatNumber } from "@/lib/utils";
 
 interface SKUListItem {
-  id: number;
+  public_id: string;
   code: string;
   color: string;
   size: string;
@@ -23,7 +23,7 @@ interface SKUListItem {
   low_stock_threshold: number;
   status: "active" | "draft" | "disabled";
   product: { name: string; category: string; category_record?: { name: string; name_en?: string } };
-  tags: Array<{ id: number; name: string }>;
+  tags: Array<{ name: string }>;
 }
 
 interface Category {
@@ -51,7 +51,7 @@ export default function SkusPage() {
       accessorKey: "code",
       header: t("sku"),
       cell: ({ row }) => (
-        <Link className="font-medium text-primary" href={`/skus/${row.original.id}`}>
+        <Link className="font-medium text-primary" href={`/skus/${row.original.public_id}`}>
           {row.original.code}
         </Link>
       ),
@@ -68,7 +68,7 @@ export default function SkusPage() {
       header: t("skuTags"),
       cell: ({ row }) => (
         <div className="flex flex-wrap gap-1">
-          {row.original.tags.map((tag) => <Badge key={tag.id} variant="neutral">{tag.name}</Badge>)}
+          {row.original.tags.map((tag) => <Badge key={tag.name} variant="neutral">{tag.name}</Badge>)}
         </div>
       ),
     },

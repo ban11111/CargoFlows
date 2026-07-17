@@ -58,6 +58,33 @@ func TestModelFamilyDefaultsGenerateOpaquePublicIDs(t *testing.T) {
 	}
 }
 
+func TestEveryNewPublicIDHookRejectsCallerSuppliedNonUUIDs(t *testing.T) {
+	constructors := map[string]func() interface{ BeforeCreate(*gorm.DB) error }{
+		"family": func() interface{ BeforeCreate(*gorm.DB) error } { return &models.ModelFamily{PublicID: "not-a-uuid"} },
+		"member": func() interface{ BeforeCreate(*gorm.DB) error } {
+			return &models.ModelFamilyMember{PublicID: "not-a-uuid"}
+		},
+		"manifest": func() interface{ BeforeCreate(*gorm.DB) error } {
+			return &models.VariantIdentityManifest{PublicID: "not-a-uuid"}
+		},
+		"version": func() interface{ BeforeCreate(*gorm.DB) error } {
+			return &models.VariantIdentityManifestVersion{PublicID: "not-a-uuid"}
+		},
+		"region": func() interface{ BeforeCreate(*gorm.DB) error } {
+			return &models.VariantDifferenceRegion{PublicID: "not-a-uuid"}
+		},
+		"sku":   func() interface{ BeforeCreate(*gorm.DB) error } { return &models.SKU{PublicID: "not-a-uuid"} },
+		"asset": func() interface{ BeforeCreate(*gorm.DB) error } { return &models.Asset{PublicID: "not-a-uuid"} },
+	}
+	for name, constructor := range constructors {
+		t.Run(name, func(t *testing.T) {
+			if err := constructor().BeforeCreate(nil); err == nil {
+				t.Fatal("caller-supplied non-UUID public ID was accepted")
+			}
+		})
+	}
+}
+
 func TestVariantDifferenceRegionSerializesNormalizedGeometryAndExactViewKeys(t *testing.T) {
 	region := models.VariantDifferenceRegion{
 		PublicID:                         "region-public-id",

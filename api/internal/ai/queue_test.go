@@ -41,7 +41,7 @@ func seedQueueItems(t *testing.T, count int) (*gorm.DB, models.AIJob, []models.A
 		if i%2 == 1 {
 			kind = models.AIContentSlotImage
 			if len(selectedAssets) == 0 {
-				selectedAssets = append(selectedAssets, AssetFacts{ID: 101})
+				selectedAssets = append(selectedAssets, AssetFacts{PublicID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"})
 			}
 		}
 		slotKey := fmt.Sprintf("slot-%d", i)
@@ -68,7 +68,7 @@ func seedQueueItems(t *testing.T, count int) (*gorm.DB, models.AIJob, []models.A
 		}
 		assetIDsJSON := []byte(`[]`)
 		if slots[i].Kind == models.AIContentSlotImage {
-			assetIDsJSON = []byte(`[101]`)
+			assetIDsJSON = []byte(`["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]`)
 		}
 		items[i] = models.AIJobItem{PublicID: uuid.NewString(), AIJobID: job.ID, AIContentSlotID: slots[i].ID, SlotKey: slots[i].SlotKey, SlotSnapshotJSON: slotSnapshotJSON, Kind: slots[i].Kind, Status: models.AIJobItemQueued, SelectedInputAssetIDsJSON: assetIDsJSON}
 		if err := db.Create(&items[i]).Error; err != nil {

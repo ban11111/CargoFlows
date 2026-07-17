@@ -4,6 +4,76 @@
  */
 
 export interface paths {
+    "/skus": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listSKUs"];
+        put?: never;
+        post: operations["createSKU"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skus/{sku_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sku_id: components["parameters"]["SKUID"];
+            };
+            cookie?: never;
+        };
+        get: operations["getSKU"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["updateSKU"];
+        trace?: never;
+    };
+    "/skus/{sku_id}/inventory-adjustments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sku_id: components["parameters"]["SKUID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createInventoryAdjustment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skus/{sku_id}/inventory-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sku_id: components["parameters"]["SKUID"];
+            };
+            cookie?: never;
+        };
+        get: operations["listInventoryHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/capture-sops": {
         parameters: {
             query?: never;
@@ -306,6 +376,42 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/assets/{asset_id}/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: components["parameters"]["AssetID"];
+            };
+            cookie?: never;
+        };
+        get: operations["getAssetMedia"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assets/{asset_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: components["parameters"]["AssetID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["reviewAsset"];
         trace?: never;
     };
     "/assets/review": {
@@ -632,7 +738,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/skus/{id}/platform-content": {
+    "/skus/{sku_id}/platform-content": {
         parameters: {
             query: {
                 platform: string;
@@ -640,7 +746,7 @@ export interface paths {
             };
             header?: never;
             path: {
-                id: number;
+                sku_id: components["parameters"]["SKUID"];
             };
             cookie?: never;
         };
@@ -755,13 +861,83 @@ export interface components {
             updated_at: string;
             versions: components["schemas"]["AIContentTemplateVersion"][];
         };
+        SKUMutationRequest: {
+            category_id?: number;
+            product_name: string;
+            brand?: string;
+            category?: string;
+            code: string;
+            color?: string;
+            size?: string;
+            barcode?: string;
+            stock?: number;
+            low_stock_threshold?: number;
+            platform_title?: string;
+            selling_points?: string;
+            /** @enum {string} */
+            status?: "active" | "inactive";
+            tags?: string[];
+        };
+        SKUCategory: {
+            id: number;
+            name: string;
+            name_en: string;
+            is_system: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        SKUProduct: {
+            category_id: number;
+            name: string;
+            brand: string;
+            category: string;
+            description: string;
+            category_record: components["schemas"]["SKUCategory"];
+        };
+        SKU: {
+            /** Format: uuid */
+            public_id: string;
+            code: string;
+            color: string;
+            size: string;
+            barcode: string;
+            stock: number;
+            low_stock_threshold: number;
+            platform_title: string;
+            selling_points: string;
+            status: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            product: components["schemas"]["SKUProduct"];
+            tags: components["schemas"]["Tag"][];
+        };
+        CreateInventoryAdjustmentRequest: {
+            quantity_delta: number;
+            reason: string;
+            note?: string;
+        };
+        InventoryAdjustment: {
+            /** Format: uuid */
+            sku_id: string;
+            quantity_delta: number;
+            reason: string;
+            note: string;
+            operator_name: string;
+            /** Format: date-time */
+            created_at: string;
+        };
         CreateAIJobRequest: {
-            sku_id: number;
+            /** Format: uuid */
+            sku_id: string;
             /** Format: uuid */
             template_version_id: string;
             selected_slot_keys: string[];
-            /** @description Duplicate IDs are accepted and normalized to one ordered reference. */
-            selected_asset_ids: number[];
+            /** @description Duplicate public UUIDs are accepted and normalized to one ordered reference. */
+            selected_asset_ids: string[];
             locale: string;
             /** @description Optional L4 user instruction stored immutably in the job snapshot. */
             user_preference?: string;
@@ -788,7 +964,8 @@ export interface components {
         AIJob: {
             /** Format: uuid */
             public_id: string;
-            sku_id: number;
+            /** Format: uuid */
+            sku_id: string;
             /** Format: uuid */
             template_version_id: string;
             target_platform: string;
@@ -819,7 +996,7 @@ export interface components {
             /** @enum {string} */
             status: "queued" | "running" | "completed" | "failed" | "cancelled";
             slot_snapshot: components["schemas"]["AIJobSlotSnapshot"];
-            selected_input_asset_ids: number[];
+            selected_input_asset_ids: string[];
             attempt_count: number;
             safe_error: string;
             /** Format: date-time */
@@ -870,7 +1047,8 @@ export interface components {
         PlatformContent: {
             /** Format: uuid */
             public_id: string;
-            sku_id: number;
+            /** Format: uuid */
+            sku_id: string;
             platform: string;
             locale: string;
             title: string;
@@ -953,6 +1131,8 @@ export interface components {
             category: components["schemas"]["AISnapshotCategory"];
         };
         AISnapshotSKU: {
+            /** Format: uuid */
+            public_id: string;
             code: string;
             color: string;
             size: string;
@@ -1006,11 +1186,15 @@ export interface components {
             composition: components["schemas"]["Composition"];
         };
         AISnapshotAsset: {
-            id: number;
-            object_key: string;
-            /** Format: uri */
-            original_url: string;
-            thumbnail_url: string;
+            /** Format: uuid */
+            public_id: string;
+            /** @enum {string} */
+            mime_type: "image/jpeg" | "image/png" | "image/webp";
+            width: number;
+            height: number;
+            /** Format: int64 */
+            byte_count: number;
+            sha256: string;
             /** Format: date-time */
             captured_at: string;
             view: components["schemas"]["AISnapshotAssetView"];
@@ -1210,9 +1394,6 @@ export interface components {
             method: "PUT";
             /** Format: uri */
             upload_url: string;
-            /** Format: uri */
-            asset_url: string;
-            object_key: string;
             /** @description Short-lived signed ticket required to complete this exact upload. */
             completion_token: string;
             expires_in: number;
@@ -1221,7 +1402,8 @@ export interface components {
             };
         };
         CreatePhotoSessionRequest: {
-            sku_id: number;
+            /** Format: uuid */
+            sku_id: string;
             /** Format: uuid */
             sop_version_id: string;
         };
@@ -1229,7 +1411,8 @@ export interface components {
             /** Format: uuid */
             public_id: string;
             code: string;
-            sku_id: number;
+            /** Format: uuid */
+            sku_id: string;
             /** Format: uuid */
             sop_version_id: string;
             /** @enum {string} */
@@ -1239,7 +1422,11 @@ export interface components {
         };
         CreateAssetUploadRequest: {
             file_name: string;
-            content_type: string;
+            /**
+             * @description HEIC and HEIF are rejected before a signed upload URL is issued.
+             * @enum {string}
+             */
+            content_type: "image/jpeg" | "image/png" | "image/webp";
             /** Format: uuid */
             photo_session_id: string;
             /** Format: uuid */
@@ -1250,31 +1437,34 @@ export interface components {
             photo_session_id: string;
             /** Format: uuid */
             sop_view_id: string;
-            /** @description Signed ticket returned by createAssetUploadURL; binds user, session, view, object key, and expiry. */
+            /** @description Signed ticket returned by createAssetUploadURL; binds the authenticated actor, session, view, upload nonce, content type, and expiry without exposing an internal object locator. */
             completion_token: string;
             /** Format: date-time */
             captured_at?: string;
         };
         CompletedAsset: {
-            id: number;
-            sku_id: number;
+            /** Format: uuid */
+            public_id: string;
+            /** Format: uuid */
+            sku_id: string;
             /** Format: uuid */
             photo_session_id: string;
             /** Format: uuid */
             sop_view_id: string;
-            object_key: string;
-            original_url: string;
-            thumbnail_url: string;
+            /** @description Authenticated same-origin media endpoint. */
+            media_url: string;
             /** @enum {string} */
             review_status: "pending" | "approved" | "rejected";
             /** Format: date-time */
             captured_at: string;
         };
         AssetReviewItem: {
-            id: number;
-            sku_id: number;
-            original_url: string;
-            thumbnail_url: string;
+            /** Format: uuid */
+            public_id: string;
+            /** Format: uuid */
+            sku_id: string;
+            /** @description Authenticated same-origin media endpoint. */
+            media_url: string;
             /** @enum {string} */
             review_status: "pending" | "approved" | "rejected";
             /** Format: date-time */
@@ -1283,20 +1473,21 @@ export interface components {
             photo_session_code: string;
         };
         Tag: {
-            id: number;
             name: string;
         };
         AssetReviewSKU: {
-            id: number;
+            /** Format: uuid */
+            public_id: string;
             code: string;
             product_name: string;
             tags: components["schemas"]["Tag"][];
             assets: components["schemas"]["AssetReviewHierarchyAsset"][];
         };
         AssetReviewHierarchyAsset: {
-            id: number;
-            original_url: string;
-            thumbnail_url: string;
+            /** Format: uuid */
+            public_id: string;
+            /** @description Authenticated same-origin media endpoint. */
+            media_url: string;
             /** @enum {string} */
             review_status: "pending" | "approved" | "rejected";
             /** Format: date-time */
@@ -1312,6 +1503,17 @@ export interface components {
             name_en: string;
             is_system: boolean;
             skus: components["schemas"]["AssetReviewSKU"][];
+        };
+        ReviewAssetRequest: {
+            /** @enum {string} */
+            status: "approved" | "rejected";
+            reason?: string;
+        };
+        ReviewedAsset: {
+            /** Format: uuid */
+            public_id: string;
+            /** @enum {string} */
+            review_status: "approved" | "rejected";
         };
     };
     responses: {
@@ -1407,6 +1609,8 @@ export interface components {
         AIJobID: string;
         AIJobItemID: string;
         AITextResultID: string;
+        SKUID: string;
+        AssetID: string;
         /** @description Actor-scoped create key. Reusing it with the same normalized request returns the original job; different input returns 409. */
         IdempotencyKey: string;
         /** @description Exact updated_at value from the latest SOPVersion response; stale revisions return 409. */
@@ -1426,6 +1630,174 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    listSKUs: {
+        parameters: {
+            query?: {
+                category_id?: number;
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SKUs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SKU"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    createSKU: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SKUMutationRequest"];
+            };
+        };
+        responses: {
+            /** @description SKU created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SKU"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    getSKU: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sku_id: components["parameters"]["SKUID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SKU */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SKU"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    updateSKU: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sku_id: components["parameters"]["SKUID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SKUMutationRequest"];
+            };
+        };
+        responses: {
+            /** @description SKU updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SKU"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    createInventoryAdjustment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sku_id: components["parameters"]["SKUID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateInventoryAdjustmentRequest"];
+            };
+        };
+        responses: {
+            /** @description Inventory adjustment created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryAdjustment"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listInventoryHistory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sku_id: components["parameters"]["SKUID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Inventory history */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["InventoryAdjustment"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
     listCaptureSOPs: {
         parameters: {
             query?: {
@@ -2073,6 +2445,64 @@ export interface operations {
             409: components["responses"]["Conflict"];
             500: components["responses"]["InternalServerError"];
             503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAssetMedia: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: components["parameters"]["AssetID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authenticated asset bytes. Responses are private, no-store and protected with nosniff. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                    "image/png": string;
+                    "image/webp": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    reviewAsset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: components["parameters"]["AssetID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewAssetRequest"];
+            };
+        };
+        responses: {
+            /** @description Asset reviewed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewedAsset"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
         };
     };
     listAssetsForReview: {
@@ -2784,7 +3214,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                id: number;
+                sku_id: components["parameters"]["SKUID"];
             };
             cookie?: never;
         };

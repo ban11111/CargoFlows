@@ -266,13 +266,14 @@ func validateDryRunProvenance(job models.AIJob, item models.AIJobItem, version m
 	if matchingSelectedSlots != 1 {
 		return dryRunProvenance{}, invalidExecutionInput("selected slot provenance is missing or duplicated")
 	}
-	var assetIDs []uint
+	var assetIDs []string
 	if err := decodeStrictJSON(item.SelectedInputAssetIDsJSON, &assetIDs); err != nil || assetIDs == nil {
 		return dryRunProvenance{}, invalidExecutionInput("invalid selected asset ID array")
 	}
-	seen := make(map[uint]struct{}, len(assetIDs))
+	seen := make(map[string]struct{}, len(assetIDs))
 	for _, id := range assetIDs {
-		if id == 0 {
+		parsed, err := uuid.Parse(id)
+		if err != nil || parsed == uuid.Nil || parsed.String() != id {
 			return dryRunProvenance{}, invalidExecutionInput("invalid selected asset ID")
 		}
 		if _, duplicate := seen[id]; duplicate {
@@ -286,15 +287,16 @@ func validateDryRunProvenance(job models.AIJob, item models.AIJobItem, version m
 	if item.Kind == models.AIContentSlotImage && len(assetIDs) == 0 {
 		return dryRunProvenance{}, invalidExecutionInput("image item requires selected assets")
 	}
-	snapshotAssetIDs := make(map[uint]struct{}, len(snapshot.SelectedAssets))
+	snapshotAssetIDs := make(map[string]struct{}, len(snapshot.SelectedAssets))
 	for _, asset := range snapshot.SelectedAssets {
-		if asset.ID == 0 {
+		parsed, err := uuid.Parse(asset.PublicID)
+		if err != nil || parsed == uuid.Nil || parsed.String() != asset.PublicID {
 			return dryRunProvenance{}, invalidExecutionInput("invalid snapshot asset ID")
 		}
-		if _, duplicate := snapshotAssetIDs[asset.ID]; duplicate {
+		if _, duplicate := snapshotAssetIDs[asset.PublicID]; duplicate {
 			return dryRunProvenance{}, invalidExecutionInput("duplicate snapshot asset ID")
 		}
-		snapshotAssetIDs[asset.ID] = struct{}{}
+		snapshotAssetIDs[asset.PublicID] = struct{}{}
 	}
 	for _, id := range assetIDs {
 		if _, exists := snapshotAssetIDs[id]; !exists {

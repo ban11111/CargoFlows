@@ -37,7 +37,7 @@ func TestCreatePhotoSessionLocksVersionBeforeValidatingPublishedStatus(t *testin
 	}
 	t.Cleanup(func() { _ = db.Callback().Query().Remove(callbackName) })
 
-	response := performCreatePhotoSession(t, db, sku.ID, version.PublicID)
+	response := performCreatePhotoSession(t, db, sku.PublicID, version.PublicID)
 	if response.Code != http.StatusCreated {
 		t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, response.Code, response.Body.String())
 	}
@@ -54,7 +54,7 @@ func TestCreatePhotoSessionResolvesSOPVersionPublicID(t *testing.T) {
 	version := createTestSOPVersion(t, db, "22222222-2222-4222-8222-222222222222")
 	sku := createSKUForSOPVersion(t, db, version, "SESSION-RESOLVE")
 
-	response := performCreatePhotoSession(t, db, sku.ID, version.PublicID)
+	response := performCreatePhotoSession(t, db, sku.PublicID, version.PublicID)
 	if response.Code != http.StatusCreated {
 		t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, response.Code, response.Body.String())
 	}
@@ -73,7 +73,7 @@ func TestCreatePhotoSessionAssignsUniquePublicIDs(t *testing.T) {
 	version := createTestSOPVersion(t, db, "33333333-3333-4333-8333-333333333333")
 
 	for _, sku := range []models.SKU{createSKUForSOPVersion(t, db, version, "SESSION-ONE"), createSKUForSOPVersion(t, db, version, "SESSION-TWO")} {
-		response := performCreatePhotoSession(t, db, sku.ID, version.PublicID)
+		response := performCreatePhotoSession(t, db, sku.PublicID, version.PublicID)
 		if response.Code != http.StatusCreated {
 			t.Fatalf("expected status %d for SKU %d, got %d: %s", http.StatusCreated, sku.ID, response.Code, response.Body.String())
 		}
@@ -127,13 +127,13 @@ func createTestSOPVersion(t *testing.T, db *gorm.DB, publicID string) models.SOP
 	return version
 }
 
-func performCreatePhotoSession(t *testing.T, db *gorm.DB, skuID uint, sopVersionPublicID string) *httptest.ResponseRecorder {
+func performCreatePhotoSession(t *testing.T, db *gorm.DB, skuID string, sopVersionPublicID string) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	response := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(response)
 	context.Request = httptest.NewRequest(http.MethodPost, "/photo-sessions", strings.NewReader(fmt.Sprintf(
-		`{"sku_id":%d,"sop_version_id":%q}`,
+		`{"sku_id":%q,"sop_version_id":%q}`,
 		skuID,
 		sopVersionPublicID,
 	)))

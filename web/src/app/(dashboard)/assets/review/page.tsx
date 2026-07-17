@@ -15,8 +15,8 @@ import { formatDateTime } from "@/lib/utils";
 type ReviewStatus = "pending" | "approved" | "rejected";
 
 interface Asset {
-  id: number;
-  original_url: string;
+  public_id: string;
+  media_url: string;
   review_status: ReviewStatus;
   captured_at: string;
   sop_view_name: { "zh-CN": string; en: string };
@@ -24,10 +24,10 @@ interface Asset {
 }
 
 interface HierarchySKU {
-  id: number;
+  public_id: string;
   code: string;
   product_name: string;
-  tags: Array<{ id: number; name: string }>;
+  tags: Array<{ name: string }>;
   assets: Asset[];
 }
 
@@ -54,13 +54,13 @@ export default function AssetReviewPage() {
   const { language, t } = useLanguage();
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
-  const [selectedAssetID, setSelectedAssetID] = useState<number>();
+  const [selectedAssetID, setSelectedAssetID] = useState<string>();
   const hierarchyQuery = useQuery({
     queryKey: ["assets", "review", "hierarchy"],
     queryFn: () => apiRequest<{ data: HierarchyCategory[] }>("/assets/review/hierarchy"),
   });
   const reviewMutation = useMutation({
-    mutationFn: ({ id, status }: { id: number; status: "approved" | "rejected" }) =>
+    mutationFn: ({ id, status }: { id: string; status: "approved" | "rejected" }) =>
       apiRequest(`/assets/${id}/review`, { method: "PATCH", body: JSON.stringify({ status }) }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["assets", "review"] });
@@ -81,18 +81,18 @@ export default function AssetReviewPage() {
       ),
     );
   }, [hierarchyQuery.data, query]);
-  const selected = selectedAssets.find(({ asset }) => asset.id === selectedAssetID) ?? selectedAssets[0];
+  const selected = selectedAssets.find(({ asset }) => asset.public_id === selectedAssetID) ?? selectedAssets[0];
 
   const grouped = useMemo(() => {
-    const assetsBySKU = new Map<number, Asset[]>();
+    const assetsBySKU = new Map<string, Asset[]>();
     for (const item of selectedAssets) {
-      assetsBySKU.set(item.sku.id, [...(assetsBySKU.get(item.sku.id) ?? []), item.asset]);
+      assetsBySKU.set(item.sku.public_id, [...(assetsBySKU.get(item.sku.public_id) ?? []), item.asset]);
     }
     return (hierarchyQuery.data?.data ?? [])
       .map((category) => ({
         ...category,
         skus: category.skus
-          .map((sku) => ({ ...sku, assets: assetsBySKU.get(sku.id) ?? [] }))
+          .map((sku) => ({ ...sku, assets: assetsBySKU.get(sku.public_id) ?? [] }))
           .filter((sku) => sku.assets.length > 0),
       }))
       .filter((category) => category.skus.length > 0);
@@ -131,9 +131,9 @@ export default function AssetReviewPage() {
                 </div>
                 <div className="divide-y divide-border">
                   {category.skus.map((sku) => (
-                    <div className="px-4 py-3" key={sku.id}>
+                    <div className="px-4 py-3" key={sku.public_id}>
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                        <Link className="font-medium text-primary" href={`/skus/${sku.id}`}>
+                        <Link className="font-medium text-primary" href={`/skus/${sku.public_id}`}>
                           {sku.code}
                         </Link>
                         <span className="text-sm text-muted-foreground">{sku.product_name}</span>
@@ -141,7 +141,7 @@ export default function AssetReviewPage() {
                           {sku.assets.length} {t("assetCount")}
                         </span>
                         {sku.tags.map((tag) => (
-                          <Badge key={tag.id} variant="neutral">
+                          <Badge key={tag.name} variant="neutral">
                             <Tags className="h-3 w-3" />
                             {tag.name}
                           </Badge>
@@ -150,9 +150,9 @@ export default function AssetReviewPage() {
                       <div className="mt-2 grid gap-1">
                         {sku.assets.map((asset) => (
                           <button
-                            className={`grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 rounded-md px-2 py-2 text-left text-sm transition-colors hover:bg-muted ${selected?.asset.id === asset.id ? "bg-muted" : ""}`}
-                            key={asset.id}
-                            onClick={() => setSelectedAssetID(asset.id)}
+                            className={`grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 rounded-md px-2 py-2 text-left text-sm transition-colors hover:bg-muted ${selected?.asset.public_id === asset.public_id ? "bg-muted" : ""}`}
+                            key={asset.public_id}
+                            onClick={() => setSelectedAssetID(asset.public_id)}
                             type="button"
                           >
                             <span className="min-w-0 truncate">{viewName(asset)}</span>
@@ -182,7 +182,7 @@ export default function AssetReviewPage() {
               <div className="aspect-[4/5] bg-muted">
                 {/* MinIO image URLs are local development assets and bypass Next Image optimization. */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img alt={`${selected.sku.code} ${viewName(selected.asset)}`} className="h-full w-full object-contain" src={selected.asset.original_url} />
+                <img alt={`${selected.sku.code} ${viewName(selected.asset)}`} className="h-full w-full object-contain" src={`/api/proxy${selected.asset.media_url}`} />
               </div>
               <div className="space-y-4 p-4">
                 <div className="flex items-center justify-between gap-3">
@@ -194,7 +194,7 @@ export default function AssetReviewPage() {
                   <Button
                     className="flex-1"
                     disabled={reviewMutation.isPending}
-                    onClick={() => reviewMutation.mutate({ id: selected.asset.id, status: "approved" })}
+                    onClick={() => reviewMutation.mutate({ id: selected.asset.public_id, status: "approved" })}
                     variant="secondary"
                   >
                     <Check className="h-4 w-4" />
@@ -203,7 +203,7 @@ export default function AssetReviewPage() {
                   <Button
                     className="flex-1"
                     disabled={reviewMutation.isPending}
-                    onClick={() => reviewMutation.mutate({ id: selected.asset.id, status: "rejected" })}
+                    onClick={() => reviewMutation.mutate({ id: selected.asset.public_id, status: "rejected" })}
                     variant="danger"
                   >
                     <X className="h-4 w-4" />

@@ -66,7 +66,7 @@ func (s *Server) createAIJob(c *gin.Context) {
 		respondAIBadRequest(c, err)
 		return
 	}
-	if req.SKUID == 0 || !isUUID(req.TemplateVersionPublicID) || len(req.SelectedSlotKeys) == 0 || req.SelectedAssetIDs == nil || strings.TrimSpace(req.Locale) == "" {
+	if !isUUID(req.SKUID) || !isUUID(req.TemplateVersionPublicID) || len(req.SelectedSlotKeys) == 0 || req.SelectedAssetIDs == nil || !allUUIDs(*req.SelectedAssetIDs) || strings.TrimSpace(req.Locale) == "" {
 		respondAIBadRequest(c, errors.New("sku_id, a UUID template_version_id, locale, selected_asset_ids array, and at least one selected_slot_key are required"))
 		return
 	}
@@ -191,13 +191,12 @@ func (s *Server) applyAITextResult(c *gin.Context) {
 }
 
 func (s *Server) getSKUPlatformContent(c *gin.Context) {
-	skuID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	platform, locale := strings.TrimSpace(c.Query("platform")), strings.TrimSpace(c.Query("locale"))
-	if err != nil || skuID == 0 || platform == "" || locale == "" {
+	if !isUUID(c.Param("sku_id")) || platform == "" || locale == "" {
 		respondAIBadRequest(c, errors.New("sku_id, platform, and locale are required"))
 		return
 	}
-	value, err := s.ai.TextResults.GetPlatformContent(c.Request.Context(), uint(skuID), platform, locale)
+	value, err := s.ai.TextResults.GetPlatformContent(c.Request.Context(), c.Param("sku_id"), platform, locale)
 	if err != nil {
 		respondAIError(c, err)
 		return
@@ -379,7 +378,7 @@ func respondAIError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"code": "lifecycle_conflict", "message": err.Error()})
 	case errors.Is(err, ai.ErrSlotSelectionInvalid):
 		respondAIBadRequest(c, err)
-	case errors.Is(err, ai.ErrIdempotencyKeyInvalid), errors.Is(err, ai.ErrLocaleInvalid), errors.Is(err, ai.ErrUserPreferenceInvalid), errors.Is(err, ai.ErrUserPreferenceNotAllowed), errors.Is(err, ai.ErrGenerationOverrideInvalid), errors.Is(err, ai.ErrTemplateVersionIDInvalid):
+	case errors.Is(err, ai.ErrIdempotencyKeyInvalid), errors.Is(err, ai.ErrLocaleInvalid), errors.Is(err, ai.ErrUserPreferenceInvalid), errors.Is(err, ai.ErrUserPreferenceNotAllowed), errors.Is(err, ai.ErrGenerationOverrideInvalid), errors.Is(err, ai.ErrTemplateVersionIDInvalid), errors.Is(err, ai.ErrSKUIDInvalid), errors.Is(err, ai.ErrAssetIDInvalid):
 		respondAIBadRequest(c, err)
 	case errors.Is(err, ai.ErrPublishedTemplateConfigInvalid):
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "ai_template_configuration_invalid", "message": "Published AI template configuration is invalid"})

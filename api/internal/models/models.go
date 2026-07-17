@@ -3,7 +3,6 @@ package models
 import (
 	"time"
 
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -60,7 +59,7 @@ type Product struct {
 type SKU struct {
 	ID                uint      `gorm:"primaryKey" json:"-"`
 	PublicID          string    `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
-	ProductID         uint      `gorm:"index;not null" json:"product_id"`
+	ProductID         uint      `gorm:"index;not null" json:"-"`
 	Code              string    `gorm:"size:80;uniqueIndex;not null" json:"code"`
 	Color             string    `gorm:"size:80" json:"color"`
 	Size              string    `gorm:"size:80" json:"size"`
@@ -77,12 +76,12 @@ type SKU struct {
 }
 
 type InventoryAdjustment struct {
-	ID            uint      `gorm:"primaryKey" json:"id"`
-	SKUID         uint      `gorm:"index;not null" json:"sku_id"`
+	ID            uint      `gorm:"primaryKey" json:"-"`
+	SKUID         uint      `gorm:"index;not null" json:"-"`
 	QuantityDelta int       `gorm:"not null" json:"quantity_delta"`
 	Reason        string    `gorm:"size:180;not null" json:"reason"`
 	Note          string    `gorm:"type:text" json:"note"`
-	OperatorID    uint      `gorm:"index;not null" json:"operator_id"`
+	OperatorID    uint      `gorm:"index;not null" json:"-"`
 	CreatedAt     time.Time `json:"created_at"`
 	Operator      User      `json:"operator"`
 }
@@ -91,9 +90,9 @@ type PhotoSession struct {
 	ID             uint       `gorm:"primaryKey" json:"-"`
 	PublicID       string     `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
 	Code           string     `gorm:"size:80;uniqueIndex;not null" json:"code"`
-	SKUID          uint       `gorm:"index;not null" json:"sku_id"`
+	SKUID          uint       `gorm:"index;not null" json:"-"`
 	SOPVersionID   uint       `gorm:"index;not null" json:"-"`
-	PhotographerID uint       `gorm:"index;not null" json:"photographer_id"`
+	PhotographerID uint       `gorm:"index;not null" json:"-"`
 	Status         string     `gorm:"size:32;not null;default:in_progress" json:"status"`
 	SOPVersion     SOPVersion `json:"sop_version"`
 	CreatedAt      time.Time  `json:"created_at"`
@@ -103,12 +102,12 @@ type PhotoSession struct {
 type Asset struct {
 	ID             uint         `gorm:"primaryKey" json:"-"`
 	PublicID       string       `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
-	SKUID          uint         `gorm:"index;not null" json:"sku_id"`
-	PhotoSessionID uint         `gorm:"index" json:"photo_session_id"`
-	SOPViewID      uint         `gorm:"index" json:"sop_view_id"`
-	ObjectKey      string       `gorm:"size:500;uniqueIndex;not null" json:"object_key"`
-	OriginalURL    string       `gorm:"size:500;not null" json:"original_url"`
-	ThumbnailURL   string       `gorm:"size:500" json:"thumbnail_url"`
+	SKUID          uint         `gorm:"index;not null" json:"-"`
+	PhotoSessionID uint         `gorm:"index" json:"-"`
+	SOPViewID      uint         `gorm:"index" json:"-"`
+	ObjectKey      string       `gorm:"size:500;uniqueIndex;not null" json:"-"`
+	OriginalURL    string       `gorm:"size:500;not null" json:"-"`
+	ThumbnailURL   string       `gorm:"size:500" json:"-"`
 	ReviewStatus   string       `gorm:"size:32;not null;default:pending" json:"review_status"`
 	MIMEType       string       `gorm:"size:80;not null;default:'';<-:create" json:"mime_type"`
 	Width          int          `gorm:"not null;default:0;<-:create" json:"width"`
@@ -124,23 +123,17 @@ type Asset struct {
 }
 
 func (sku *SKU) BeforeCreate(*gorm.DB) error {
-	if sku.PublicID == "" {
-		sku.PublicID = uuid.NewString()
-	}
-	return nil
+	return ensurePublicID(&sku.PublicID)
 }
 
 func (asset *Asset) BeforeCreate(*gorm.DB) error {
-	if asset.PublicID == "" {
-		asset.PublicID = uuid.NewString()
-	}
-	return nil
+	return ensurePublicID(&asset.PublicID)
 }
 
 type AssetReview struct {
-	ID         uint      `gorm:"primaryKey" json:"id"`
-	AssetID    uint      `gorm:"index;not null" json:"asset_id"`
-	ReviewerID uint      `gorm:"index;not null" json:"reviewer_id"`
+	ID         uint      `gorm:"primaryKey" json:"-"`
+	AssetID    uint      `gorm:"index;not null" json:"-"`
+	ReviewerID uint      `gorm:"index;not null" json:"-"`
 	Status     string    `gorm:"size:32;not null" json:"status"`
 	Reason     string    `gorm:"type:text" json:"reason"`
 	CreatedAt  time.Time `json:"created_at"`

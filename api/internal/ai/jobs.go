@@ -35,13 +35,15 @@ var (
 	ErrPublishedTemplateConfigInvalid = errors.New("published template configuration is invalid")
 	ErrUserPreferenceNotAllowed       = errors.New("user preference is not allowed by every selected slot")
 	ErrTemplateVersionIDInvalid       = errors.New("template version ID must be a UUID")
+	ErrSKUIDInvalid                   = errors.New("SKU ID must be a UUID")
+	ErrAssetIDInvalid                 = errors.New("asset IDs must be UUIDs")
 )
 
 type CreateJobInput struct {
-	SKUID                   uint
+	SKUID                   string
 	TemplateVersionPublicID string
 	SelectedSlotKeys        []string
-	SelectedAssetIDs        []uint
+	SelectedAssetIDs        []string
 	Locale                  string
 	CreatedByID             uint
 	IdempotencyKey          string
@@ -74,6 +76,7 @@ type ProductFacts struct {
 }
 
 type SKUFacts struct {
+	PublicID      string   `json:"public_id"`
 	Code          string   `json:"code"`
 	Color         string   `json:"color"`
 	Size          string   `json:"size"`
@@ -115,12 +118,14 @@ type SOPFacts struct {
 }
 
 type AssetFacts struct {
-	ID           uint           `json:"id"`
-	ObjectKey    string         `json:"object_key"`
-	OriginalURL  string         `json:"original_url"`
-	ThumbnailURL string         `json:"thumbnail_url"`
-	CapturedAt   time.Time      `json:"captured_at"`
-	View         AssetViewFacts `json:"view"`
+	PublicID   string         `json:"public_id"`
+	MIMEType   string         `json:"mime_type"`
+	Width      int            `json:"width"`
+	Height     int            `json:"height"`
+	ByteCount  int64          `json:"byte_count"`
+	SHA256     string         `json:"sha256"`
+	CapturedAt time.Time      `json:"captured_at"`
+	View       AssetViewFacts `json:"view"`
 }
 
 type AssetViewFacts struct {
@@ -179,7 +184,7 @@ type JobItemDocument struct {
 	Kind                  models.AIContentSlotKind `json:"kind"`
 	Status                models.AIJobItemStatus   `json:"status"`
 	SlotSnapshot          json.RawMessage          `json:"slot_snapshot"`
-	SelectedInputAssetIDs []uint                   `json:"selected_input_asset_ids"`
+	SelectedInputAssetIDs []string                 `json:"selected_input_asset_ids"`
 	AttemptCount          int                      `json:"attempt_count"`
 	SafeError             string                   `json:"safe_error"`
 	StartedAt             *time.Time               `json:"started_at"`
@@ -190,7 +195,7 @@ type JobItemDocument struct {
 
 type JobDocument struct {
 	PublicID                string             `json:"public_id"`
-	SKUID                   uint               `json:"sku_id"`
+	SKUID                   string             `json:"sku_id"`
 	TemplateVersionPublicID string             `json:"template_version_id"`
 	TargetPlatform          string             `json:"target_platform"`
 	Locale                  string             `json:"locale"`
@@ -247,7 +252,7 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 		if err := validateGenerationOverrides(selectedSlots, normalized.GenerationOverrides); err != nil {
 			return err
 		}
-		assets, assetIDs, err := loadEligibleAssets(tx.Clauses(clause.Locking{Strength: "UPDATE"}), normalized.SKUID, normalized.SelectedAssetIDs)
+		assets, assetIDs, err := loadEligibleAssets(tx.Clauses(clause.Locking{Strength: "UPDATE"}), sku.ID, normalized.SelectedAssetIDs)
 		if err != nil {
 			return err
 		}
@@ -275,7 +280,7 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 			if err != nil {
 				return fmt.Errorf("marshal AI job slot: %w", err)
 			}
-			ids := []uint{}
+			ids := []string{}
 			if slot.Kind == models.AIContentSlotImage {
 				ids = assetIDs
 			}
@@ -290,6 +295,7 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 			items = append(items, item)
 		}
 		job.Items = items
+		job.SKU = sku
 		metadata, _ := json.Marshal(map[string]any{"snapshot_schema": ProductSnapshotSchemaV1, "slot_keys": normalized.SelectedSlotKeys, "asset_count": len(assetIDs), "request_sha256": requestHash})
 		jobID, actorID := job.ID, normalized.CreatedByID
 		audit := models.AIAuditEvent{PublicID: uuid.NewString(), EventType: "ai_job.created", EntityType: "ai_job", EntityPublicID: job.PublicID, ActorID: &actorID, AIJobID: &jobID, MetadataJSON: metadata}
@@ -339,6 +345,11 @@ func normalizeCreateJobInput(input CreateJobInput) (CreateJobInput, string, erro
 		return input, "", ErrTemplateVersionIDInvalid
 	}
 	input.TemplateVersionPublicID = parsedTemplateID.String()
+	parsedSKUID, err := uuid.Parse(strings.TrimSpace(input.SKUID))
+	if err != nil || parsedSKUID == uuid.Nil {
+		return input, "", ErrSKUIDInvalid
+	}
+	input.SKUID = parsedSKUID.String()
 	input.Locale = strings.TrimSpace(input.Locale)
 	if len(input.Locale) == 0 || len(input.Locale) > 32 || !localePattern.MatchString(input.Locale) {
 		return input, "", ErrLocaleInvalid
@@ -355,18 +366,25 @@ func normalizeCreateJobInput(input CreateJobInput) (CreateJobInput, string, erro
 	}
 	slots := append([]string(nil), input.SelectedSlotKeys...)
 	sort.Strings(slots)
-	assets := append([]uint(nil), input.SelectedAssetIDs...)
-	sort.Slice(assets, func(i, j int) bool { return assets[i] < assets[j] })
-	assets = dedupeUint(assets)
+	assets := make([]string, 0, len(input.SelectedAssetIDs))
+	for _, value := range input.SelectedAssetIDs {
+		parsed, err := uuid.Parse(strings.TrimSpace(value))
+		if err != nil || parsed == uuid.Nil {
+			return input, "", ErrAssetIDInvalid
+		}
+		assets = append(assets, parsed.String())
+	}
+	sort.Strings(assets)
+	assets = dedupeStrings(assets)
 	input.SelectedAssetIDs = assets
 	if input.GenerationOverrides == nil {
 		input.GenerationOverrides = map[string]GenerationOverride{}
 	}
 	canonical := struct {
-		SKUID      uint                          `json:"sku_id"`
+		SKUID      string                        `json:"sku_id"`
 		Template   string                        `json:"template_version_id"`
 		Slots      []string                      `json:"selected_slot_keys"`
-		Assets     []uint                        `json:"selected_asset_ids"`
+		Assets     []string                      `json:"selected_asset_ids"`
 		Locale     string                        `json:"locale"`
 		Preference string                        `json:"user_preference"`
 		Overrides  map[string]GenerationOverride `json:"generation_overrides"`
@@ -379,8 +397,8 @@ func normalizeCreateJobInput(input CreateJobInput) (CreateJobInput, string, erro
 	return input, fmt.Sprintf("%x", digest[:]), nil
 }
 
-func dedupeUint(values []uint) []uint {
-	result := make([]uint, 0, len(values))
+func dedupeStrings(values []string) []string {
+	result := make([]string, 0, len(values))
 	for _, value := range values {
 		if len(result) == 0 || result[len(result)-1] != value {
 			result = append(result, value)
@@ -399,7 +417,7 @@ func findIdempotentJob(db *gorm.DB, actorID uint, key string) (models.AIJob, boo
 }
 
 func documentFromPersistedJob(db *gorm.DB, job models.AIJob) (JobDocument, error) {
-	if err := db.Preload("Items", func(q *gorm.DB) *gorm.DB { return q.Order("created_at ASC, id ASC") }).First(&job, job.ID).Error; err != nil {
+	if err := db.Preload("SKU").Preload("Items", func(q *gorm.DB) *gorm.DB { return q.Order("created_at ASC, id ASC") }).First(&job, job.ID).Error; err != nil {
 		return JobDocument{}, err
 	}
 	ids, err := versionPublicIDs(db, []uint{job.AIContentTemplateVersionID})
@@ -411,7 +429,7 @@ func documentFromPersistedJob(db *gorm.DB, job models.AIJob) (JobDocument, error
 
 func (s *JobService) List(ctx context.Context) ([]JobDocument, error) {
 	var jobs []models.AIJob
-	if err := s.db.WithContext(ctx).Preload("Items", func(db *gorm.DB) *gorm.DB { return db.Order("created_at ASC, id ASC") }).Order("created_at DESC, id DESC").Find(&jobs).Error; err != nil {
+	if err := s.db.WithContext(ctx).Preload("SKU").Preload("Items", func(db *gorm.DB) *gorm.DB { return db.Order("created_at ASC, id ASC") }).Order("created_at DESC, id DESC").Find(&jobs).Error; err != nil {
 		return nil, err
 	}
 	versionIDs := make([]uint, 0, len(jobs))
@@ -431,7 +449,7 @@ func (s *JobService) List(ctx context.Context) ([]JobDocument, error) {
 
 func (s *JobService) Get(ctx context.Context, publicID string) (JobDocument, error) {
 	var job models.AIJob
-	if err := s.db.WithContext(ctx).Preload("Items", func(db *gorm.DB) *gorm.DB { return db.Order("created_at ASC, id ASC") }).Where("public_id = ?", publicID).First(&job).Error; err != nil {
+	if err := s.db.WithContext(ctx).Preload("SKU").Preload("Items", func(db *gorm.DB) *gorm.DB { return db.Order("created_at ASC, id ASC") }).Where("public_id = ?", publicID).First(&job).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return JobDocument{}, ErrJobNotFound
 		}
@@ -444,9 +462,9 @@ func (s *JobService) Get(ctx context.Context, publicID string) (JobDocument, err
 	return jobDocument(job, ids[job.AIContentTemplateVersionID]), nil
 }
 
-func loadJobSKU(tx *gorm.DB, id uint) (models.SKU, error) {
+func loadJobSKU(tx *gorm.DB, publicID string) (models.SKU, error) {
 	var sku models.SKU
-	err := tx.Preload("Product.CatalogCategory").Preload("Tags", func(db *gorm.DB) *gorm.DB { return db.Order("tags.name ASC, tags.id ASC") }).First(&sku, id).Error
+	err := tx.Preload("Product.CatalogCategory").Preload("Tags", func(db *gorm.DB) *gorm.DB { return db.Order("tags.name ASC, tags.id ASC") }).Where("public_id = ?", publicID).First(&sku).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return sku, ErrSKUNotFound
 	}
@@ -498,21 +516,21 @@ func selectJobSlots(slots []models.AIContentSlot, keys []string) ([]models.AICon
 	return selected, nil
 }
 
-func loadEligibleAssets(tx *gorm.DB, skuID uint, requested []uint) ([]models.Asset, []uint, error) {
-	set := make(map[uint]struct{}, len(requested))
+func loadEligibleAssets(tx *gorm.DB, skuID uint, requested []string) ([]models.Asset, []string, error) {
+	set := make(map[string]struct{}, len(requested))
 	for _, id := range requested {
 		set[id] = struct{}{}
 	}
-	ids := make([]uint, 0, len(set))
+	ids := make([]string, 0, len(set))
 	for id := range set {
 		ids = append(ids, id)
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	sort.Strings(ids)
 	if len(ids) == 0 {
-		return []models.Asset{}, []uint{}, nil
+		return []models.Asset{}, []string{}, nil
 	}
 	var assets []models.Asset
-	if err := tx.Preload("SOPView").Where("id IN ?", ids).Where(&models.Asset{SKUID: skuID, ReviewStatus: "approved"}).Order("id ASC").Find(&assets).Error; err != nil {
+	if err := tx.Preload("SOPView").Where("public_id IN ?", ids).Where(&models.Asset{SKUID: skuID, ReviewStatus: "approved"}).Order("public_id ASC").Find(&assets).Error; err != nil {
 		return nil, nil, err
 	}
 	if len(assets) != len(ids) {
@@ -744,7 +762,7 @@ func makeProductSnapshot(sku models.SKU, sop models.SOPVersion, captureSOPPublic
 	assetFacts := make([]AssetFacts, 0, len(assets))
 	for _, asset := range assets {
 		view := asset.SOPView
-		assetFacts = append(assetFacts, AssetFacts{ID: asset.ID, ObjectKey: asset.ObjectKey, OriginalURL: asset.OriginalURL, ThumbnailURL: asset.ThumbnailURL, CapturedAt: asset.CapturedAt, View: AssetViewFacts{PublicID: view.PublicID, PresetKey: view.PresetKey, Name: LocalizedNameFacts{ZH: view.NameZH, EN: view.NameEN}, Role: view.Role, ViewKind: view.ViewKind, Instruction: LocalizedNameFacts{ZH: view.InstructionZH, EN: view.InstructionEN}, CameraPositionDirection: VectorFacts{X: view.CameraPositionX, Y: view.CameraPositionY, Z: view.CameraPositionZ}, ImageUpDirection: VectorFacts{X: view.ImageUpX, Y: view.ImageUpY, Z: view.ImageUpZ}, Target: VectorFacts{X: view.TargetX, Y: view.TargetY, Z: view.TargetZ}, Composition: view.Composition}})
+		assetFacts = append(assetFacts, AssetFacts{PublicID: asset.PublicID, MIMEType: asset.MIMEType, Width: asset.Width, Height: asset.Height, ByteCount: asset.ByteCount, SHA256: asset.SHA256, CapturedAt: asset.CapturedAt, View: AssetViewFacts{PublicID: view.PublicID, PresetKey: view.PresetKey, Name: LocalizedNameFacts{ZH: view.NameZH, EN: view.NameEN}, Role: view.Role, ViewKind: view.ViewKind, Instruction: LocalizedNameFacts{ZH: view.InstructionZH, EN: view.InstructionEN}, CameraPositionDirection: VectorFacts{X: view.CameraPositionX, Y: view.CameraPositionY, Z: view.CameraPositionZ}, ImageUpDirection: VectorFacts{X: view.ImageUpX, Y: view.ImageUpY, Z: view.ImageUpZ}, Target: VectorFacts{X: view.TargetX, Y: view.TargetY, Z: view.TargetZ}, Composition: view.Composition}})
 	}
 	selectedSlots := make([]SlotFacts, 0, len(slots))
 	for _, slot := range slots {
@@ -753,7 +771,7 @@ func makeProductSnapshot(sku models.SKU, sop models.SOPVersion, captureSOPPublic
 	if overrides == nil {
 		overrides = map[string]GenerationOverride{}
 	}
-	return ProductSnapshotV1{Schema: ProductSnapshotSchemaV1, Locale: locale, TargetPlatform: template.TargetPlatform, Product: ProductFacts{Name: sku.Product.Name, Brand: sku.Product.Brand, Description: sku.Product.Description, Category: CategoryFacts{NameZH: sku.Product.CatalogCategory.Name, NameEN: sku.Product.CatalogCategory.NameEN}}, SKU: SKUFacts{Code: sku.Code, Color: sku.Color, Size: sku.Size, PlatformTitle: sku.PlatformTitle, SellingPoints: sku.SellingPoints, Tags: tags}, SOP: SOPFacts{PublicID: captureSOPPublicID, VersionPublicID: sop.PublicID, VersionNumber: sop.VersionNumber, SchemaVersion: sop.SchemaVersion, Name: LocalizedNameFacts{ZH: sop.NameZH, EN: sop.NameEN}, Description: LocalizedNameFacts{ZH: sop.DescriptionZH, EN: sop.DescriptionEN}, CoordinateSystem: sop.CoordinateSystem, Views: views}, Template: TemplateFacts{TemplatePublicID: template.PublicID, VersionPublicID: version.PublicID, VersionNumber: version.VersionNumber, PromptCompilerVersion: version.PromptCompilerVersion, PlatformPrompt: version.PlatformPrompt, SelectedSlots: selectedSlots}, SelectedAssets: assetFacts, UserPreference: preference, GenerationOverrides: overrides}
+	return ProductSnapshotV1{Schema: ProductSnapshotSchemaV1, Locale: locale, TargetPlatform: template.TargetPlatform, Product: ProductFacts{Name: sku.Product.Name, Brand: sku.Product.Brand, Description: sku.Product.Description, Category: CategoryFacts{NameZH: sku.Product.CatalogCategory.Name, NameEN: sku.Product.CatalogCategory.NameEN}}, SKU: SKUFacts{PublicID: sku.PublicID, Code: sku.Code, Color: sku.Color, Size: sku.Size, PlatformTitle: sku.PlatformTitle, SellingPoints: sku.SellingPoints, Tags: tags}, SOP: SOPFacts{PublicID: captureSOPPublicID, VersionPublicID: sop.PublicID, VersionNumber: sop.VersionNumber, SchemaVersion: sop.SchemaVersion, Name: LocalizedNameFacts{ZH: sop.NameZH, EN: sop.NameEN}, Description: LocalizedNameFacts{ZH: sop.DescriptionZH, EN: sop.DescriptionEN}, CoordinateSystem: sop.CoordinateSystem, Views: views}, Template: TemplateFacts{TemplatePublicID: template.PublicID, VersionPublicID: version.PublicID, VersionNumber: version.VersionNumber, PromptCompilerVersion: version.PromptCompilerVersion, PlatformPrompt: version.PlatformPrompt, SelectedSlots: selectedSlots}, SelectedAssets: assetFacts, UserPreference: preference, GenerationOverrides: overrides}
 }
 
 func slotFacts(slot models.AIContentSlot) SlotFacts {
@@ -787,9 +805,9 @@ func versionPublicIDs(db *gorm.DB, ids []uint) (map[uint]string, error) {
 func jobDocument(job models.AIJob, versionPublicID string) JobDocument {
 	items := make([]JobItemDocument, 0, len(job.Items))
 	for _, item := range job.Items {
-		ids := []uint{}
+		ids := []string{}
 		_ = json.Unmarshal(item.SelectedInputAssetIDsJSON, &ids)
 		items = append(items, JobItemDocument{PublicID: item.PublicID, SlotKey: item.SlotKey, Kind: item.Kind, Status: item.Status, SlotSnapshot: cloneJSON(item.SlotSnapshotJSON), SelectedInputAssetIDs: ids, AttemptCount: item.AttemptCount, SafeError: item.SafeError, StartedAt: item.StartedAt, CompletedAt: item.CompletedAt, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt})
 	}
-	return JobDocument{PublicID: job.PublicID, SKUID: job.SKUID, TemplateVersionPublicID: versionPublicID, TargetPlatform: job.TargetPlatform, Locale: job.Locale, Status: job.Status, SnapshotSchema: job.SnapshotSchema, InputSnapshot: append(json.RawMessage(nil), job.InputSnapshotJSON...), StartedAt: job.StartedAt, CompletedAt: job.CompletedAt, CancelledAt: job.CancelledAt, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt, Items: items}
+	return JobDocument{PublicID: job.PublicID, SKUID: job.SKU.PublicID, TemplateVersionPublicID: versionPublicID, TargetPlatform: job.TargetPlatform, Locale: job.Locale, Status: job.Status, SnapshotSchema: job.SnapshotSchema, InputSnapshot: append(json.RawMessage(nil), job.InputSnapshotJSON...), StartedAt: job.StartedAt, CompletedAt: job.CompletedAt, CancelledAt: job.CancelledAt, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt, Items: items}
 }

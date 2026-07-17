@@ -122,14 +122,14 @@ func TestTextResultLifecycleKeepsRawImmutableAndRequiresEffectiveApproval(t *tes
 	if err != nil || !titleReplay.Replayed || titleReplay.Content.Revision != 1 || titleReplay.Content.Title != "Second generated title" {
 		t.Fatalf("historical title replay=%#v err=%v", titleReplay, err)
 	}
-	history, err := service.GetPlatformContent(t.Context(), job.SKUID, job.TargetPlatform, job.Locale)
+	history, err := service.GetPlatformContent(t.Context(), sku.PublicID, job.TargetPlatform, job.Locale)
 	if err != nil || history.Content == nil || len(history.Revisions) != 2 || history.Revisions[0].Revision != 2 {
 		t.Fatalf("history=%#v err=%v", history, err)
 	}
 }
 
 func TestTextResultOwnershipRejectionPreviewAndHistory(t *testing.T) {
-	service, _, job, item, results := prepareTextResultService(t)
+	service, db, job, item, results := prepareTextResultService(t)
 	if _, err := service.Approve(t.Context(), "00000000-0000-4000-8000-000000000000", item.PublicID, results[0].PublicID, 10); !errors.Is(err, ErrTextResultNotFound) {
 		t.Fatalf("cross-job error=%v", err)
 	}
@@ -142,7 +142,11 @@ func TestTextResultOwnershipRejectionPreviewAndHistory(t *testing.T) {
 	if _, err := service.Approve(t.Context(), job.PublicID, item.PublicID, results[0].PublicID, 12); !errors.Is(err, ErrTextResultLifecycleConflict) {
 		t.Fatalf("approve rejected error=%v", err)
 	}
-	history, err := service.GetPlatformContent(t.Context(), job.SKUID, job.TargetPlatform, job.Locale)
+	var sku models.SKU
+	if err := db.First(&sku, job.SKUID).Error; err != nil {
+		t.Fatal(err)
+	}
+	history, err := service.GetPlatformContent(t.Context(), sku.PublicID, job.TargetPlatform, job.Locale)
 	if err != nil || history.Content != nil || len(history.Revisions) != 0 {
 		t.Fatalf("empty history=%#v err=%v", history, err)
 	}

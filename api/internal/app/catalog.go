@@ -151,9 +151,8 @@ func resolveTags(db *gorm.DB, rawTags []string) ([]models.Tag, error) {
 }
 
 type assetReviewHierarchyAsset struct {
-	ID               uint              `json:"id"`
-	OriginalURL      string            `json:"original_url"`
-	ThumbnailURL     string            `json:"thumbnail_url"`
+	PublicID         string            `json:"public_id"`
+	MediaURL         string            `json:"media_url"`
 	ReviewStatus     string            `json:"review_status"`
 	CapturedAt       string            `json:"captured_at"`
 	SOPViewKey       string            `json:"sop_view_key"`
@@ -167,10 +166,10 @@ type localizedViewName struct {
 }
 
 type assetReviewHierarchySKU struct {
-	ID          uint                        `json:"id"`
+	PublicID    string                      `json:"public_id"`
 	Code        string                      `json:"code"`
 	ProductName string                      `json:"product_name"`
-	Tags        []models.Tag                `json:"tags"`
+	Tags        []publicTagDTO              `json:"tags"`
 	Assets      []assetReviewHierarchyAsset `json:"assets"`
 }
 
@@ -213,12 +212,12 @@ func (s *Server) listAssetReviewHierarchy(c *gin.Context) {
 		if _, exists := skuIndex[categoryKey][asset.SKU.ID]; !exists {
 			skuIndex[categoryKey][asset.SKU.ID] = len(categories[categoryPosition].SKUs)
 			categories[categoryPosition].SKUs = append(categories[categoryPosition].SKUs, assetReviewHierarchySKU{
-				ID: asset.SKU.ID, Code: asset.SKU.Code, ProductName: asset.SKU.Product.Name, Tags: asset.SKU.Tags,
+				PublicID: asset.SKU.PublicID, Code: asset.SKU.Code, ProductName: asset.SKU.Product.Name, Tags: publicTagDTOs(asset.SKU.Tags),
 			})
 		}
 		skuPosition := skuIndex[categoryKey][asset.SKU.ID]
 		categories[categoryPosition].SKUs[skuPosition].Assets = append(categories[categoryPosition].SKUs[skuPosition].Assets, assetReviewHierarchyAsset{
-			ID: asset.ID, OriginalURL: asset.OriginalURL, ThumbnailURL: asset.ThumbnailURL,
+			PublicID: asset.PublicID, MediaURL: "/api/v1/assets/" + asset.PublicID + "/media",
 			ReviewStatus: asset.ReviewStatus, CapturedAt: asset.CapturedAt.Format(time.RFC3339),
 			SOPViewKey: asset.SOPView.PresetKey, SOPViewName: localizedViewName{ZHCN: asset.SOPView.NameZH, EN: asset.SOPView.NameEN}, PhotoSessionCode: asset.PhotoSession.Code,
 		})

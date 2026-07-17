@@ -41,7 +41,7 @@ type TextResultDocument struct {
 
 type PlatformContentDocument struct {
 	PublicID         string          `json:"public_id"`
-	SKUID            uint            `json:"sku_id"`
+	SKUID            string          `json:"sku_id"`
 	Platform         string          `json:"platform"`
 	Locale           string          `json:"locale"`
 	Title            string          `json:"title"`
@@ -304,7 +304,7 @@ func (service *TextResultService) Apply(ctx context.Context, jobID, itemID, resu
 		} else if err := tx.Save(&content).Error; err != nil {
 			return err
 		}
-		after, err = json.Marshal(platformContentDocument(content))
+		after, err = json.Marshal(platformContentDocument(content, binding.job.SKU.PublicID))
 		if err != nil {
 			return err
 		}
@@ -318,17 +318,28 @@ func (service *TextResultService) Apply(ctx context.Context, jobID, itemID, resu
 		if err := createTextResultAudit(tx, binding, actorID, "ai_text_result.applied", map[string]any{"platform": binding.job.TargetPlatform, "locale": binding.job.Locale, "revision": content.Revision}); err != nil {
 			return err
 		}
-		applied = TextApplicationResult{Content: platformContentDocument(content)}
+		applied = TextApplicationResult{Content: platformContentDocument(content, binding.job.SKU.PublicID)}
 		return nil
 	})
 	return applied, err
 }
 
-func (service *TextResultService) GetPlatformContent(ctx context.Context, skuID uint, platform, locale string) (PlatformContentHistory, error) {
+func (service *TextResultService) GetPlatformContent(ctx context.Context, skuPublicID string, platform, locale string) (PlatformContentHistory, error) {
 	history := PlatformContentHistory{Revisions: []PlatformContentRevisionDocument{}}
 	err := service.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		parsed, err := uuid.Parse(skuPublicID)
+		if err != nil || parsed == uuid.Nil {
+			return ErrSKUNotFound
+		}
+		var sku models.SKU
+		if err := tx.Select("id", "public_id").Where("public_id = ?", parsed.String()).First(&sku).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrSKUNotFound
+			}
+			return err
+		}
 		var content models.SKUPlatformContent
-		err := tx.Where("sku_id = ? AND platform = ? AND locale = ?", skuID, platform, locale).First(&content).Error
+		err = tx.Where("sku_id = ? AND platform = ? AND locale = ?", sku.ID, platform, locale).First(&content).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil
 		}
@@ -339,7 +350,7 @@ func (service *TextResultService) GetPlatformContent(ctx context.Context, skuID 
 		if err := tx.Where("sku_platform_content_id = ?", content.ID).Order("revision DESC").Find(&revisions).Error; err != nil {
 			return err
 		}
-		doc := platformContentDocument(content)
+		doc := platformContentDocument(content, sku.PublicID)
 		history.Content = &doc
 		history.Revisions = make([]PlatformContentRevisionDocument, 0, len(revisions))
 		for _, revision := range revisions {
@@ -366,7 +377,7 @@ func loadTextResultBinding(db *gorm.DB, jobPublicID, itemPublicID, resultPublicI
 		return query
 	}
 	var binding textResultBinding
-	if err := newQuery().Where("public_id = ?", jobPublicID).First(&binding.job).Error; err != nil {
+	if err := newQuery().Preload("SKU").Where("public_id = ?", jobPublicID).First(&binding.job).Error; err != nil {
 		return binding, textResultNotFound(err)
 	}
 	if err := newQuery().Where("public_id = ? AND ai_job_id = ?", itemPublicID, binding.job.ID).First(&binding.item).Error; err != nil {
@@ -451,9 +462,9 @@ func findPlatformContent(db *gorm.DB, job models.AIJob) (models.SKUPlatformConte
 
 func applicationSnapshots(content models.SKUPlatformContent, found bool, binding textResultBinding) (json.RawMessage, json.RawMessage, error) {
 	before := json.RawMessage(`{}`)
-	document := PlatformContentDocument{SKUID: binding.job.SKUID, Platform: binding.job.TargetPlatform, Locale: binding.job.Locale, SellingPoints: json.RawMessage(`[]`), SearchKeywords: json.RawMessage(`[]`), Revision: 1}
+	document := PlatformContentDocument{SKUID: binding.job.SKU.PublicID, Platform: binding.job.TargetPlatform, Locale: binding.job.Locale, SellingPoints: json.RawMessage(`[]`), SearchKeywords: json.RawMessage(`[]`), Revision: 1}
 	if found {
-		document = platformContentDocument(content)
+		document = platformContentDocument(content, binding.job.SKU.PublicID)
 		encoded, err := json.Marshal(document)
 		if err != nil {
 			return nil, nil, err
@@ -481,8 +492,8 @@ func applicationSnapshots(content models.SKUPlatformContent, found bool, binding
 	return before, after, err
 }
 
-func platformContentDocument(content models.SKUPlatformContent) PlatformContentDocument {
-	return PlatformContentDocument{PublicID: content.PublicID, SKUID: content.SKUID, Platform: content.Platform, Locale: content.Locale, Title: content.Title, ShortDescription: content.ShortDescription, LongDescription: content.LongDescription, SellingPoints: cloneRawJSON(content.SellingPointsJSON, `[]`), SearchKeywords: cloneRawJSON(content.SearchKeywordsJSON, `[]`), Revision: content.Revision, UpdatedAt: content.UpdatedAt}
+func platformContentDocument(content models.SKUPlatformContent, skuPublicID string) PlatformContentDocument {
+	return PlatformContentDocument{PublicID: content.PublicID, SKUID: skuPublicID, Platform: content.Platform, Locale: content.Locale, Title: content.Title, ShortDescription: content.ShortDescription, LongDescription: content.LongDescription, SellingPoints: cloneRawJSON(content.SellingPointsJSON, `[]`), SearchKeywords: cloneRawJSON(content.SearchKeywordsJSON, `[]`), Revision: content.Revision, UpdatedAt: content.UpdatedAt}
 }
 
 func textResultDocument(result models.AITextResult, item models.AIJobItem) TextResultDocument {

@@ -360,7 +360,7 @@ func TestDryRunExecutorRejectsCorruptProvenanceWithoutWrites(t *testing.T) {
 			db.Model(&models.AIJob{}).Where("id = ?", item.AIJobID).Update("input_snapshot_json", encoded)
 		},
 		"text item has input assets": func(db *gorm.DB, item models.AIJobItem) {
-			db.Model(&models.AIJobItem{}).Where("id = ?", item.ID).Update("selected_input_asset_ids_json", []byte(`[101]`))
+			db.Model(&models.AIJobItem{}).Where("id = ?", item.ID).Update("selected_input_asset_ids_json", []byte(`["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]`))
 		},
 	}
 	for name, corrupt := range tests {
@@ -401,7 +401,7 @@ func TestDryRunExecutorRejectsImageAssetMissingFromSnapshot(t *testing.T) {
 	if err != nil || imageItem == nil || imageItem.Kind != models.AIContentSlotImage {
 		t.Fatalf("image lease = %#v, %v", imageItem, err)
 	}
-	if err := db.Model(&models.AIJobItem{}).Where("public_id = ?", imageItem.PublicID).Update("selected_input_asset_ids_json", []byte(`[999]`)).Error; err != nil {
+	if err := db.Model(&models.AIJobItem{}).Where("public_id = ?", imageItem.PublicID).Update("selected_input_asset_ids_json", []byte(`["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"]`)).Error; err != nil {
 		t.Fatal(err)
 	}
 	err = newDryRunExecutorWithClock(db, fixedClock{now: now.Add(20 * time.Second)}).Execute(t.Context(), *imageItem)

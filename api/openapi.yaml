@@ -7,6 +7,70 @@ servers:
 security:
   - bearerAuth: []
 paths:
+  /skus:
+    get:
+      operationId: listSKUs
+      parameters:
+        - { in: query, name: category_id, schema: { type: integer, minimum: 1 } }
+        - { in: query, name: q, schema: { type: string } }
+      responses:
+        '200': { description: SKUs, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/SKU' } } } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    post:
+      operationId: createSKU
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/SKUMutationRequest' } } }
+      responses:
+        '201': { description: SKU created, content: { application/json: { schema: { $ref: '#/components/schemas/SKU' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /skus/{sku_id}:
+    parameters: [ { $ref: '#/components/parameters/SKUID' } ]
+    get:
+      operationId: getSKU
+      responses:
+        '200': { description: SKU, content: { application/json: { schema: { $ref: '#/components/schemas/SKU' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    patch:
+      operationId: updateSKU
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/SKUMutationRequest' } } }
+      responses:
+        '200': { description: SKU updated, content: { application/json: { schema: { $ref: '#/components/schemas/SKU' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /skus/{sku_id}/inventory-adjustments:
+    parameters: [ { $ref: '#/components/parameters/SKUID' } ]
+    post:
+      operationId: createInventoryAdjustment
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateInventoryAdjustmentRequest' } } }
+      responses:
+        '201': { description: Inventory adjustment created, content: { application/json: { schema: { $ref: '#/components/schemas/InventoryAdjustment' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /skus/{sku_id}/inventory-history:
+    parameters: [ { $ref: '#/components/parameters/SKUID' } ]
+    get:
+      operationId: listInventoryHistory
+      responses:
+        '200': { description: Inventory history, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/InventoryAdjustment' } } } } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
   /capture-sops:
     post:
       operationId: createCaptureSOP
@@ -288,6 +352,34 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '500': { $ref: '#/components/responses/InternalServerError' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /assets/{asset_id}/media:
+    parameters: [ { $ref: '#/components/parameters/AssetID' } ]
+    get:
+      operationId: getAssetMedia
+      responses:
+        '200':
+          description: Authenticated asset bytes. Responses are private, no-store and protected with nosniff.
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /assets/{asset_id}/review:
+    parameters: [ { $ref: '#/components/parameters/AssetID' } ]
+    patch:
+      operationId: reviewAsset
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ReviewAssetRequest' } } }
+      responses:
+        '200': { description: Asset reviewed, content: { application/json: { schema: { $ref: '#/components/schemas/ReviewedAsset' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
   /assets/review:
     get:
       operationId: listAssetsForReview
@@ -547,8 +639,8 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { description: Candidate validation failed, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
         '500': { $ref: '#/components/responses/InternalServerError' }
-  /skus/{id}/platform-content:
-    parameters: [ { in: path, name: id, required: true, schema: { type: integer, minimum: 1 } }, { in: query, name: platform, required: true, schema: { type: string, minLength: 1, maxLength: 80 } }, { in: query, name: locale, required: true, schema: { type: string, minLength: 1, maxLength: 32 } } ]
+  /skus/{sku_id}/platform-content:
+    parameters: [ { $ref: '#/components/parameters/SKUID' }, { in: query, name: platform, required: true, schema: { type: string, minLength: 1, maxLength: 80 } }, { in: query, name: locale, required: true, schema: { type: string, minLength: 1, maxLength: 32 } } ]
     get:
       operationId: getSKUPlatformContent
       responses:
@@ -570,6 +662,8 @@ components:
     AIJobID: { in: path, name: job_id, required: true, schema: { type: string, format: uuid } }
     AIJobItemID: { in: path, name: item_id, required: true, schema: { type: string, format: uuid } }
     AITextResultID: { in: path, name: result_id, required: true, schema: { type: string, format: uuid } }
+    SKUID: { in: path, name: sku_id, required: true, schema: { type: string, format: uuid } }
+    AssetID: { in: path, name: asset_id, required: true, schema: { type: string, format: uuid } }
     IdempotencyKey: { in: header, name: Idempotency-Key, required: true, description: "Actor-scoped create key. Reusing it with the same normalized request returns the original job; different input returns 409.", schema: { type: string, minLength: 8, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$' } }
     SOPRevision:
       in: header
@@ -691,15 +785,93 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         versions: { type: array, items: { $ref: '#/components/schemas/AIContentTemplateVersion' } }
+    SKUMutationRequest:
+      type: object
+      additionalProperties: false
+      required: [product_name, code]
+      properties:
+        category_id: { type: integer, minimum: 1 }
+        product_name: { type: string, minLength: 1 }
+        brand: { type: string }
+        category: { type: string }
+        code: { type: string, minLength: 1 }
+        color: { type: string }
+        size: { type: string }
+        barcode: { type: string }
+        stock: { type: integer }
+        low_stock_threshold: { type: integer }
+        platform_title: { type: string }
+        selling_points: { type: string }
+        status: { type: string, enum: [active, inactive] }
+        tags: { type: array, items: { type: string } }
+    SKUCategory:
+      type: object
+      required: [id, name, name_en, is_system, created_at, updated_at]
+      properties:
+        id: { type: integer, minimum: 1 }
+        name: { type: string }
+        name_en: { type: string }
+        is_system: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    SKUProduct:
+      type: object
+      additionalProperties: false
+      required: [category_id, name, brand, category, description, category_record]
+      properties:
+        category_id: { type: integer, minimum: 1 }
+        name: { type: string }
+        brand: { type: string }
+        category: { type: string }
+        description: { type: string }
+        category_record: { $ref: '#/components/schemas/SKUCategory' }
+    SKU:
+      type: object
+      additionalProperties: false
+      required: [public_id, code, color, size, barcode, stock, low_stock_threshold, platform_title, selling_points, status, created_at, updated_at, product, tags]
+      properties:
+        public_id: { type: string, format: uuid }
+        code: { type: string }
+        color: { type: string }
+        size: { type: string }
+        barcode: { type: string }
+        stock: { type: integer }
+        low_stock_threshold: { type: integer }
+        platform_title: { type: string }
+        selling_points: { type: string }
+        status: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        product: { $ref: '#/components/schemas/SKUProduct' }
+        tags: { type: array, items: { $ref: '#/components/schemas/Tag' } }
+    CreateInventoryAdjustmentRequest:
+      type: object
+      additionalProperties: false
+      required: [quantity_delta, reason]
+      properties:
+        quantity_delta: { type: integer, not: { enum: [0] } }
+        reason: { type: string, minLength: 1 }
+        note: { type: string }
+    InventoryAdjustment:
+      type: object
+      additionalProperties: false
+      required: [sku_id, quantity_delta, reason, note, operator_name, created_at]
+      properties:
+        sku_id: { type: string, format: uuid }
+        quantity_delta: { type: integer }
+        reason: { type: string }
+        note: { type: string }
+        operator_name: { type: string }
+        created_at: { type: string, format: date-time }
     CreateAIJobRequest:
       type: object
       additionalProperties: false
       required: [sku_id, template_version_id, selected_slot_keys, selected_asset_ids, locale]
       properties:
-        sku_id: { type: integer, minimum: 1 }
+        sku_id: { type: string, format: uuid }
         template_version_id: { type: string, format: uuid }
         selected_slot_keys: { type: array, minItems: 1, uniqueItems: true, items: { type: string, minLength: 1, maxLength: 80 } }
-        selected_asset_ids: { type: array, items: { type: integer, minimum: 1 }, description: Duplicate IDs are accepted and normalized to one ordered reference. }
+        selected_asset_ids: { type: array, items: { type: string, format: uuid }, description: Duplicate public UUIDs are accepted and normalized to one ordered reference. }
         locale: { type: string, minLength: 2, maxLength: 32, pattern: '^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$' }
         user_preference: { type: string, maxLength: 1000, description: Optional L4 user instruction stored immutably in the job snapshot. }
         generation_overrides:
@@ -721,7 +893,7 @@ components:
       required: [public_id, sku_id, template_version_id, target_platform, locale, status, snapshot_schema, input_snapshot, started_at, completed_at, cancelled_at, created_at, updated_at, items]
       properties:
         public_id: { type: string, format: uuid }
-        sku_id: { type: integer, minimum: 1 }
+        sku_id: { type: string, format: uuid }
         template_version_id: { type: string, format: uuid }
         target_platform: { type: string }
         locale: { type: string }
@@ -744,7 +916,7 @@ components:
         kind: { type: string, enum: [image, title, seo_description] }
         status: { type: string, enum: [queued, running, completed, failed, cancelled] }
         slot_snapshot: { $ref: '#/components/schemas/AIJobSlotSnapshot' }
-        selected_input_asset_ids: { type: array, items: { type: integer, minimum: 1 } }
+        selected_input_asset_ids: { type: array, items: { type: string, format: uuid } }
         attempt_count: { type: integer, minimum: 0 }
         safe_error: { type: string }
         started_at: { type: string, format: date-time, nullable: true }
@@ -782,7 +954,7 @@ components:
       required: [public_id, sku_id, platform, locale, title, short_description, long_description, selling_points, search_keywords, revision, updated_at]
       properties:
         public_id: { type: string, format: uuid }
-        sku_id: { type: integer, minimum: 1 }
+        sku_id: { type: string, format: uuid }
         platform: { type: string }
         locale: { type: string }
         title: { type: string }
@@ -867,8 +1039,9 @@ components:
     AISnapshotSKU:
       type: object
       additionalProperties: false
-      required: [code, color, size, platform_title, selling_points, tags]
+      required: [public_id, code, color, size, platform_title, selling_points, tags]
       properties:
+        public_id: { type: string, format: uuid }
         code: { type: string }
         color: { type: string }
         size: { type: string }
@@ -923,12 +1096,14 @@ components:
     AISnapshotAsset:
       type: object
       additionalProperties: false
-      required: [id, object_key, original_url, thumbnail_url, captured_at, view]
+      required: [public_id, mime_type, width, height, byte_count, sha256, captured_at, view]
       properties:
-        id: { type: integer, minimum: 1 }
-        object_key: { type: string }
-        original_url: { type: string, format: uri }
-        thumbnail_url: { type: string }
+        public_id: { type: string, format: uuid }
+        mime_type: { type: string, enum: [image/jpeg, image/png, image/webp] }
+        width: { type: integer, minimum: 1 }
+        height: { type: integer, minimum: 1 }
+        byte_count: { type: integer, format: int64, minimum: 1 }
+        sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
         captured_at: { type: string, format: date-time }
         view: { $ref: '#/components/schemas/AISnapshotAssetView' }
     AISnapshotTemplate:
@@ -1142,12 +1317,11 @@ components:
         headers: { type: object, additionalProperties: { type: string } }
     AssetUploadEnvelope:
       type: object
-      required: [method, upload_url, asset_url, object_key, completion_token, expires_in, headers]
+      additionalProperties: false
+      required: [method, upload_url, completion_token, expires_in, headers]
       properties:
         method: { type: string, enum: [PUT] }
         upload_url: { type: string, format: uri }
-        asset_url: { type: string, format: uri }
-        object_key: { type: string }
         completion_token: { type: string, minLength: 1, description: "Short-lived signed ticket required to complete this exact upload." }
         expires_in: { type: integer }
         headers: { type: object, additionalProperties: { type: string } }
@@ -1156,7 +1330,7 @@ components:
       additionalProperties: false
       required: [sku_id, sop_version_id]
       properties:
-        sku_id: { type: integer, minimum: 1 }
+        sku_id: { type: string, format: uuid }
         sop_version_id: { type: string, format: uuid }
     PhotoSession:
       type: object
@@ -1164,7 +1338,7 @@ components:
       properties:
         public_id: { type: string, format: uuid }
         code: { type: string }
-        sku_id: { type: integer, minimum: 1 }
+        sku_id: { type: string, format: uuid }
         sop_version_id: { type: string, format: uuid }
         status: { type: string, enum: [in_progress, completed] }
         created_at: { type: string, format: date-time }
@@ -1174,7 +1348,7 @@ components:
       required: [file_name, content_type, photo_session_id, sop_view_id]
       properties:
         file_name: { type: string, minLength: 1 }
-        content_type: { type: string, pattern: '^image/' }
+        content_type: { type: string, enum: [image/jpeg, image/png, image/webp], description: HEIC and HEIF are rejected before a signed upload URL is issued. }
         photo_session_id: { type: string, format: uuid }
         sop_view_id: { type: string, format: uuid }
     CompleteAssetRequest:
@@ -1184,55 +1358,55 @@ components:
       properties:
         photo_session_id: { type: string, format: uuid }
         sop_view_id: { type: string, format: uuid }
-        completion_token: { type: string, minLength: 1, description: "Signed ticket returned by createAssetUploadURL; binds user, session, view, object key, and expiry." }
+        completion_token: { type: string, minLength: 1, description: "Signed ticket returned by createAssetUploadURL; binds the authenticated actor, session, view, upload nonce, content type, and expiry without exposing an internal object locator." }
         captured_at: { type: string, format: date-time }
     CompletedAsset:
       type: object
-      required: [id, sku_id, photo_session_id, sop_view_id, object_key, original_url, thumbnail_url, review_status, captured_at]
+      additionalProperties: false
+      required: [public_id, sku_id, photo_session_id, sop_view_id, media_url, review_status, captured_at]
       properties:
-        id: { type: integer, minimum: 1 }
-        sku_id: { type: integer, minimum: 1 }
+        public_id: { type: string, format: uuid }
+        sku_id: { type: string, format: uuid }
         photo_session_id: { type: string, format: uuid }
         sop_view_id: { type: string, format: uuid }
-        object_key: { type: string }
-        original_url: { type: string }
-        thumbnail_url: { type: string }
+        media_url: { type: string, description: Authenticated same-origin media endpoint. }
         review_status: { type: string, enum: [pending, approved, rejected] }
         captured_at: { type: string, format: date-time }
     AssetReviewItem:
       type: object
-      required: [id, sku_id, original_url, thumbnail_url, review_status, captured_at, sop_view_name, photo_session_code]
+      additionalProperties: false
+      required: [public_id, sku_id, media_url, review_status, captured_at, sop_view_name, photo_session_code]
       properties:
-        id: { type: integer, minimum: 1 }
-        sku_id: { type: integer, minimum: 1 }
-        original_url: { type: string }
-        thumbnail_url: { type: string }
+        public_id: { type: string, format: uuid }
+        sku_id: { type: string, format: uuid }
+        media_url: { type: string, description: Authenticated same-origin media endpoint. }
         review_status: { type: string, enum: [pending, approved, rejected] }
         captured_at: { type: string, format: date-time }
         sop_view_name: { $ref: '#/components/schemas/LocalizedText' }
         photo_session_code: { type: string }
     Tag:
       type: object
-      required: [id, name]
+      additionalProperties: false
+      required: [name]
       properties:
-        id: { type: integer, minimum: 1 }
         name: { type: string }
     AssetReviewSKU:
       type: object
-      required: [id, code, product_name, tags, assets]
+      additionalProperties: false
+      required: [public_id, code, product_name, tags, assets]
       properties:
-        id: { type: integer, minimum: 1 }
+        public_id: { type: string, format: uuid }
         code: { type: string }
         product_name: { type: string }
         tags: { type: array, items: { $ref: '#/components/schemas/Tag' } }
         assets: { type: array, items: { $ref: '#/components/schemas/AssetReviewHierarchyAsset' } }
     AssetReviewHierarchyAsset:
       type: object
-      required: [id, original_url, thumbnail_url, review_status, captured_at, sop_view_key, sop_view_name, photo_session_code]
+      additionalProperties: false
+      required: [public_id, media_url, review_status, captured_at, sop_view_key, sop_view_name, photo_session_code]
       properties:
-        id: { type: integer, minimum: 1 }
-        original_url: { type: string }
-        thumbnail_url: { type: string }
+        public_id: { type: string, format: uuid }
+        media_url: { type: string, description: Authenticated same-origin media endpoint. }
         review_status: { type: string, enum: [pending, approved, rejected] }
         captured_at: { type: string, format: date-time }
         sop_view_key: { type: string, description: Stable SOP preset key used to satisfy AI slot required_views. }
@@ -1247,3 +1421,17 @@ components:
         name_en: { type: string }
         is_system: { type: boolean }
         skus: { type: array, items: { $ref: '#/components/schemas/AssetReviewSKU' } }
+    ReviewAssetRequest:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { type: string, enum: [approved, rejected] }
+        reason: { type: string }
+    ReviewedAsset:
+      type: object
+      additionalProperties: false
+      required: [public_id, review_status]
+      properties:
+        public_id: { type: string, format: uuid }
+        review_status: { type: string, enum: [approved, rejected] }

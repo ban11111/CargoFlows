@@ -13,7 +13,7 @@ import { useLanguage } from "@/lib/i18n";
 import { formatNumber } from "@/lib/utils";
 
 interface SKUDetail {
-  id: number;
+  public_id: string;
   code: string;
   color: string;
   size: string;
@@ -23,9 +23,8 @@ interface SKUDetail {
   platform_title: string;
   selling_points: string;
   status: "active" | "draft" | "disabled";
-  tags: Array<{ id: number; name: string }>;
+  tags: Array<{ name: string }>;
   product: {
-    id: number;
     category_id: number;
     name: string;
     brand: string;
@@ -47,7 +46,7 @@ export default function SkuDetailPage() {
     mutationFn: (tags: string[]) => {
       const sku = skuQuery.data;
       if (!sku) throw new Error("SKU unavailable");
-      return apiRequest(`/skus/${sku.id}`, {
+      return apiRequest(`/skus/${sku.public_id}`, {
         method: "PATCH",
         body: JSON.stringify({
           category_id: sku.product.category_id,

@@ -25,9 +25,10 @@ import (
 )
 
 type fakeAssetStorage struct {
-	exists bool
-	err    error
-	source []byte
+	exists        bool
+	err           error
+	source        []byte
+	lastObjectKey string
 }
 
 var defaultFakeAssetImage = func() []byte {
@@ -44,6 +45,7 @@ type assetUploadTicketResponse struct {
 }
 
 func (s *fakeAssetStorage) createUploadURL(_ context.Context, objectKey string) (string, string, error) {
+	s.lastObjectKey = objectKey
 	return "https://upload.example.test/" + objectKey, s.assetURL(objectKey), s.err
 }
 
@@ -79,13 +81,13 @@ func TestCreatePhotoSessionRequiresPublishedVersion(t *testing.T) {
 	version := createCaptureVersionFixture(t, db, models.SOPVersionDraft, "44444444-4444-4444-8444-444444444444")
 	sku := createSKUForSOPVersion(t, db, version, "PUBLISH-SKU")
 
-	response := performCreatePhotoSession(t, db, sku.ID, version.PublicID)
+	response := performCreatePhotoSession(t, db, sku.PublicID, version.PublicID)
 	assertErrorResponse(t, response, http.StatusConflict, "version_not_published")
 
 	if err := db.Model(&version).Update("status", models.SOPVersionPublished).Error; err != nil {
 		t.Fatal(err)
 	}
-	response = performCreatePhotoSession(t, db, sku.ID, version.PublicID)
+	response = performCreatePhotoSession(t, db, sku.PublicID, version.PublicID)
 	if response.Code != http.StatusCreated {
 		t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, response.Code, response.Body.String())
 	}
@@ -104,11 +106,46 @@ func TestCreatePhotoSessionRequiresPublishedVersion(t *testing.T) {
 	}
 }
 
+func TestCreatePhotoSessionRejectsNumericInternalSKUIdentifier(t *testing.T) {
+	db := newTestDB(t)
+	version := createCaptureVersionFixture(t, db, models.SOPVersionPublished, "41111111-1111-4111-8111-111111111111")
+	sku := createSKUForSOPVersion(t, db, version, "PUBLIC-SKU-ONLY")
+
+	response := performCreatePhotoSession(t, db, fmt.Sprint(sku.ID), version.PublicID)
+	assertErrorResponse(t, response, http.StatusBadRequest, "invalid_request")
+	assertPhotoSessionCount(t, db, 0)
+}
+
+func TestCreateAssetUploadURLRejectsHEICBeforeSigningAndNeverReturnsObjectLocator(t *testing.T) {
+	db := newTestDB(t)
+	version := createCaptureVersionFixture(t, db, models.SOPVersionPublished, "42111111-1111-4111-8111-111111111111")
+	view := createCaptureViewFixture(t, db, version.ID, "43111111-1111-4111-8111-111111111111", "正面", "Front")
+	session := createPhotoSessionFixture(t, db, version.ID, "44111111-1111-4111-8111-111111111111")
+	storage := &fakeAssetStorage{exists: true}
+	server := &Server{db: db, cfg: testAssetConfig(), storage: storage}
+
+	rejected := performCreateAssetUploadURLWithContentType(t, server, session.PublicID, view.PublicID, session.PhotographerID, "capture.heic", "image/heic")
+	assertErrorResponse(t, rejected, http.StatusBadRequest, "invalid_request")
+	if storage.lastObjectKey != "" {
+		t.Fatalf("unsupported format reached object storage signing: %q", storage.lastObjectKey)
+	}
+
+	accepted := performCreateAssetUploadURLWithContentType(t, server, session.PublicID, view.PublicID, session.PhotographerID, "capture.jpg", "image/jpeg")
+	if accepted.Code != http.StatusOK {
+		t.Fatalf("JPEG upload ticket = %d %s", accepted.Code, accepted.Body.String())
+	}
+	for _, forbidden := range []string{`"object_key"`, `"asset_url"`} {
+		if strings.Contains(accepted.Body.String(), forbidden) {
+			t.Fatalf("upload response leaked %q: %s", forbidden, accepted.Body.String())
+		}
+	}
+}
+
 func TestCreatePhotoSessionRejectsArchivedVersion(t *testing.T) {
 	db := newTestDB(t)
 	version := createCaptureVersionFixture(t, db, models.SOPVersionArchived, "55555555-5555-4555-8555-555555555555")
 	sku := createSKUForSOPVersion(t, db, version, "ARCHIVED-SKU")
-	response := performCreatePhotoSession(t, db, sku.ID, version.PublicID)
+	response := performCreatePhotoSession(t, db, sku.PublicID, version.PublicID)
 	assertErrorResponse(t, response, http.StatusConflict, "version_not_published")
 }
 
@@ -116,7 +153,7 @@ func TestCreatePhotoSessionRejectsMissingSKUWithoutWriting(t *testing.T) {
 	db := newTestDB(t)
 	version := createCaptureVersionFixture(t, db, models.SOPVersionPublished, "13131313-1313-4313-8313-131313131313")
 
-	response := performCreatePhotoSession(t, db, 999999, version.PublicID)
+	response := performCreatePhotoSession(t, db, "99999999-9999-4999-8999-999999999999", version.PublicID)
 	assertErrorResponse(t, response, http.StatusNotFound, "sku_not_found")
 	assertPhotoSessionCount(t, db, 0)
 }
@@ -130,7 +167,7 @@ func TestCreatePhotoSessionRejectsSKUCaptureSOPCategoryMismatchWithoutWriting(t 
 	}
 	sku := createSKUFixture(t, db, otherCategory.ID, "OTHER-SKU")
 
-	response := performCreatePhotoSession(t, db, sku.ID, version.PublicID)
+	response := performCreatePhotoSession(t, db, sku.PublicID, version.PublicID)
 	assertErrorResponse(t, response, http.StatusConflict, "sku_sop_category_mismatch")
 	assertPhotoSessionCount(t, db, 0)
 }
@@ -252,8 +289,8 @@ func TestCompleteAssetUsesSignedTicketAndServerDerivedURL(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &receipt); err != nil {
 		t.Fatal(err)
 	}
-	if receipt.ObjectKey != ticket.ObjectKey || receipt.OriginalURL != storage.assetURL(ticket.ObjectKey) {
-		t.Fatalf("asset location was not derived from the signed ticket: %#v", receipt)
+	if receipt.PublicID == "" || receipt.MediaURL != "/api/v1/assets/"+receipt.PublicID+"/media" {
+		t.Fatalf("asset response exposed an unsafe media locator: %#v", receipt)
 	}
 }
 
@@ -317,7 +354,7 @@ func TestCompleteAssetIsIdempotentForRepeatedTicket(t *testing.T) {
 	if err := json.Unmarshal(second.Body.Bytes(), &secondAsset); err != nil {
 		t.Fatal(err)
 	}
-	if firstAsset.ID != secondAsset.ID || firstAsset.ObjectKey != secondAsset.ObjectKey || !firstAsset.CapturedAt.Equal(secondAsset.CapturedAt) {
+	if firstAsset.PublicID != secondAsset.PublicID || !firstAsset.CapturedAt.Equal(secondAsset.CapturedAt) {
 		t.Fatalf("replay must return the originally created asset: first=%#v second=%#v", firstAsset, secondAsset)
 	}
 	var count int64
@@ -349,7 +386,7 @@ func TestCompleteAssetIsIdempotentForConcurrentTicketConsumption(t *testing.T) {
 	workers.Wait()
 	close(responses)
 
-	ids := make([]uint, 0, 2)
+	ids := make([]string, 0, 2)
 	statuses := map[int]int{}
 	for response := range responses {
 		statuses[response.Code]++
@@ -360,7 +397,7 @@ func TestCompleteAssetIsIdempotentForConcurrentTicketConsumption(t *testing.T) {
 		if err := json.Unmarshal(response.Body.Bytes(), &asset); err != nil {
 			t.Fatal(err)
 		}
-		ids = append(ids, asset.ID)
+		ids = append(ids, asset.PublicID)
 	}
 	if statuses[http.StatusCreated] != 1 || statuses[http.StatusOK] != 1 || len(ids) != 2 || ids[0] != ids[1] {
 		t.Fatalf("expected one create and one replay for the same asset, statuses=%v ids=%v", statuses, ids)
@@ -544,6 +581,13 @@ func createCaptureViewFixture(t *testing.T, db *gorm.DB, versionID uint, publicI
 
 func createPhotoSessionFixture(t *testing.T, db *gorm.DB, versionID uint, publicID string) models.PhotoSession {
 	t.Helper()
+	var sku models.SKU
+	if err := db.First(&sku, 42).Error; err != nil {
+		sku = models.SKU{ID: 42, ProductID: 1, Code: "PHOTO-SESSION-SKU"}
+		if err := db.Create(&sku).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
 	session := models.PhotoSession{PublicID: publicID, Code: "PS-" + publicID, SKUID: 42, SOPVersionID: versionID, PhotographerID: 7, Status: "in_progress"}
 	if err := db.Create(&session).Error; err != nil {
 		t.Fatal(err)
@@ -608,12 +652,16 @@ func testAssetConfig() config.Config {
 }
 
 func performCreateAssetUploadURL(t *testing.T, server *Server, sessionID, viewID string, userID uint, fileName string) *httptest.ResponseRecorder {
+	return performCreateAssetUploadURLWithContentType(t, server, sessionID, viewID, userID, fileName, "image/jpeg")
+}
+
+func performCreateAssetUploadURLWithContentType(t *testing.T, server *Server, sessionID, viewID string, userID uint, fileName, contentType string) *httptest.ResponseRecorder {
 	t.Helper()
 	response := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(response)
 	context.Request = httptest.NewRequest(http.MethodPost, "/assets/upload-url", strings.NewReader(fmt.Sprintf(
-		`{"file_name":%q,"content_type":"image/jpeg","photo_session_id":%q,"sop_view_id":%q}`,
-		fileName, sessionID, viewID,
+		`{"file_name":%q,"content_type":%q,"photo_session_id":%q,"sop_view_id":%q}`,
+		fileName, contentType, sessionID, viewID,
 	)))
 	context.Request.Header.Set("Content-Type", "application/json")
 	context.Set("user", models.User{ID: userID, Role: models.RolePhotographer})
@@ -631,8 +679,14 @@ func createAssetUploadTicket(t *testing.T, server *Server, session models.PhotoS
 	if err := json.Unmarshal(response.Body.Bytes(), &ticket); err != nil {
 		t.Fatal(err)
 	}
-	if ticket.ObjectKey == "" || ticket.CompletionToken == "" {
+	if ticket.CompletionToken == "" {
 		t.Fatalf("incomplete upload ticket: %s", response.Body.String())
+	}
+	if storage, ok := server.storage.(*fakeAssetStorage); ok {
+		ticket.ObjectKey = storage.lastObjectKey
+	}
+	if ticket.ObjectKey == "" {
+		t.Fatal("test storage did not observe the signed object key")
 	}
 	return ticket
 }

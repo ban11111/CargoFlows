@@ -120,8 +120,8 @@ func seedAIJobFixture(t *testing.T) (*gorm.DB, aiJobFixture) {
 func TestCreateJobSnapshotsOnlyWhitelistedFactsAndSelectedSlots(t *testing.T) {
 	db, fixture := seedAIJobFixture(t)
 	job, err := NewJobService(db).Create(t.Context(), CreateJobInput{
-		SKUID: fixture.SKU.ID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID,
-		SelectedSlotKeys: []string{"hero", "title"}, SelectedAssetIDs: []uint{fixture.ApprovedAsset.ID, fixture.ApprovedAsset.ID},
+		SKUID: fixture.SKU.PublicID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID,
+		SelectedSlotKeys: []string{"hero", "title"}, SelectedAssetIDs: []string{fixture.ApprovedAsset.PublicID, fixture.ApprovedAsset.PublicID},
 		Locale: "zh-CN", CreatedByID: fixture.Operator.ID,
 		IdempotencyKey: "job-test-whitelist",
 	})
@@ -135,16 +135,16 @@ func TestCreateJobSnapshotsOnlyWhitelistedFactsAndSelectedSlots(t *testing.T) {
 		t.Fatalf("item order = %v", got)
 	}
 	for _, item := range job.Items {
-		want := []uint{}
+		want := []string{}
 		if item.Kind == models.AIContentSlotImage {
-			want = []uint{fixture.ApprovedAsset.ID}
+			want = []string{fixture.ApprovedAsset.PublicID}
 		}
 		if !reflect.DeepEqual(item.SelectedInputAssetIDs, want) {
 			t.Fatalf("%s selected assets = %v", item.SlotKey, item.SelectedInputAssetIDs)
 		}
 	}
 	snapshotText := string(job.InputSnapshot)
-	for _, forbidden := range []string{"low_stock_threshold", `"stock"`, `"status"`, "password_hash", "created_by_id", "barcode"} {
+	for _, forbidden := range []string{"low_stock_threshold", `"stock"`, `"status"`, "password_hash", "created_by_id", "barcode", "object_key", "original_url", "thumbnail_url", `"id":`} {
 		if strings.Contains(snapshotText, forbidden) {
 			t.Fatalf("snapshot contains %q: %s", forbidden, snapshotText)
 		}
@@ -156,6 +156,9 @@ func TestCreateJobSnapshotsOnlyWhitelistedFactsAndSelectedSlots(t *testing.T) {
 	if snapshot.Schema != ProductSnapshotSchemaV1 || snapshot.Product.Category.NameEN != "Phone cases" || snapshot.SOP.CoordinateSystem != "pcs_object_v1" || len(snapshot.SelectedAssets) != 1 || len(snapshot.Template.SelectedSlots) != 2 || !snapshot.Template.SelectedSlots[0].DefaultSelected {
 		t.Fatalf("incomplete snapshot: %#v", snapshot)
 	}
+	if job.SKUID != fixture.SKU.PublicID || snapshot.SKU.PublicID != fixture.SKU.PublicID || snapshot.SelectedAssets[0].PublicID != fixture.ApprovedAsset.PublicID {
+		t.Fatalf("public identity contract was not preserved: job=%#v snapshot=%#v", job, snapshot)
+	}
 	if snapshot.SelectedAssets[0].View.CameraPositionDirection.Z != 1 || snapshot.SelectedAssets[0].View.Instruction.EN != "Front capture" || snapshot.SelectedAssets[0].View.Composition.AspectRatio != "1:1" {
 		t.Fatalf("asset-specific view was not snapshotted: %#v", snapshot.SelectedAssets[0].View)
 	}
@@ -163,7 +166,7 @@ func TestCreateJobSnapshotsOnlyWhitelistedFactsAndSelectedSlots(t *testing.T) {
 
 func TestCreateJobAllowsTextOnlyWithoutAssets(t *testing.T) {
 	db, fixture := seedAIJobFixture(t)
-	job, err := NewJobService(db).Create(t.Context(), CreateJobInput{SKUID: fixture.SKU.ID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"seo", "title"}, Locale: "en", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-test-text-only"})
+	job, err := NewJobService(db).Create(t.Context(), CreateJobInput{SKUID: fixture.SKU.PublicID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"seo", "title"}, Locale: "en", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-test-text-only"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,25 +182,25 @@ func TestCreateJobRejectsInvalidTemplateSlotsAndAssetsWithoutWriting(t *testing.
 		want   error
 	}{
 		{"draft template", func(f aiJobFixture) CreateJobInput {
-			return CreateJobInput{SKUID: f.SKU.ID, TemplateVersionPublicID: f.DraftVersion.PublicID, SelectedSlotKeys: []string{"title"}}
+			return CreateJobInput{SKUID: f.SKU.PublicID, TemplateVersionPublicID: f.DraftVersion.PublicID, SelectedSlotKeys: []string{"title"}}
 		}, ErrTemplateVersionNotPublished},
 		{"empty slots", func(f aiJobFixture) CreateJobInput {
-			return CreateJobInput{SKUID: f.SKU.ID, TemplateVersionPublicID: f.PublishedVersion.PublicID}
+			return CreateJobInput{SKUID: f.SKU.PublicID, TemplateVersionPublicID: f.PublishedVersion.PublicID}
 		}, ErrSlotSelectionInvalid},
 		{"duplicate slot", func(f aiJobFixture) CreateJobInput {
-			return CreateJobInput{SKUID: f.SKU.ID, TemplateVersionPublicID: f.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title", "title"}}
+			return CreateJobInput{SKUID: f.SKU.PublicID, TemplateVersionPublicID: f.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title", "title"}}
 		}, ErrSlotSelectionInvalid},
 		{"unknown slot", func(f aiJobFixture) CreateJobInput {
-			return CreateJobInput{SKUID: f.SKU.ID, TemplateVersionPublicID: f.PublishedVersion.PublicID, SelectedSlotKeys: []string{"missing"}}
+			return CreateJobInput{SKUID: f.SKU.PublicID, TemplateVersionPublicID: f.PublishedVersion.PublicID, SelectedSlotKeys: []string{"missing"}}
 		}, ErrSlotSelectionInvalid},
 		{"cross sku asset", func(f aiJobFixture) CreateJobInput {
-			return CreateJobInput{SKUID: f.SKU.ID, TemplateVersionPublicID: f.PublishedVersion.PublicID, SelectedSlotKeys: []string{"hero"}, SelectedAssetIDs: []uint{f.OtherAsset.ID}}
+			return CreateJobInput{SKUID: f.SKU.PublicID, TemplateVersionPublicID: f.PublishedVersion.PublicID, SelectedSlotKeys: []string{"hero"}, SelectedAssetIDs: []string{f.OtherAsset.PublicID}}
 		}, ErrAssetNotEligible},
-		{"zero asset id", func(f aiJobFixture) CreateJobInput {
-			return CreateJobInput{SKUID: f.SKU.ID, TemplateVersionPublicID: f.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title"}, SelectedAssetIDs: []uint{0}}
-		}, ErrAssetNotEligible},
+		{"invalid asset id", func(f aiJobFixture) CreateJobInput {
+			return CreateJobInput{SKUID: f.SKU.PublicID, TemplateVersionPublicID: f.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title"}, SelectedAssetIDs: []string{"not-a-uuid"}}
+		}, ErrAssetIDInvalid},
 		{"image without required asset", func(f aiJobFixture) CreateJobInput {
-			return CreateJobInput{SKUID: f.SKU.ID, TemplateVersionPublicID: f.PublishedVersion.PublicID, SelectedSlotKeys: []string{"hero"}}
+			return CreateJobInput{SKUID: f.SKU.PublicID, TemplateVersionPublicID: f.PublishedVersion.PublicID, SelectedSlotKeys: []string{"hero"}}
 		}, ErrAssetNotEligible},
 	}
 	for _, tc := range tests {
@@ -232,7 +235,7 @@ func TestCreateJobRollsBackWhenItemInsertFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Callback().Create().Remove(callbackName) })
-	_, err := NewJobService(db).Create(t.Context(), CreateJobInput{SKUID: fixture.SKU.ID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title"}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-test-rollback"})
+	_, err := NewJobService(db).Create(t.Context(), CreateJobInput{SKUID: fixture.SKU.PublicID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title"}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-test-rollback"})
 	if err == nil {
 		t.Fatal("expected failure")
 	}
@@ -246,7 +249,7 @@ func TestCreateJobRollsBackWhenItemInsertFails(t *testing.T) {
 func TestCreateJobIsIdempotentAuditedAndRejectsKeyReuse(t *testing.T) {
 	db, fixture := seedAIJobFixture(t)
 	service := NewJobService(db)
-	input := CreateJobInput{SKUID: fixture.SKU.ID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title"}, SelectedAssetIDs: []uint{}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-idempotency-0001", UserPreference: "  clean premium layout  ", GenerationOverrides: map[string]GenerationOverride{"title": {CandidateCount: intPointer(3)}}}
+	input := CreateJobInput{SKUID: fixture.SKU.PublicID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title"}, SelectedAssetIDs: []string{}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-idempotency-0001", UserPreference: "  clean premium layout  ", GenerationOverrides: map[string]GenerationOverride{"title": {CandidateCount: intPointer(3)}}}
 	first, err := service.Create(t.Context(), input)
 	if err != nil {
 		t.Fatal(err)
@@ -283,7 +286,7 @@ func TestCreateJobIsIdempotentAuditedAndRejectsKeyReuse(t *testing.T) {
 	if snapshot.UserPreference != "clean premium layout" || snapshot.GenerationOverrides["title"].CandidateCount == nil {
 		t.Fatalf("missing immutable preference/override: %#v", snapshot)
 	}
-	normalized, hash, err := normalizeCreateJobInput(CreateJobInput{SKUID: fixture.SKU.ID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title"}, SelectedAssetIDs: []uint{}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-idempotency-0001", UserPreference: "  clean premium layout  ", GenerationOverrides: map[string]GenerationOverride{"title": {CandidateCount: intPointer(3)}}})
+	normalized, hash, err := normalizeCreateJobInput(CreateJobInput{SKUID: fixture.SKU.PublicID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title"}, SelectedAssetIDs: []string{}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-idempotency-0001", UserPreference: "  clean premium layout  ", GenerationOverrides: map[string]GenerationOverride{"title": {CandidateCount: intPointer(3)}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +301,7 @@ func TestCreateJobIsIdempotentAuditedAndRejectsKeyReuse(t *testing.T) {
 func TestCreateJobRejectsInvalidRuntimeConfiguration(t *testing.T) {
 	db, fixture := seedAIJobFixture(t)
 	service := NewJobService(db)
-	base := CreateJobInput{SKUID: fixture.SKU.ID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title"}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-runtime-invalid"}
+	base := CreateJobInput{SKUID: fixture.SKU.PublicID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title"}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-runtime-invalid"}
 	base.IdempotencyKey = ""
 	if _, err := service.Create(t.Context(), base); !errors.Is(err, ErrIdempotencyKeyInvalid) {
 		t.Fatalf("idempotency key error = %v", err)
@@ -331,7 +334,7 @@ func TestCreateJobRejectsInvalidRuntimeConfiguration(t *testing.T) {
 	base.IdempotencyKey = "job-runtime-malformed"
 	base.GenerationOverrides = nil
 	base.SelectedSlotKeys = []string{"hero"}
-	base.SelectedAssetIDs = []uint{fixture.ApprovedAsset.ID}
+	base.SelectedAssetIDs = []string{fixture.ApprovedAsset.PublicID}
 	if _, err := service.Create(t.Context(), base); !errors.Is(err, ErrPublishedTemplateConfigInvalid) {
 		t.Fatalf("malformed config error = %v", err)
 	}
@@ -339,7 +342,7 @@ func TestCreateJobRejectsInvalidRuntimeConfiguration(t *testing.T) {
 
 func TestCreateJobRequiresEverySelectedSlotToAllowUserPreference(t *testing.T) {
 	db, fixture := seedAIJobFixture(t)
-	_, err := NewJobService(db).Create(t.Context(), CreateJobInput{SKUID: fixture.SKU.ID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title", "seo"}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-mixed-preference", UserPreference: "minimal premium"})
+	_, err := NewJobService(db).Create(t.Context(), CreateJobInput{SKUID: fixture.SKU.PublicID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title", "seo"}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-mixed-preference", UserPreference: "minimal premium"})
 	if !errors.Is(err, ErrUserPreferenceNotAllowed) {
 		t.Fatalf("mixed-slot preference error = %v", err)
 	}
@@ -351,7 +354,7 @@ func TestCreateJobTreatsLegacyNonBooleanPreferencePermissionAsBrokenConfig(t *te
 	if update.Error != nil || update.RowsAffected != 1 {
 		t.Fatal(update.Error)
 	}
-	_, err := NewJobService(db).Create(t.Context(), CreateJobInput{SKUID: fixture.SKU.ID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title"}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-broken-preference", UserPreference: "minimal"})
+	_, err := NewJobService(db).Create(t.Context(), CreateJobInput{SKUID: fixture.SKU.PublicID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title"}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-broken-preference", UserPreference: "minimal"})
 	if !errors.Is(err, ErrPublishedTemplateConfigInvalid) {
 		t.Fatalf("legacy permission error = %v", err)
 	}
@@ -360,7 +363,7 @@ func TestCreateJobTreatsLegacyNonBooleanPreferencePermissionAsBrokenConfig(t *te
 func TestCreateJobCanonicalizesTemplateUUIDForIdempotency(t *testing.T) {
 	db, fixture := seedAIJobFixture(t)
 	service := NewJobService(db)
-	input := CreateJobInput{SKUID: fixture.SKU.ID, TemplateVersionPublicID: strings.ToUpper(fixture.PublishedVersion.PublicID), SelectedSlotKeys: []string{"title"}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-uuid-canonical"}
+	input := CreateJobInput{SKUID: strings.ToUpper(fixture.SKU.PublicID), TemplateVersionPublicID: strings.ToUpper(fixture.PublishedVersion.PublicID), SelectedSlotKeys: []string{"title"}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-uuid-canonical"}
 	first, err := service.Create(t.Context(), input)
 	if err != nil {
 		t.Fatal(err)
@@ -392,7 +395,7 @@ func TestCreateJobDefensivelyBoundsLegacyAllowedOverrideValues(t *testing.T) {
 			if update.Error != nil || update.RowsAffected != 1 {
 				t.Fatal(update.Error)
 			}
-			_, err := NewJobService(db).Create(t.Context(), CreateJobInput{SKUID: fixture.SKU.ID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title"}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-bound-" + tc.name, GenerationOverrides: map[string]GenerationOverride{"title": tc.override}})
+			_, err := NewJobService(db).Create(t.Context(), CreateJobInput{SKUID: fixture.SKU.PublicID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title"}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-bound-" + tc.name, GenerationOverrides: map[string]GenerationOverride{"title": tc.override}})
 			if !errors.Is(err, ErrPublishedTemplateConfigInvalid) && !errors.Is(err, ErrGenerationOverrideInvalid) {
 				t.Fatalf("legacy boundary error = %v", err)
 			}
@@ -427,7 +430,7 @@ func TestCreateJobSelectsMostRecentlyPublishedCategorySOPAcrossLogicalSOPs(t *te
 	if err := db.Create(&view).Error; err != nil {
 		t.Fatal(err)
 	}
-	job, err := NewJobService(db).Create(t.Context(), CreateJobInput{SKUID: fixture.SKU.ID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title"}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-latest-sop"})
+	job, err := NewJobService(db).Create(t.Context(), CreateJobInput{SKUID: fixture.SKU.PublicID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title"}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-latest-sop"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -458,7 +461,7 @@ func TestCreateJobRequestsUpdateLocksForEligibilityRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Callback().Query().Remove(name) })
-	_, err := NewJobService(db).Create(t.Context(), CreateJobInput{SKUID: fixture.SKU.ID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"hero"}, SelectedAssetIDs: []uint{fixture.ApprovedAsset.ID}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-locking-test"})
+	_, err := NewJobService(db).Create(t.Context(), CreateJobInput{SKUID: fixture.SKU.PublicID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"hero"}, SelectedAssetIDs: []string{fixture.ApprovedAsset.PublicID}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-locking-test"})
 	if err != nil {
 		t.Fatal(err)
 	}

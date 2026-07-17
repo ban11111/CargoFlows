@@ -31,10 +31,10 @@ func textPromptFixture(kind models.AIContentSlotKind) (ProductSnapshotV1, SlotFa
 	snapshot := ProductSnapshotV1{
 		Schema: ProductSnapshotSchemaV1, Locale: "zh-CN", TargetPlatform: "lazada",
 		Product:        ProductFacts{Name: "透明手机壳", Brand: "CargoFlow", Description: "轻薄透明保护壳", Category: CategoryFacts{NameZH: "手机壳", NameEN: "Phone cases"}},
-		SKU:            SKUFacts{Code: "CASE-17-PRO", Color: "透明", Size: "iPhone 17 Pro", PlatformTitle: "透明保护壳", SellingPoints: "轻薄;防刮", Tags: []string{"透明", "轻薄"}},
+		SKU:            SKUFacts{PublicID: "99999999-9999-4999-8999-999999999999", Code: "CASE-17-PRO", Color: "透明", Size: "iPhone 17 Pro", PlatformTitle: "透明保护壳", SellingPoints: "轻薄;防刮", Tags: []string{"透明", "轻薄"}},
 		SOP:            SOPFacts{PublicID: "11111111-1111-4111-8111-111111111111", VersionPublicID: "22222222-2222-4222-8222-222222222222", VersionNumber: 2, SchemaVersion: "1.0", Name: LocalizedNameFacts{ZH: "手机壳 SOP", EN: "Phone case SOP"}, Description: LocalizedNameFacts{ZH: "标准拍摄", EN: "Standard capture"}, CoordinateSystem: "pcs_object_v1", Views: []SOPViewFacts{{PublicID: "44444444-4444-4444-8444-444444444444", Sequence: 1, Role: models.SOPViewReferenceFront, ViewKind: models.SOPViewStandard, PresetKey: "reference_front", Name: LocalizedNameFacts{ZH: "正面", EN: "Front"}, Instruction: LocalizedNameFacts{ZH: "正面拍摄", EN: "Front capture"}, Required: true, CameraPositionDirection: VectorFacts{Z: 1}, ImageUpDirection: VectorFacts{X: 1}, Composition: models.Composition{FrameOccupancy: .85, AspectRatio: "1:1", AllowRotationCorrection: true}}}},
 		Template:       TemplateFacts{TemplatePublicID: "55555555-5555-4555-8555-555555555555", VersionPublicID: "66666666-6666-4666-8666-666666666666", VersionNumber: 3, PromptCompilerVersion: "v1", PlatformPrompt: "Create Lazada content for {{product.brand}} on {{target_platform}}.", SelectedSlots: []SlotFacts{slot}},
-		SelectedAssets: []AssetFacts{{ID: 99, ObjectKey: "must-not-leak/original.jpg", OriginalURL: "https://assets.example.test/original.jpg", ThumbnailURL: "https://assets.example.test/thumb.jpg"}},
+		SelectedAssets: []AssetFacts{{PublicID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}},
 		UserPreference: "简洁、自然，不要夸张", GenerationOverrides: map[string]GenerationOverride{},
 	}
 	if kind == models.AIContentSlotTitle {

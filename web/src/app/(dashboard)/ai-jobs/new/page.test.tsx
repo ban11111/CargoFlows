@@ -10,6 +10,9 @@ import NewAIJobPage from "./page";
 const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 
+const skuPublicID = "11111111-1111-4111-8111-111111111111";
+const assetPublicID = "22222222-2222-4222-8222-222222222222";
+
 function Providers({ children }: { children: ReactNode }) {
   return <LanguageProvider><LanguageToggle /><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}>{children}</QueryClientProvider></LanguageProvider>;
 }
@@ -28,9 +31,9 @@ function installWizardFetch(assetViewKey = "reference_front") {
   const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const path = String(input);
     requests.push({ path, init, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-    if (path.endsWith("/skus")) return new Response(JSON.stringify({ data: [{ id: 11, code: "CF-CASE-CLR-IP17", status: "active", product: { name: "Clear Case" } }] }), { status: 200 });
+    if (path.endsWith("/skus")) return new Response(JSON.stringify({ data: [{ public_id: skuPublicID, code: "CF-CASE-CLR-IP17", status: "active", product: { name: "Clear Case" } }] }), { status: 200 });
     if (path.endsWith("/ai-content-templates")) return new Response(JSON.stringify({ data: [template] }), { status: 200 });
-    if (path.includes("/assets/review/hierarchy")) return new Response(JSON.stringify({ data: [{ id: 1, name: "配件", name_en: "Accessories", is_system: false, skus: [{ id: 11, code: "CF-CASE-CLR-IP17", product_name: "Clear Case", tags: [], assets: [{ id: 31, original_url: "https://signed.invalid/private", thumbnail_url: "/thumb.jpg", review_status: "approved", captured_at: "2026-07-17T00:00:00Z", sop_view_key: assetViewKey, sop_view_name: { "zh-CN": "正面", en: "Front" }, photo_session_code: "PS-1" }] }] }] }), { status: 200 });
+    if (path.includes("/assets/review/hierarchy")) return new Response(JSON.stringify({ data: [{ id: 1, name: "配件", name_en: "Accessories", is_system: false, skus: [{ public_id: skuPublicID, code: "CF-CASE-CLR-IP17", product_name: "Clear Case", tags: [], assets: [{ public_id: assetPublicID, media_url: `/api/v1/assets/${assetPublicID}/media`, review_status: "approved", captured_at: "2026-07-17T00:00:00Z", sop_view_key: assetViewKey, sop_view_name: { "zh-CN": "正面", en: "Front" }, photo_session_code: "PS-1" }] }] }] }), { status: 200 });
     if (path.endsWith("/ai-jobs") && init?.method === "POST") return new Response(JSON.stringify({ public_id: "job-created" }), { status: 201 });
     throw new Error(`Unexpected request: ${path}`);
   });
@@ -44,7 +47,7 @@ describe("NewAIJobPage", () => {
     const { requests } = installWizardFetch();
     render(<NewAIJobPage />, { wrapper: Providers });
 
-    fireEvent.change(await screen.findByLabelText("选择 SKU"), { target: { value: "11" } });
+    fireEvent.change(await screen.findByLabelText("选择 SKU"), { target: { value: skuPublicID } });
     fireEvent.change(screen.getByLabelText("选择模板版本"), { target: { value: "version-1" } });
     fireEvent.click(screen.getByRole("button", { name: "下一步" }));
     fireEvent.click(screen.getByRole("checkbox", { name: /白底主图/ }));
@@ -61,14 +64,14 @@ describe("NewAIJobPage", () => {
 
     await waitFor(() => expect(push).toHaveBeenCalledWith("/ai-jobs/job-created"));
     const post = requests.find((request) => request.path.endsWith("/ai-jobs") && request.init?.method === "POST");
-    expect(post?.body).toMatchObject({ sku_id: 11, template_version_id: "version-1", selected_slot_keys: ["hero"], selected_asset_ids: [31], locale: "zh-CN", user_preference: "保留透明材质", generation_overrides: { hero: { candidate_count: 1, size: "1024x1024", quality: "high", style: "简洁" } } });
+    expect(post?.body).toMatchObject({ sku_id: skuPublicID, template_version_id: "version-1", selected_slot_keys: ["hero"], selected_asset_ids: [assetPublicID], locale: "zh-CN", user_preference: "保留透明材质", generation_overrides: { hero: { candidate_count: 1, size: "1024x1024", quality: "high", style: "简洁" } } });
     expect(new Headers(post?.init?.headers).get("Idempotency-Key")).toMatch(/^ai-job-/);
   });
 
   it("blocks advancing until at least one optional slot is selected", async () => {
     installWizardFetch();
     render(<NewAIJobPage />, { wrapper: Providers });
-    fireEvent.change(await screen.findByLabelText("选择 SKU"), { target: { value: "11" } });
+    fireEvent.change(await screen.findByLabelText("选择 SKU"), { target: { value: skuPublicID } });
     fireEvent.change(screen.getByLabelText("选择模板版本"), { target: { value: "version-1" } });
     fireEvent.click(screen.getByRole("button", { name: "下一步" }));
     fireEvent.click(screen.getByRole("button", { name: "下一步" }));
@@ -79,7 +82,7 @@ describe("NewAIJobPage", () => {
   it("blocks image slots until selected assets satisfy their required SOP views", async () => {
     installWizardFetch("back");
     render(<NewAIJobPage />, { wrapper: Providers });
-    fireEvent.change(await screen.findByLabelText("选择 SKU"), { target: { value: "11" } });
+    fireEvent.change(await screen.findByLabelText("选择 SKU"), { target: { value: skuPublicID } });
     fireEvent.change(screen.getByLabelText("选择模板版本"), { target: { value: "version-1" } });
     fireEvent.click(screen.getByRole("button", { name: "下一步" }));
     fireEvent.click(screen.getByRole("checkbox", { name: /白底主图/ }));
@@ -93,7 +96,7 @@ describe("NewAIJobPage", () => {
   it("shows extra preference only when every selected slot permits it", async () => {
     installWizardFetch();
     render(<NewAIJobPage />, { wrapper: Providers });
-    fireEvent.change(await screen.findByLabelText("选择 SKU"), { target: { value: "11" } });
+    fireEvent.change(await screen.findByLabelText("选择 SKU"), { target: { value: skuPublicID } });
     fireEvent.change(screen.getByLabelText("选择模板版本"), { target: { value: "version-1" } });
     fireEvent.click(screen.getByRole("button", { name: "下一步" }));
     fireEvent.click(screen.getByRole("checkbox", { name: /白底主图/ }));

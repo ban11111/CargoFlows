@@ -1,11 +1,25 @@
 package models
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+func ensurePublicID(value *string) error {
+	if *value == "" {
+		*value = uuid.NewString()
+		return nil
+	}
+	parsed, err := uuid.Parse(*value)
+	if err != nil || parsed == uuid.Nil {
+		return fmt.Errorf("public ID must be a UUID")
+	}
+	*value = parsed.String()
+	return nil
+}
 
 type ModelFamilyStatus string
 
@@ -63,8 +77,8 @@ type ModelFamily struct {
 }
 
 func (family *ModelFamily) BeforeCreate(*gorm.DB) error {
-	if family.PublicID == "" {
-		family.PublicID = uuid.NewString()
+	if err := ensurePublicID(&family.PublicID); err != nil {
+		return err
 	}
 	if len(family.CommonStructureJSON) == 0 {
 		family.CommonStructureJSON = []byte(`{}`)
@@ -91,8 +105,8 @@ type ModelFamilyMember struct {
 }
 
 func (member *ModelFamilyMember) BeforeCreate(*gorm.DB) error {
-	if member.PublicID == "" {
-		member.PublicID = uuid.NewString()
+	if err := ensurePublicID(&member.PublicID); err != nil {
+		return err
 	}
 	if member.ActiveGuard == nil && member.RemovedAt == nil {
 		active := "active"
@@ -113,10 +127,7 @@ type VariantIdentityManifest struct {
 }
 
 func (manifest *VariantIdentityManifest) BeforeCreate(*gorm.DB) error {
-	if manifest.PublicID == "" {
-		manifest.PublicID = uuid.NewString()
-	}
-	return nil
+	return ensurePublicID(&manifest.PublicID)
 }
 
 type VariantIdentityManifestVersion struct {
@@ -135,8 +146,8 @@ type VariantIdentityManifestVersion struct {
 }
 
 func (version *VariantIdentityManifestVersion) BeforeCreate(*gorm.DB) error {
-	if version.PublicID == "" {
-		version.PublicID = uuid.NewString()
+	if err := ensurePublicID(&version.PublicID); err != nil {
+		return err
 	}
 	if len(version.IdentityJSON) == 0 {
 		version.IdentityJSON = []byte(`{}`)
@@ -169,8 +180,8 @@ type VariantDifferenceRegion struct {
 }
 
 func (region *VariantDifferenceRegion) BeforeCreate(*gorm.DB) error {
-	if region.PublicID == "" {
-		region.PublicID = uuid.NewString()
+	if err := ensurePublicID(&region.PublicID); err != nil {
+		return err
 	}
 	if len(region.ShapeJSON) == 0 {
 		region.ShapeJSON = []byte(`{}`)
