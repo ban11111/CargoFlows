@@ -22,6 +22,10 @@ type createAIJobRequest struct {
 	GenerationOverrides     map[string]ai.GenerationOverride `json:"generation_overrides"`
 }
 
+type editAITextResultRequest struct {
+	Structured json.RawMessage `json:"structured"`
+}
+
 type openAISettingDTO struct {
 	Provider                  string     `json:"provider"`
 	Status                    string     `json:"status"`

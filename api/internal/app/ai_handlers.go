@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -107,6 +109,104 @@ func (s *Server) getAIJob(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, value)
+}
+
+func (s *Server) listAITextResults(c *gin.Context) {
+	if !requireAIUUIDParam(c, "job_id") {
+		return
+	}
+	values, err := s.ai.TextResults.List(c.Request.Context(), c.Param("job_id"))
+	if err != nil {
+		respondAIError(c, err)
+		return
+	}
+	if values == nil {
+		values = []ai.TextResultDocument{}
+	}
+	c.JSON(http.StatusOK, gin.H{"data": values})
+}
+
+func (s *Server) editAITextResult(c *gin.Context) {
+	if !requireAITextResultParams(c) {
+		return
+	}
+	var req editAITextResultRequest
+	if err := decodeJSONStrict(c, &req); err != nil || len(req.Structured) == 0 || !json.Valid(req.Structured) {
+		if err == nil {
+			err = errors.New("structured must be a JSON object")
+		}
+		respondAIBadRequest(c, err)
+		return
+	}
+	value, err := s.ai.TextResults.Edit(c.Request.Context(), c.Param("job_id"), c.Param("item_id"), c.Param("result_id"), currentUser(c).ID, req.Structured)
+	if err != nil {
+		respondAIError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, value)
+}
+
+func (s *Server) approveAITextResult(c *gin.Context) {
+	s.mutateAITextResult(c, s.ai.TextResults.Approve)
+}
+
+func (s *Server) rejectAITextResult(c *gin.Context) {
+	s.mutateAITextResult(c, s.ai.TextResults.Reject)
+}
+
+func (s *Server) mutateAITextResult(c *gin.Context, mutate func(context.Context, string, string, string, uint) (ai.TextResultDocument, error)) {
+	if !requireAITextResultParams(c) {
+		return
+	}
+	value, err := mutate(c.Request.Context(), c.Param("job_id"), c.Param("item_id"), c.Param("result_id"), currentUser(c).ID)
+	if err != nil {
+		respondAIError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, value)
+}
+
+func (s *Server) previewAITextResultApplication(c *gin.Context) {
+	if !requireAITextResultParams(c) {
+		return
+	}
+	value, err := s.ai.TextResults.Preview(c.Request.Context(), c.Param("job_id"), c.Param("item_id"), c.Param("result_id"))
+	if err != nil {
+		respondAIError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, value)
+}
+
+func (s *Server) applyAITextResult(c *gin.Context) {
+	if !requireAITextResultParams(c) {
+		return
+	}
+	value, err := s.ai.TextResults.Apply(c.Request.Context(), c.Param("job_id"), c.Param("item_id"), c.Param("result_id"), currentUser(c).ID)
+	if err != nil {
+		respondAIError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, value)
+}
+
+func (s *Server) getSKUPlatformContent(c *gin.Context) {
+	skuID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	platform, locale := strings.TrimSpace(c.Query("platform")), strings.TrimSpace(c.Query("locale"))
+	if err != nil || skuID == 0 || platform == "" || locale == "" {
+		respondAIBadRequest(c, errors.New("sku_id, platform, and locale are required"))
+		return
+	}
+	value, err := s.ai.TextResults.GetPlatformContent(c.Request.Context(), uint(skuID), platform, locale)
+	if err != nil {
+		respondAIError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, value)
+}
+
+func requireAITextResultParams(c *gin.Context) bool {
+	return requireAIUUIDParam(c, "job_id") && requireAIUUIDParam(c, "item_id") && requireAIUUIDParam(c, "result_id")
 }
 
 func (s *Server) listAIContentTemplates(c *gin.Context) {
@@ -271,6 +371,12 @@ func respondAIError(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
 	case errors.Is(err, ai.ErrJobNotFound), errors.Is(err, ai.ErrSKUNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
+	case errors.Is(err, ai.ErrTextResultNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
+	case errors.Is(err, ai.ErrTextResultInvalid):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "text_result_invalid", "message": err.Error()})
+	case errors.Is(err, ai.ErrTextResultLifecycleConflict), errors.Is(err, ai.ErrTextResultApprovalRequired), errors.Is(err, ai.ErrTextResultNotEffective):
+		c.JSON(http.StatusConflict, gin.H{"code": "lifecycle_conflict", "message": err.Error()})
 	case errors.Is(err, ai.ErrSlotSelectionInvalid):
 		respondAIBadRequest(c, err)
 	case errors.Is(err, ai.ErrIdempotencyKeyInvalid), errors.Is(err, ai.ErrLocaleInvalid), errors.Is(err, ai.ErrUserPreferenceInvalid), errors.Is(err, ai.ErrUserPreferenceNotAllowed), errors.Is(err, ai.ErrGenerationOverrideInvalid), errors.Is(err, ai.ErrTemplateVersionIDInvalid):

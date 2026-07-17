@@ -233,13 +233,14 @@ type AIExecution struct {
 type AIAuditEvent struct {
 	ID             uint      `gorm:"primaryKey" json:"-"`
 	PublicID       string    `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
-	EventType      string    `gorm:"size:80;index;uniqueIndex:idx_ai_audit_execution_event,priority:2;not null" json:"event_type"`
+	EventType      string    `gorm:"size:80;index;not null" json:"event_type"`
 	EntityType     string    `gorm:"size:80;index;not null" json:"entity_type"`
 	EntityPublicID string    `gorm:"size:36;index;not null" json:"entity_public_id"`
+	IdempotencyKey *string   `gorm:"size:160;uniqueIndex" json:"-"`
 	ActorID        *uint     `gorm:"index" json:"-"`
 	AIJobID        *uint     `gorm:"index" json:"-"`
 	AIJobItemID    *uint     `gorm:"index" json:"-"`
-	AIExecutionID  *uint     `gorm:"index;uniqueIndex:idx_ai_audit_execution_event,priority:1" json:"-"`
+	AIExecutionID  *uint     `gorm:"index" json:"-"`
 	MetadataJSON   []byte    `gorm:"type:json;not null" json:"metadata"`
 	CreatedAt      time.Time `gorm:"index" json:"created_at"`
 }
@@ -307,7 +308,7 @@ func (result *AITextResult) BeforeCreate(*gorm.DB) error {
 type SKUPlatformContent struct {
 	ID                   uint      `gorm:"primaryKey" json:"-"`
 	PublicID             string    `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
-	SKUID                uint      `gorm:"uniqueIndex:idx_sku_platform_content,priority:1;not null" json:"-"`
+	SKUID                uint      `gorm:"column:sku_id;uniqueIndex:idx_sku_platform_content,priority:1;not null" json:"-"`
 	Platform             string    `gorm:"size:80;uniqueIndex:idx_sku_platform_content,priority:2;not null" json:"platform"`
 	Locale               string    `gorm:"size:32;uniqueIndex:idx_sku_platform_content,priority:3;not null" json:"locale"`
 	Title                string    `gorm:"size:500;not null" json:"title"`

@@ -471,6 +471,92 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
+  /ai-jobs/{job_id}/text-results:
+    parameters: [ { $ref: '#/components/parameters/AIJobID' } ]
+    get:
+      operationId: listAITextResults
+      responses:
+        '200': { description: Safe AI text candidates, content: { application/json: { schema: { type: object, additionalProperties: false, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/AITextResult' } } } } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /ai-jobs/{job_id}/items/{item_id}/text-results/{result_id}:
+    parameters: [ { $ref: '#/components/parameters/AIJobID' }, { $ref: '#/components/parameters/AIJobItemID' }, { $ref: '#/components/parameters/AITextResultID' } ]
+    patch:
+      operationId: editAITextResult
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/EditAITextResultRequest' } } } }
+      responses:
+        '200': { description: Edited candidate, content: { application/json: { schema: { $ref: '#/components/schemas/AITextResult' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { description: Candidate validation failed, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /ai-jobs/{job_id}/items/{item_id}/text-results/{result_id}/approve:
+    parameters: [ { $ref: '#/components/parameters/AIJobID' }, { $ref: '#/components/parameters/AIJobItemID' }, { $ref: '#/components/parameters/AITextResultID' } ]
+    post:
+      operationId: approveAITextResult
+      responses:
+        '200': { description: Approved candidate, content: { application/json: { schema: { $ref: '#/components/schemas/AITextResult' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { description: Candidate validation failed, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /ai-jobs/{job_id}/items/{item_id}/text-results/{result_id}/reject:
+    parameters: [ { $ref: '#/components/parameters/AIJobID' }, { $ref: '#/components/parameters/AIJobItemID' }, { $ref: '#/components/parameters/AITextResultID' } ]
+    post:
+      operationId: rejectAITextResult
+      responses:
+        '200': { description: Rejected candidate, content: { application/json: { schema: { $ref: '#/components/schemas/AITextResult' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /ai-jobs/{job_id}/items/{item_id}/text-results/{result_id}/application-preview:
+    parameters: [ { $ref: '#/components/parameters/AIJobID' }, { $ref: '#/components/parameters/AIJobItemID' }, { $ref: '#/components/parameters/AITextResultID' } ]
+    get:
+      operationId: previewAITextResultApplication
+      responses:
+        '200': { description: Explicit before/after application preview, content: { application/json: { schema: { $ref: '#/components/schemas/AITextApplicationPreview' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { description: Candidate validation failed, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /ai-jobs/{job_id}/items/{item_id}/text-results/{result_id}/apply:
+    parameters: [ { $ref: '#/components/parameters/AIJobID' }, { $ref: '#/components/parameters/AIJobItemID' }, { $ref: '#/components/parameters/AITextResultID' } ]
+    post:
+      operationId: applyAITextResult
+      responses:
+        '200': { description: Explicitly applied candidate, content: { application/json: { schema: { $ref: '#/components/schemas/AITextApplicationResult' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { description: Candidate validation failed, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /skus/{id}/platform-content:
+    parameters: [ { in: path, name: id, required: true, schema: { type: integer, minimum: 1 } }, { in: query, name: platform, required: true, schema: { type: string, minLength: 1, maxLength: 80 } }, { in: query, name: locale, required: true, schema: { type: string, minLength: 1, maxLength: 32 } } ]
+    get:
+      operationId: getSKUPlatformContent
+      responses:
+        '200': { description: Current formal platform content and immutable history, content: { application/json: { schema: { $ref: '#/components/schemas/PlatformContentHistory' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
@@ -482,6 +568,8 @@ components:
     AIContentTemplateID: { in: path, name: template_id, required: true, schema: { type: string, format: uuid } }
     AIContentTemplateVersionID: { in: path, name: version_id, required: true, schema: { type: string, format: uuid } }
     AIJobID: { in: path, name: job_id, required: true, schema: { type: string, format: uuid } }
+    AIJobItemID: { in: path, name: item_id, required: true, schema: { type: string, format: uuid } }
+    AITextResultID: { in: path, name: result_id, required: true, schema: { type: string, format: uuid } }
     IdempotencyKey: { in: header, name: Idempotency-Key, required: true, description: "Actor-scoped create key. Reusing it with the same normalized request returns the original job; different input returns 409.", schema: { type: string, minLength: 8, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$' } }
     SOPRevision:
       in: header
@@ -663,6 +751,78 @@ components:
         completed_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    AITextResult:
+      type: object
+      additionalProperties: false
+      required: [public_id, job_item_id, candidate_index, kind, raw_structured, validation, state, edited_at, approved_at, rejected_at, applied_at, effective, created_at, updated_at]
+      properties:
+        public_id: { type: string, format: uuid }
+        job_item_id: { type: string, format: uuid }
+        candidate_index: { type: integer, minimum: 1 }
+        kind: { type: string, enum: [title, seo_description] }
+        raw_structured: { type: object, additionalProperties: true }
+        edited_structured: { type: object, additionalProperties: true }
+        validation: { type: array, items: {} }
+        state: { type: string, enum: [candidate, approved, rejected] }
+        edited_at: { type: string, format: date-time, nullable: true }
+        approved_at: { type: string, format: date-time, nullable: true }
+        rejected_at: { type: string, format: date-time, nullable: true }
+        applied_at: { type: string, format: date-time, nullable: true }
+        effective: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    EditAITextResultRequest:
+      type: object
+      additionalProperties: false
+      required: [structured]
+      properties: { structured: { type: object, additionalProperties: true } }
+    PlatformContent:
+      type: object
+      additionalProperties: false
+      required: [public_id, sku_id, platform, locale, title, short_description, long_description, selling_points, search_keywords, revision, updated_at]
+      properties:
+        public_id: { type: string, format: uuid }
+        sku_id: { type: integer, minimum: 1 }
+        platform: { type: string }
+        locale: { type: string }
+        title: { type: string }
+        short_description: { type: string }
+        long_description: { type: string }
+        selling_points: { type: array, items: { type: string } }
+        search_keywords: { type: array, items: { type: string } }
+        revision: { type: integer, minimum: 1 }
+        updated_at: { type: string, format: date-time }
+    PlatformContentRevision:
+      type: object
+      additionalProperties: false
+      required: [public_id, revision, before, after, created_at]
+      properties:
+        public_id: { type: string, format: uuid }
+        revision: { type: integer, minimum: 1 }
+        before: { type: object, additionalProperties: true }
+        after: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+    PlatformContentHistory:
+      type: object
+      additionalProperties: false
+      required: [content, revisions]
+      properties:
+        content: { allOf: [ { $ref: '#/components/schemas/PlatformContent' } ], nullable: true }
+        revisions: { type: array, items: { $ref: '#/components/schemas/PlatformContentRevision' } }
+    AITextApplicationPreview:
+      type: object
+      additionalProperties: false
+      required: [before, after]
+      properties:
+        before: { type: object, additionalProperties: true }
+        after: { type: object, additionalProperties: true }
+    AITextApplicationResult:
+      type: object
+      additionalProperties: false
+      required: [content, replayed]
+      properties:
+        content: { $ref: '#/components/schemas/PlatformContent' }
+        replayed: { type: boolean }
     AIJobSlotSnapshot:
       type: object
       additionalProperties: false

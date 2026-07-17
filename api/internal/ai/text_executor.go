@@ -421,7 +421,8 @@ func (executor *TextExecutor) upsertTerminalAudit(tx *gorm.DB, execution models.
 		return err
 	}
 	jobID, itemID := item.AIJobID, item.ID
-	audit := models.AIAuditEvent{PublicID: uuid.NewString(), EventType: eventType, EntityType: "ai_execution", EntityPublicID: execution.PublicID, AIJobID: &jobID, AIJobItemID: &itemID, AIExecutionID: &execution.ID, MetadataJSON: metadata}
+	idempotencyKey := execution.PublicID + ":" + eventType
+	audit := models.AIAuditEvent{PublicID: uuid.NewString(), EventType: eventType, EntityType: "ai_execution", EntityPublicID: execution.PublicID, IdempotencyKey: &idempotencyKey, AIJobID: &jobID, AIJobItemID: &itemID, AIExecutionID: &execution.ID, MetadataJSON: metadata}
 	var existing models.AIAuditEvent
 	err = tx.Where("ai_execution_id = ? AND event_type = ?", execution.ID, eventType).First(&existing).Error
 	if err == nil {

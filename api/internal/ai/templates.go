@@ -401,6 +401,11 @@ func ValidateTemplateVersion(version models.AIContentTemplateVersion, slots []mo
 		if slot.Kind == models.AIContentSlotImage {
 			issues = append(issues, validateImageSize(generation, path+".generation_config.size")...)
 			issues = append(issues, validateRequiredViews(constraints, path+".constraints.required_views")...)
+		} else if constraints != nil {
+			rawConstraints, _ := json.Marshal(constraints)
+			if _, err := parseTextConstraintRules(rawConstraints, slot.Kind); err != nil {
+				issues = appendIssue(issues, "text_constraints_invalid", path+".constraints", "Text constraints contain unsupported or invalid rules.")
+			}
 		}
 		for _, config := range []map[string]any{generation, layout} {
 			if config != nil {

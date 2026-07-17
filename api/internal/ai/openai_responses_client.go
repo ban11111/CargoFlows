@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"cargoflow/api/internal/models"
 )
 
 const maxResponsesBodyBytes = 4 << 20
@@ -239,17 +241,21 @@ func validateTextCandidates(outputJSON []byte, prompt CompiledTextPrompt) error 
 	if err != nil {
 		return ErrTextProviderInvalidResponse
 	}
+	rules, requiredValues, err := textPromptValidationRules(prompt)
+	if err != nil {
+		return ErrTextProviderInvalidResponse
+	}
 	for _, raw := range *envelope.Candidates {
 		switch prompt.SchemaName {
 		case "cargoflow_product_title":
 			var candidate titleTextCandidate
-			if strictJSONDecode(raw, &candidate) != nil || candidate.Title == nil || candidate.Keywords == nil || candidate.SourceFields == nil || !withinTextBounds(*candidate.Title, bounds["title"]) {
+			if strictJSONDecode(raw, &candidate) != nil || candidate.Title == nil || candidate.Keywords == nil || candidate.SourceFields == nil || !withinTextBounds(*candidate.Title, bounds["title"]) || !validateTitleCandidateRules(candidate, rules, requiredValues) {
 				return ErrTextProviderInvalidResponse
 			}
 		case "cargoflow_product_seo":
 			var candidate seoTextCandidate
 			if strictJSONDecode(raw, &candidate) != nil || candidate.ShortDescription == nil || candidate.SellingPoints == nil || candidate.LongDescription == nil || candidate.SearchKeywords == nil || candidate.SourceFields == nil ||
-				!withinTextBounds(*candidate.ShortDescription, bounds["short_description"]) || !withinTextBounds(*candidate.LongDescription, bounds["long_description"]) {
+				!withinTextBounds(*candidate.ShortDescription, bounds["short_description"]) || !withinTextBounds(*candidate.LongDescription, bounds["long_description"]) || !validateSEOCandidateRules(candidate, rules, requiredValues) {
 				return ErrTextProviderInvalidResponse
 			}
 		default:
@@ -257,6 +263,94 @@ func validateTextCandidates(outputJSON []byte, prompt CompiledTextPrompt) error 
 		}
 	}
 	return nil
+}
+
+func textPromptValidationRules(prompt CompiledTextPrompt) (textConstraintRules, map[string][]string, error) {
+	var input struct {
+		Product ProductFacts `json:"product"`
+		SKU     SKUFacts     `json:"sku"`
+		Slot    struct {
+			Constraints json.RawMessage `json:"constraints"`
+		} `json:"slot"`
+	}
+	if err := json.Unmarshal(prompt.InputJSON, &input); err != nil {
+		return textConstraintRules{}, nil, err
+	}
+	kind := models.AIContentSlotSEODescription
+	if prompt.SchemaName == "cargoflow_product_title" {
+		kind = models.AIContentSlotTitle
+	}
+	rules, err := parseTextConstraintRules(input.Slot.Constraints, kind)
+	return rules, requiredTextFieldValues(input.Product, input.SKU), err
+}
+
+func validateTitleCandidateRules(candidate titleTextCandidate, rules textConstraintRules, requiredValues map[string][]string) bool {
+	return validateTextRuleValues([]string{*candidate.Title}, *candidate.Keywords, rules, requiredValues)
+}
+
+func validateSEOCandidateRules(candidate seoTextCandidate, rules textConstraintRules, requiredValues map[string][]string) bool {
+	content := []string{*candidate.ShortDescription, *candidate.LongDescription}
+	content = append(content, (*candidate.SellingPoints)...)
+	return validateTextRuleValues(content, *candidate.SearchKeywords, rules, requiredValues)
+}
+
+func validateTextRuleValues(content, keywords []string, rules textConstraintRules, requiredValues map[string][]string) bool {
+	joined := strings.ToLower(strings.Join(append(append([]string{}, content...), keywords...), "\n"))
+	for _, term := range rules.ForbiddenTerms {
+		if strings.Contains(joined, strings.ToLower(strings.TrimSpace(term))) {
+			return false
+		}
+	}
+	for _, required := range rules.RequiredFields {
+		values := requiredValues[normalizeRequiredSourceField(required)]
+		matched := false
+		for _, value := range values {
+			if normalized := strings.ToLower(strings.TrimSpace(value)); normalized != "" && strings.Contains(joined, normalized) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	if rules.KeywordPolicy == "natural" {
+		seen := make(map[string]struct{}, len(keywords))
+		for _, keyword := range keywords {
+			normalized := strings.ToLower(strings.TrimSpace(keyword))
+			if normalized == "" || utf8.RuneCountInString(keyword) > 100 {
+				return false
+			}
+			if _, exists := seen[normalized]; exists {
+				return false
+			}
+			seen[normalized] = struct{}{}
+		}
+	}
+	return true
+}
+
+func requiredTextFieldValues(product ProductFacts, sku SKUFacts) map[string][]string {
+	return map[string][]string{
+		"product.name":     {product.Name},
+		"product.brand":    {product.Brand},
+		"product.category": {product.Category.NameZH, product.Category.NameEN},
+		"sku.code":         {sku.Code},
+		"sku.color":        {sku.Color},
+		"sku.size":         {sku.Size},
+	}
+}
+
+func normalizeRequiredSourceField(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "brand":
+		return "product.brand"
+	case "product_type":
+		return "product.category"
+	default:
+		return normalized
+	}
 }
 
 func strictJSONDecode(raw []byte, destination any) error {

@@ -514,6 +514,145 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ai-jobs/{job_id}/text-results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+            };
+            cookie?: never;
+        };
+        get: operations["listAITextResults"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-jobs/{job_id}/items/{item_id}/text-results/{result_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+                item_id: components["parameters"]["AIJobItemID"];
+                result_id: components["parameters"]["AITextResultID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["editAITextResult"];
+        trace?: never;
+    };
+    "/ai-jobs/{job_id}/items/{item_id}/text-results/{result_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+                item_id: components["parameters"]["AIJobItemID"];
+                result_id: components["parameters"]["AITextResultID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["approveAITextResult"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-jobs/{job_id}/items/{item_id}/text-results/{result_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+                item_id: components["parameters"]["AIJobItemID"];
+                result_id: components["parameters"]["AITextResultID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["rejectAITextResult"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-jobs/{job_id}/items/{item_id}/text-results/{result_id}/application-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+                item_id: components["parameters"]["AIJobItemID"];
+                result_id: components["parameters"]["AITextResultID"];
+            };
+            cookie?: never;
+        };
+        get: operations["previewAITextResultApplication"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-jobs/{job_id}/items/{item_id}/text-results/{result_id}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+                item_id: components["parameters"]["AIJobItemID"];
+                result_id: components["parameters"]["AITextResultID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["applyAITextResult"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skus/{id}/platform-content": {
+        parameters: {
+            query: {
+                platform: string;
+                locale: string;
+            };
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        get: operations["getSKUPlatformContent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -691,6 +830,86 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        AITextResult: {
+            /** Format: uuid */
+            public_id: string;
+            /** Format: uuid */
+            job_item_id: string;
+            candidate_index: number;
+            /** @enum {string} */
+            kind: "title" | "seo_description";
+            raw_structured: {
+                [key: string]: unknown;
+            };
+            edited_structured?: {
+                [key: string]: unknown;
+            };
+            validation: unknown[];
+            /** @enum {string} */
+            state: "candidate" | "approved" | "rejected";
+            /** Format: date-time */
+            edited_at: string | null;
+            /** Format: date-time */
+            approved_at: string | null;
+            /** Format: date-time */
+            rejected_at: string | null;
+            /** Format: date-time */
+            applied_at: string | null;
+            effective: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        EditAITextResultRequest: {
+            structured: {
+                [key: string]: unknown;
+            };
+        };
+        PlatformContent: {
+            /** Format: uuid */
+            public_id: string;
+            sku_id: number;
+            platform: string;
+            locale: string;
+            title: string;
+            short_description: string;
+            long_description: string;
+            selling_points: string[];
+            search_keywords: string[];
+            revision: number;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PlatformContentRevision: {
+            /** Format: uuid */
+            public_id: string;
+            revision: number;
+            before: {
+                [key: string]: unknown;
+            };
+            after: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            created_at: string;
+        };
+        PlatformContentHistory: {
+            content: components["schemas"]["PlatformContent"] | null;
+            revisions: components["schemas"]["PlatformContentRevision"][];
+        };
+        AITextApplicationPreview: {
+            before: {
+                [key: string]: unknown;
+            };
+            after: {
+                [key: string]: unknown;
+            };
+        };
+        AITextApplicationResult: {
+            content: components["schemas"]["PlatformContent"];
+            replayed: boolean;
         };
         AIJobSlotSnapshot: {
             /** Format: uuid */
@@ -1186,6 +1405,8 @@ export interface components {
         AIContentTemplateID: string;
         AIContentTemplateVersionID: string;
         AIJobID: string;
+        AIJobItemID: string;
+        AITextResultID: string;
         /** @description Actor-scoped create key. Reusing it with the same normalized request returns the original job; different input returns 409. */
         IdempotencyKey: string;
         /** @description Exact updated_at value from the latest SOPVersion response; stale revisions return 409. */
@@ -2333,6 +2554,254 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listAITextResults: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Safe AI text candidates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AITextResult"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    editAITextResult: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+                item_id: components["parameters"]["AIJobItemID"];
+                result_id: components["parameters"]["AITextResultID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EditAITextResultRequest"];
+            };
+        };
+        responses: {
+            /** @description Edited candidate */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AITextResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            /** @description Candidate validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    approveAITextResult: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+                item_id: components["parameters"]["AIJobItemID"];
+                result_id: components["parameters"]["AITextResultID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Approved candidate */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AITextResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            /** @description Candidate validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    rejectAITextResult: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+                item_id: components["parameters"]["AIJobItemID"];
+                result_id: components["parameters"]["AITextResultID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Rejected candidate */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AITextResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    previewAITextResultApplication: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+                item_id: components["parameters"]["AIJobItemID"];
+                result_id: components["parameters"]["AITextResultID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Explicit before/after application preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AITextApplicationPreview"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            /** @description Candidate validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    applyAITextResult: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+                item_id: components["parameters"]["AIJobItemID"];
+                result_id: components["parameters"]["AITextResultID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Explicitly applied candidate */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AITextApplicationResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            /** @description Candidate validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    getSKUPlatformContent: {
+        parameters: {
+            query: {
+                platform: string;
+                locale: string;
+            };
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current formal platform content and immutable history */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformContentHistory"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             500: components["responses"]["InternalServerError"];
         };
     };

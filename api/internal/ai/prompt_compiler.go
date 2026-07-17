@@ -121,6 +121,9 @@ func CompileTextPrompt(snapshot ProductSnapshotV1, slot SlotFacts) (CompiledText
 	if err != nil {
 		return CompiledTextPrompt{}, err
 	}
+	if containsForbiddenTextPromptData(constraints) {
+		return CompiledTextPrompt{}, fmt.Errorf("%w: secret-looking content", ErrTextPromptTemplateInvalid)
+	}
 	constraintRules, err := parseTextConstraintRules(constraints, slot.Kind)
 	if err != nil {
 		return CompiledTextPrompt{}, err
@@ -235,16 +238,25 @@ var templateVariableInputPaths = map[string]string{
 }
 
 type textConstraintRules struct {
-	MinLength *int
-	MaxLength *int
+	MinLength      *int
+	MaxLength      *int
+	RequiredFields []string
+	ForbiddenTerms []string
+	KeywordPolicy  string
 }
 
 func parseTextConstraintRules(raw json.RawMessage, kind models.AIContentSlotKind) (textConstraintRules, error) {
 	var rules struct {
-		MinLength *int `json:"min_length"`
-		MaxLength *int `json:"max_length"`
+		Locale                 string   `json:"locale"`
+		MinLength              *int     `json:"min_length"`
+		MaxLength              *int     `json:"max_length"`
+		CandidateCount         *int     `json:"candidate_count"`
+		AllowedCandidateCounts []int    `json:"allowed_candidate_count"`
+		RequiredFields         []string `json:"required_fields"`
+		ForbiddenTerms         []string `json:"forbidden_terms"`
+		KeywordPolicy          string   `json:"keyword_policy"`
 	}
-	if err := json.Unmarshal(raw, &rules); err != nil {
+	if err := decodeStrictJSON(raw, &rules); err != nil {
 		return textConstraintRules{}, ErrTextPromptSlotInvalid
 	}
 	if rules.MinLength != nil && *rules.MinLength < 1 || rules.MaxLength != nil && *rules.MaxLength < 1 || rules.MinLength != nil && rules.MaxLength != nil && *rules.MinLength > *rules.MaxLength {
@@ -257,7 +269,33 @@ func parseTextConstraintRules(raw json.RawMessage, kind models.AIContentSlotKind
 	if rules.MaxLength != nil && *rules.MaxLength > maxAllowed {
 		return textConstraintRules{}, fmt.Errorf("%w: length constraints", ErrTextPromptSlotInvalid)
 	}
-	return textConstraintRules{MinLength: rules.MinLength, MaxLength: rules.MaxLength}, nil
+	if !validConstraintStrings(rules.RequiredFields) || !validConstraintStrings(rules.ForbiddenTerms) {
+		return textConstraintRules{}, fmt.Errorf("%w: text constraint list", ErrTextPromptSlotInvalid)
+	}
+	for _, field := range rules.RequiredFields {
+		if _, supported := supportedRequiredTextFields[normalizeRequiredSourceField(field)]; !supported {
+			return textConstraintRules{}, fmt.Errorf("%w: required field", ErrTextPromptSlotInvalid)
+		}
+	}
+	policy := strings.ToLower(strings.TrimSpace(rules.KeywordPolicy))
+	if policy != "" && policy != "natural" {
+		return textConstraintRules{}, fmt.Errorf("%w: keyword policy", ErrTextPromptSlotInvalid)
+	}
+	return textConstraintRules{MinLength: rules.MinLength, MaxLength: rules.MaxLength, RequiredFields: rules.RequiredFields, ForbiddenTerms: rules.ForbiddenTerms, KeywordPolicy: policy}, nil
+}
+
+var supportedRequiredTextFields = map[string]struct{}{
+	"product.name": {}, "product.brand": {}, "product.category": {},
+	"sku.code": {}, "sku.color": {}, "sku.size": {},
+}
+
+func validConstraintStrings(values []string) bool {
+	for _, value := range values {
+		if strings.TrimSpace(value) == "" || utf8.RuneCountInString(value) > 200 {
+			return false
+		}
+	}
+	return true
 }
 
 func containsForbiddenTextPromptData(raw []byte) bool {

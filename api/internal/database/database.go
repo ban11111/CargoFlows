@@ -88,6 +88,9 @@ func migrateSchema(db *gorm.DB) error {
 	if err := migrateAIContentTemplateSchema(db); err != nil {
 		return err
 	}
+	if err := migrateAITextSchema(db); err != nil {
+		return err
+	}
 	return db.AutoMigrate(
 		&models.User{},
 		&models.Category{},
@@ -115,6 +118,25 @@ func migrateSchema(db *gorm.DB) error {
 		&models.SKUPlatformContent{},
 		&models.SKUPlatformContentRevision{},
 	)
+}
+
+func migrateAITextSchema(db *gorm.DB) error {
+	if db.Migrator().HasIndex(&models.AIAuditEvent{}, "idx_ai_audit_execution_event") {
+		if err := db.Migrator().DropIndex(&models.AIAuditEvent{}, "idx_ai_audit_execution_event"); err != nil {
+			return err
+		}
+	}
+	if db.Migrator().HasTable(&models.SKUPlatformContent{}) && db.Migrator().HasColumn("sku_platform_contents", "skuid") && !db.Migrator().HasColumn("sku_platform_contents", "sku_id") {
+		if db.Migrator().HasIndex(&models.SKUPlatformContent{}, "idx_sku_platform_content") {
+			if err := db.Migrator().DropIndex(&models.SKUPlatformContent{}, "idx_sku_platform_content"); err != nil {
+				return err
+			}
+		}
+		if err := db.Migrator().RenameColumn("sku_platform_contents", "skuid", "sku_id"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func backfillLegacyPublicIDs(db *gorm.DB) error {

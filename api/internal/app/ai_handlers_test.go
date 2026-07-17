@@ -125,6 +125,82 @@ func TestOpenAISettingIsAdminOnlyAndNeverEchoesKey(t *testing.T) {
 	}
 }
 
+func TestTextResultReviewAndApplicationRoutesAreOperatorSafe(t *testing.T) {
+	db := newTestDB(t)
+	server, _, operator := authenticatedAIRouter(t, db, &handlerVerifier{authenticated: true})
+	product := models.Product{Name: "Review product"}
+	if err := db.Create(&product).Error; err != nil {
+		t.Fatal(err)
+	}
+	sku := models.SKU{ProductID: product.ID, Code: "REVIEW-ROUTE-SKU", PlatformTitle: "legacy", Status: "active"}
+	if err := db.Create(&sku).Error; err != nil {
+		t.Fatal(err)
+	}
+	template := models.AIContentTemplate{PublicID: uuid.NewString(), NameZH: "审核", NameEN: "Review", TargetPlatform: "lazada", Status: models.AIContentTemplateActive, CreatedByID: operator.ID}
+	if err := db.Create(&template).Error; err != nil {
+		t.Fatal(err)
+	}
+	version := models.AIContentTemplateVersion{PublicID: uuid.NewString(), AIContentTemplateID: template.ID, VersionNumber: 1, Status: models.AITemplatePublished, DefaultLocale: "zh-CN", PromptCompilerVersion: "v1", CreatedByID: operator.ID}
+	if err := db.Create(&version).Error; err != nil {
+		t.Fatal(err)
+	}
+	slot := models.AIContentSlot{PublicID: uuid.NewString(), AIContentTemplateVersionID: version.ID, SlotKey: "title", Kind: models.AIContentSlotTitle, NameZH: "标题", NameEN: "Title", Sequence: 1, PromptFragment: "title", ConstraintsJSON: []byte(`{}`), GenerationConfigJSON: []byte(`{}`), LayoutConfigJSON: []byte(`{}`)}
+	if err := db.Create(&slot).Error; err != nil {
+		t.Fatal(err)
+	}
+	slotSnapshot, _ := json.Marshal(ai.SlotFacts{PublicID: slot.PublicID, SlotKey: slot.SlotKey, Kind: slot.Kind, PromptFragment: slot.PromptFragment, Constraints: json.RawMessage(`{}`), GenerationConfig: json.RawMessage(`{}`), LayoutConfig: json.RawMessage(`{}`)})
+	job := models.AIJob{PublicID: uuid.NewString(), SKUID: sku.ID, AIContentTemplateVersionID: version.ID, TargetPlatform: "lazada", Locale: "zh-CN", Status: models.AIJobCompleted, SnapshotSchema: ai.ProductSnapshotSchemaV1, InputSnapshotJSON: []byte(`{}`), CreatedByID: operator.ID}
+	if err := db.Create(&job).Error; err != nil {
+		t.Fatal(err)
+	}
+	item := models.AIJobItem{PublicID: uuid.NewString(), AIJobID: job.ID, AIContentSlotID: slot.ID, SlotKey: slot.SlotKey, SlotSnapshotJSON: slotSnapshot, Kind: slot.Kind, Status: models.AIJobItemCompleted, SelectedInputAssetIDsJSON: []byte(`[]`), AttemptCount: 1}
+	if err := db.Create(&item).Error; err != nil {
+		t.Fatal(err)
+	}
+	execution := models.AIExecution{PublicID: uuid.NewString(), AIJobItemID: item.ID, Operation: models.AIExecutionTextGenerate, Status: models.AIExecutionCompleted, AttemptNumber: 1, L0PolicyVersion: "l0", L1ProductContextVersion: "l1", L2TemplateVersionPublicID: version.PublicID, L3ContentSlotPublicID: slot.PublicID, NormalizedInputJSON: []byte(`{}`), OrderedInputListJSON: []byte(`[]`), CompiledPrompt: "must-not-be-exposed", CompiledPromptSHA256: strings.Repeat("a", 64), Model: "fake", RequestConfigJSON: []byte(`{}`)}
+	if err := db.Create(&execution).Error; err != nil {
+		t.Fatal(err)
+	}
+	result := models.AITextResult{PublicID: uuid.NewString(), AIExecutionID: execution.ID, CandidateIndex: 1, Kind: models.AIContentSlotTitle, RawStructuredJSON: []byte(`{"title":"Generated route title","keywords":[],"source_fields":["product.name"]}`), ValidationJSON: []byte(`[]`)}
+	if err := db.Create(&result).Error; err != nil {
+		t.Fatal(err)
+	}
+	token := server.token(t, operator)
+	base := "/api/v1/ai-jobs/" + job.PublicID + "/items/" + item.PublicID + "/text-results/" + result.PublicID
+	listed := aiRequest(t, server, token, http.MethodGet, "/api/v1/ai-jobs/"+job.PublicID+"/text-results", "")
+	if listed.Code != http.StatusOK || strings.Contains(listed.Body.String(), "must-not-be-exposed") || !strings.Contains(listed.Body.String(), result.PublicID) {
+		t.Fatalf("list status/body=%d %s", listed.Code, listed.Body.String())
+	}
+	viewer := models.User{Name: "AI Viewer", Email: "ai-viewer@example.test", PasswordHash: "unused", Role: models.RoleViewer}
+	if err := db.Create(&viewer).Error; err != nil {
+		t.Fatal(err)
+	}
+	forbidden := aiRequest(t, server, server.token(t, viewer), http.MethodGet, "/api/v1/ai-jobs/"+job.PublicID+"/text-results", "")
+	if forbidden.Code != http.StatusForbidden {
+		t.Fatalf("viewer status/body=%d %s", forbidden.Code, forbidden.Body.String())
+	}
+	edited := aiRequest(t, server, token, http.MethodPatch, base, `{"structured":{"title":"Edited route title","keywords":[],"source_fields":["product.name"]}}`)
+	if edited.Code != http.StatusOK || !strings.Contains(edited.Body.String(), "Edited route title") {
+		t.Fatalf("edit status/body=%d %s", edited.Code, edited.Body.String())
+	}
+	approved := aiRequest(t, server, token, http.MethodPost, base+"/approve", "")
+	if approved.Code != http.StatusOK || !strings.Contains(approved.Body.String(), `"effective":true`) {
+		t.Fatalf("approve status/body=%d %s", approved.Code, approved.Body.String())
+	}
+	preview := aiRequest(t, server, token, http.MethodGet, base+"/application-preview", "")
+	if preview.Code != http.StatusOK || !strings.Contains(preview.Body.String(), "Edited route title") {
+		t.Fatalf("preview status/body=%d %s", preview.Code, preview.Body.String())
+	}
+	applied := aiRequest(t, server, token, http.MethodPost, base+"/apply", "")
+	if applied.Code != http.StatusOK || !strings.Contains(applied.Body.String(), `"revision":1`) {
+		t.Fatalf("apply status/body=%d %s", applied.Code, applied.Body.String())
+	}
+	history := aiRequest(t, server, token, http.MethodGet, fmt.Sprintf("/api/v1/skus/%d/platform-content?platform=lazada&locale=zh-CN", sku.ID), "")
+	if history.Code != http.StatusOK || !strings.Contains(history.Body.String(), "Edited route title") {
+		t.Fatalf("history status/body=%d %s", history.Code, history.Body.String())
+	}
+}
+
 func TestAIContentTemplateAdminLifecycleUsesPublicDTOs(t *testing.T) {
 	db := newTestDB(t)
 	server, admin, operator := authenticatedAIRouter(t, db, &handlerVerifier{authenticated: true})

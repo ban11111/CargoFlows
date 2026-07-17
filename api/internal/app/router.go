@@ -27,6 +27,7 @@ type AIDependencies struct {
 	ProviderSettings *ai.ProviderSettingsService
 	Templates        *ai.TemplateService
 	Jobs             *ai.JobService
+	TextResults      *ai.TextResultService
 }
 
 func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
@@ -58,6 +59,9 @@ func newRouter(cfg config.Config, db *gorm.DB, deps AIDependencies) *gin.Engine 
 	}
 	if deps.Jobs == nil {
 		deps.Jobs = ai.NewJobService(db)
+	}
+	if deps.TextResults == nil {
+		deps.TextResults = ai.NewTextResultService(db)
 	}
 	server := &Server{cfg: cfg, db: db, storage: storage, ai: deps}
 	router := gin.New()
@@ -123,6 +127,13 @@ func registerAIRoutes(protected *gin.RouterGroup, server *Server) {
 	aiJobs.GET("/ai-jobs", server.listAIJobs)
 	aiJobs.POST("/ai-jobs", server.createAIJob)
 	aiJobs.GET("/ai-jobs/:job_id", server.getAIJob)
+	aiJobs.GET("/ai-jobs/:job_id/text-results", server.listAITextResults)
+	aiJobs.PATCH("/ai-jobs/:job_id/items/:item_id/text-results/:result_id", server.editAITextResult)
+	aiJobs.POST("/ai-jobs/:job_id/items/:item_id/text-results/:result_id/approve", server.approveAITextResult)
+	aiJobs.POST("/ai-jobs/:job_id/items/:item_id/text-results/:result_id/reject", server.rejectAITextResult)
+	aiJobs.GET("/ai-jobs/:job_id/items/:item_id/text-results/:result_id/application-preview", server.previewAITextResultApplication)
+	aiJobs.POST("/ai-jobs/:job_id/items/:item_id/text-results/:result_id/apply", server.applyAITextResult)
+	aiJobs.GET("/skus/:id/platform-content", server.getSKUPlatformContent)
 	aiJobs.GET("/ai-content-templates", server.listAIContentTemplates)
 	aiAdmin := protected.Group("")
 	aiAdmin.Use(requireRoles(models.RoleAdmin))
@@ -139,7 +150,7 @@ func registerAIRoutes(protected *gin.RouterGroup, server *Server) {
 }
 
 func newAIDependencies(cfg config.Config, db *gorm.DB) (AIDependencies, error) {
-	deps := AIDependencies{Templates: ai.NewTemplateService(db), Jobs: ai.NewJobService(db)}
+	deps := AIDependencies{Templates: ai.NewTemplateService(db), Jobs: ai.NewJobService(db), TextResults: ai.NewTextResultService(db)}
 	key, err := validateSecretsMasterKey(cfg)
 	if err != nil {
 		return AIDependencies{}, err
