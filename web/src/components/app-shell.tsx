@@ -51,17 +51,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </nav>
       </aside>
       <div className="lg:pl-60">
-        <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-border bg-card px-4">
-          <div>
+        <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-2 border-b border-border bg-card px-3 sm:px-4">
+          <div className="min-w-0">
             <p className="text-sm font-semibold">{t("adminTitle")}</p>
-            <p className="text-xs text-muted-foreground">{t("adminSubtitle")}</p>
+            <p className="hidden truncate text-xs text-muted-foreground sm:block">{t("adminSubtitle")}</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             <LanguageToggle />
-            <Button asChild className="min-h-11" variant="secondary" size="sm">
-              <Link href="/settings/openai">
+            <Button asChild className="min-h-11 px-3" variant="secondary" size="sm">
+              <Link aria-label={t("navOpenAISettings")} href="/settings/openai">
                 <Settings2 className="h-4 w-4" />
-                {t("navOpenAISettings")}
+                <span className="hidden sm:inline">{t("navOpenAISettings")}</span>
               </Link>
             </Button>
             <Button variant="ghost" size="icon" aria-label={t("logout")}>

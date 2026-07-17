@@ -38,10 +38,21 @@ const emptySetting: OpenAISetting = {
 
 async function getSetting() {
   try {
-    return await apiRequest<OpenAISetting>("/settings/openai");
+    return await safeOpenAIRequest<OpenAISetting>("/settings/openai");
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) return emptySetting;
     throw error;
+  }
+}
+
+async function safeOpenAIRequest<TResponse>(path: string, options?: RequestInit) {
+  try {
+    return await apiRequest<TResponse>(path, options);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw new ApiError("OpenAI settings request failed", error.status);
+    }
+    throw new Error("OpenAI settings request failed");
   }
 }
 
@@ -51,7 +62,7 @@ export default function OpenAISettingsPage() {
   const [secret, setSecretState] = useState("");
   const secretRef = useRef("");
   const [showSecret, setShowSecret] = useState(false);
-  const [fieldError, setFieldError] = useState<string | null>(null);
+  const [fieldError, setFieldError] = useState<MessageKey | null>(null);
   const [notice, setNotice] = useState<MessageKey | null>(null);
 
   function setSecret(value: string) {
@@ -78,7 +89,7 @@ export default function OpenAISettingsPage() {
   const forbidden = settingQuery.error instanceof ApiError && settingQuery.error.status === 403;
 
   const saveMutation = useMutation({
-    mutationFn: () => apiRequest<OpenAISetting>("/settings/openai", {
+    mutationFn: () => safeOpenAIRequest<OpenAISetting>("/settings/openai", {
       method: "PUT",
       body: JSON.stringify({ api_key: secretRef.current }),
     }),
@@ -91,7 +102,7 @@ export default function OpenAISettingsPage() {
   });
 
   const disableMutation = useMutation({
-    mutationFn: () => apiRequest<OpenAISetting>("/settings/openai", { method: "DELETE" }),
+    mutationFn: () => safeOpenAIRequest<OpenAISetting>("/settings/openai", { method: "DELETE" }),
     onSuccess(next) {
       queryClient.setQueryData(["openai-setting"], next);
       clearSecret();
@@ -106,7 +117,7 @@ export default function OpenAISettingsPage() {
     saveMutation.reset();
     const parsed = openAIKeySchema.safeParse({ api_key: secret });
     if (!parsed.success) {
-      setFieldError(t(parsed.error.issues[0]?.message === "openAIKeyTooLong" ? "openAIKeyTooLong" : "openAIKeyTooShort"));
+      setFieldError(parsed.error.issues[0]?.message === "openAIKeyTooLong" ? "openAIKeyTooLong" : "openAIKeyTooShort");
       return;
     }
     if (setting.key_fingerprint && !window.confirm(t("openAIReplaceConfirm"))) return;
@@ -179,7 +190,7 @@ export default function OpenAISettingsPage() {
                     <Button aria-label={showSecret ? t("openAIHideKey") : t("openAIShowKey")} className="absolute right-0 top-0 min-h-11 min-w-11" onClick={() => setShowSecret((current) => !current)} size="icon" type="button" variant="ghost">{showSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</Button>
                   </div>
                   <p className="text-sm leading-5 text-muted-foreground" id="openai-key-help">{t("openAIKeyHelper")}</p>
-                  {fieldError ? <p className="text-sm text-danger" id="openai-key-error" role="alert">{fieldError}</p> : null}
+                  {fieldError ? <p className="text-sm text-danger" id="openai-key-error" role="alert">{t(fieldError)}</p> : null}
                 </div>
                 {saveMutation.isError ? <p className="rounded-md border border-danger/30 bg-danger/5 p-3 text-sm text-danger" role="alert">{saveMutation.error instanceof ApiError && saveMutation.error.status === 422 ? t("openAIRejectedError") : t("openAISaveError")}</p> : null}
                 <div className="flex justify-end">

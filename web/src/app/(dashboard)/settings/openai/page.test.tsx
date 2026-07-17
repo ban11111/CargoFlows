@@ -102,6 +102,7 @@ describe("OpenAI settings", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("无法载入 OpenAI 设置");
     expect(document.body).not.toHaveTextContent("sk-proj-leaked-server-detail");
+    expect(JSON.stringify(queryClient.getQueryCache().getAll().map((query) => query.state.error))).not.toContain("sk-proj-leaked-server-detail");
     fireEvent.click(screen.getByRole("button", { name: "重试载入 OpenAI 设置" }));
     expect(await screen.findByText("尚未配置凭据")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -151,6 +152,7 @@ describe("OpenAI settings", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存并验证" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("OpenAI 未接受该凭据");
     expect(document.body).not.toHaveTextContent("sk-proj-unsafe-rejection-ABCD");
+    expect(JSON.stringify(queryClient.getMutationCache().getAll().map((mutation) => mutation.state.error))).not.toContain("sk-proj-unsafe-rejection");
 
     fireEvent.click(screen.getByRole("button", { name: "保存并验证" }));
     expect(await screen.findByText("凭据已保存并验证")).toBeInTheDocument();
@@ -167,6 +169,20 @@ describe("OpenAI settings", () => {
     expect(screen.getByRole("heading", { name: "OpenAI settings" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save and verify" })).toBeInTheDocument();
     expect(screen.queryByText("尚未配置凭据")).not.toBeInTheDocument();
+  });
+
+  it("retranslates an active validation error when the language changes", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => jsonResponse(unconfigured));
+    render(<OpenAISettingsPage />, { wrapper: Providers });
+    const input = await screen.findByLabelText("OpenAI Project API Key");
+
+    fireEvent.change(input, { target: { value: "short" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存并验证" }));
+    expect(await screen.findByText("API Key 至少需要 20 个字符")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "语言" }));
+    expect(screen.getByText("API Key must contain at least 20 characters")).toBeInTheDocument();
+    expect(screen.queryByText("API Key 至少需要 20 个字符")).not.toBeInTheDocument();
   });
 
   it("exposes an accessible deep link in the admin shell", () => {
