@@ -276,18 +276,18 @@ func (s *TemplateService) CopyVersion(ctx context.Context, templatePublicID, sou
 }
 
 func (s *TemplateService) Archive(ctx context.Context, versionPublicID string) error {
+	var identity struct {
+		AIContentTemplateID uint
+	}
+	err := s.db.WithContext(ctx).Model(&models.AIContentTemplateVersion{}).
+		Select("ai_content_template_id").Where("public_id = ?", versionPublicID).Take(&identity).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrTemplateVersionNotFound
+	}
+	if err != nil {
+		return err
+	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var identity struct {
-			AIContentTemplateID uint
-		}
-		err := tx.Model(&models.AIContentTemplateVersion{}).
-			Select("ai_content_template_id").Where("public_id = ?", versionPublicID).Take(&identity).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrTemplateVersionNotFound
-		}
-		if err != nil {
-			return err
-		}
 		var parent models.AIContentTemplate
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&parent, identity.AIContentTemplateID).Error; err != nil {
 			return err

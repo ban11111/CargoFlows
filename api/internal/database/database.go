@@ -110,17 +110,21 @@ func migrateAIContentTemplateSchema(db *gorm.DB) error {
 }
 
 func archiveDuplicateLegacyDrafts(db *gorm.DB) error {
-	if db.Dialector.Name() == "mysql" {
-		return db.Exec(`UPDATE ai_content_template_versions AS older
+	return db.Exec(archiveDuplicateLegacyDraftsSQL(db.Dialector.Name())).Error
+}
+
+func archiveDuplicateLegacyDraftsSQL(dialect string) string {
+	if dialect == "mysql" {
+		return `UPDATE ai_content_template_versions AS older
 			JOIN ai_content_template_versions AS newer
 			  ON newer.ai_content_template_id = older.ai_content_template_id
 			 AND newer.status = 'draft'
 			 AND (newer.version_number > older.version_number
 			      OR (newer.version_number = older.version_number AND newer.id > older.id))
 			SET older.status = 'archived', older.archived_at = COALESCE(older.archived_at, CURRENT_TIMESTAMP), older.draft_guard = NULL
-			WHERE older.status = 'draft'`).Error
+			WHERE older.status = 'draft'`
 	}
-	return db.Exec(`UPDATE ai_content_template_versions AS older
+	return `UPDATE ai_content_template_versions AS older
 		SET status = 'archived', archived_at = COALESCE(archived_at, CURRENT_TIMESTAMP), draft_guard = NULL
 		WHERE status = 'draft' AND EXISTS (
 			SELECT 1 FROM ai_content_template_versions AS newer
@@ -128,7 +132,7 @@ func archiveDuplicateLegacyDrafts(db *gorm.DB) error {
 			AND newer.status = 'draft'
 			AND (newer.version_number > older.version_number
 			     OR (newer.version_number = older.version_number AND newer.id > older.id))
-		)`).Error
+		)`
 }
 
 func Seed(db *gorm.DB) error {

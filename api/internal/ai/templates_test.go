@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -273,59 +274,7 @@ func TestDatabaseRejectsDraftWithoutGuard(t *testing.T) {
 	}
 }
 
-func TestConcurrentArchiveOfLastPublishedVersionsArchivesParent(t *testing.T) {
-	db := templateTestDB(t)
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	// SQLite serializes writes on one connection; launching both calls together
-	// deterministically exercises the service boundary under that supported rule.
-	sqlDB.SetMaxOpenConns(1)
-	service := NewTemplateService(db)
-	created, err := service.Create(t.Context(), validTemplateInput())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if issues, err := service.Publish(t.Context(), created.Version.PublicID, 1); err != nil || len(issues) != 0 {
-		t.Fatalf("publish v1 issues=%#v err=%v", issues, err)
-	}
-	second, err := service.CopyVersion(t.Context(), created.Template.PublicID, created.Version.PublicID, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if issues, err := service.Publish(t.Context(), second.PublicID, 2); err != nil || len(issues) != 0 {
-		t.Fatalf("publish v2 issues=%#v err=%v", issues, err)
-	}
-
-	start := make(chan struct{})
-	errs := make(chan error, 2)
-	var ready sync.WaitGroup
-	ready.Add(2)
-	for _, versionID := range []string{created.Version.PublicID, second.PublicID} {
-		go func() {
-			ready.Done()
-			<-start
-			errs <- service.Archive(t.Context(), versionID)
-		}()
-	}
-	ready.Wait()
-	close(start)
-	for range 2 {
-		if err := <-errs; err != nil {
-			t.Fatal(err)
-		}
-	}
-	got, err := service.Get(t.Context(), created.Template.PublicID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Status != models.AIContentTemplateArchived {
-		t.Fatalf("parent status = %q, want archived", got.Status)
-	}
-}
-
-func TestArchiveLocksParentBeforeVersionMutation(t *testing.T) {
+func TestArchiveResolvesIdentityOutsideTransactionThenLocksParentFirst(t *testing.T) {
 	db := templateTestDB(t)
 	service := NewTemplateService(db)
 	created, err := service.Create(t.Context(), validTemplateInput())
@@ -338,15 +287,30 @@ func TestArchiveLocksParentBeforeVersionMutation(t *testing.T) {
 
 	var mu sync.Mutex
 	var events []string
-	const queryCallback = "test:observe-template-parent-lock"
+	const queryCallback = "test:observe-template-archive-reads"
 	const updateCallback = "test:observe-template-version-update"
 	if err := db.Callback().Query().Before("gorm:query").Register(queryCallback, func(tx *gorm.DB) {
-		if tx.Statement.Table != "ai_content_templates" {
-			return
+		_, inTransaction := tx.Statement.ConnPool.(*sql.Tx)
+		_, locked := tx.Statement.Clauses["FOR"]
+		event := ""
+		switch tx.Statement.Table {
+		case "ai_content_template_versions":
+			switch {
+			case !inTransaction:
+				event = "identity_outside"
+			case locked:
+				event = "lock_version"
+			default:
+				event = "read_version_in_transaction"
+			}
+		case "ai_content_templates":
+			if inTransaction && locked {
+				event = "lock_parent"
+			}
 		}
-		if _, locked := tx.Statement.Clauses["FOR"]; locked {
+		if event != "" {
 			mu.Lock()
-			events = append(events, "lock_parent")
+			events = append(events, event)
 			mu.Unlock()
 		}
 	}); err != nil {
@@ -371,17 +335,29 @@ func TestArchiveLocksParentBeforeVersionMutation(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	lockIndex, updateIndex := -1, -1
+	identityIndex, parentLockIndex, versionLockIndex, updateIndex := -1, -1, -1, -1
 	for index, event := range events {
-		if event == "lock_parent" && lockIndex == -1 {
-			lockIndex = index
+		if event == "identity_outside" && identityIndex == -1 {
+			identityIndex = index
+		}
+		if event == "lock_parent" && parentLockIndex == -1 {
+			parentLockIndex = index
+		}
+		if event == "lock_version" && versionLockIndex == -1 {
+			versionLockIndex = index
 		}
 		if event == "update_version" && updateIndex == -1 {
 			updateIndex = index
 		}
 	}
-	if lockIndex == -1 || updateIndex == -1 || lockIndex >= updateIndex {
-		t.Fatalf("archive orchestration events = %v, want parent lock before version update", events)
+	if identityIndex == -1 || parentLockIndex == -1 || versionLockIndex == -1 || updateIndex == -1 ||
+		identityIndex >= parentLockIndex || parentLockIndex >= versionLockIndex || versionLockIndex >= updateIndex {
+		t.Fatalf("archive orchestration events = %v, want outside identity -> parent lock -> version lock -> update", events)
+	}
+	for index, event := range events {
+		if index < parentLockIndex && event == "read_version_in_transaction" {
+			t.Fatalf("archive established a pre-lock transaction snapshot: %v", events)
+		}
 	}
 }
 

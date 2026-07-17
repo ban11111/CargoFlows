@@ -185,6 +185,22 @@ func TestMigrateUpgradesLegacyAITemplateLifecycleAndIndexes(t *testing.T) {
 	}
 }
 
+func TestArchiveDuplicateLegacyDraftsMySQLSQLShape(t *testing.T) {
+	sql := archiveDuplicateLegacyDraftsSQL("mysql")
+	for _, fragment := range []string{
+		"UPDATE ai_content_template_versions AS older",
+		"JOIN ai_content_template_versions AS newer",
+		"newer.ai_content_template_id = older.ai_content_template_id",
+		"newer.version_number > older.version_number",
+		"newer.id > older.id",
+		"WHERE older.status = 'draft'",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Fatalf("MySQL duplicate-draft cleanup SQL missing %q:\n%s", fragment, sql)
+		}
+	}
+}
+
 func TestSeedCreatesPublishedPhoneCaseCaptureSOPFromExactPresets(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
