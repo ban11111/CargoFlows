@@ -97,6 +97,75 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '500': { $ref: '#/components/responses/InternalServerError' }
+  /model-families:
+    get:
+      operationId: listModelFamilies
+      responses:
+        '200': { description: Model families, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/ModelFamily' } } } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    post:
+      operationId: createModelFamily
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateModelFamilyRequest' } } }
+      responses:
+        '201': { description: Model family created, content: { application/json: { schema: { $ref: '#/components/schemas/ModelFamily' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /model-families/{family_id}:
+    parameters: [ { $ref: '#/components/parameters/ModelFamilyID' } ]
+    get:
+      operationId: getModelFamily
+      responses:
+        '200': { description: Model family, content: { application/json: { schema: { $ref: '#/components/schemas/ModelFamily' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    patch:
+      operationId: updateModelFamily
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateModelFamilyRequest' } } }
+      responses:
+        '200': { description: Model family updated, content: { application/json: { schema: { $ref: '#/components/schemas/ModelFamily' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /model-families/{family_id}/members:
+    parameters: [ { $ref: '#/components/parameters/ModelFamilyID' } ]
+    post:
+      operationId: addModelFamilyMember
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AddModelFamilyMemberRequest' } } }
+      responses:
+        '201': { description: Member added, content: { application/json: { schema: { $ref: '#/components/schemas/ModelFamilyMember' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /model-families/{family_id}/members/{member_id}:
+    parameters: [ { $ref: '#/components/parameters/ModelFamilyID' }, { $ref: '#/components/parameters/ModelFamilyMemberID' } ]
+    delete:
+      operationId: removeModelFamilyMember
+      responses:
+        '204': { description: Member removed }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
   /capture-sops/{sop_id}:
     parameters: [ { $ref: '#/components/parameters/SOPID' } ]
     get:
@@ -672,6 +741,8 @@ components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
   parameters:
+    ModelFamilyID: { in: path, name: family_id, required: true, schema: { type: string, format: uuid } }
+    ModelFamilyMemberID: { in: path, name: member_id, required: true, schema: { type: string, format: uuid } }
     SOPID: { in: path, name: sop_id, required: true, schema: { type: string, format: uuid } }
     VersionID: { in: path, name: version_id, required: true, schema: { type: string, format: uuid } }
     ViewID: { in: path, name: view_id, required: true, schema: { type: string, format: uuid } }
@@ -1289,6 +1360,66 @@ components:
         category_id: { type: integer, minimum: 1 }
         name: { $ref: '#/components/schemas/LocalizedText' }
         description: { $ref: '#/components/schemas/LocalizedText' }
+    ModelFamilyCommonStructure:
+      type: object
+      additionalProperties: false
+      required: [schema, invariants]
+      properties:
+        schema: { type: string, enum: [model_family_common_structure_v1] }
+        invariants: { type: array, minItems: 1, items: { type: string, minLength: 1 }, uniqueItems: true }
+    CreateModelFamilyRequest:
+      type: object
+      additionalProperties: false
+      required: [brand, name_zh, name_en, model_code, common_structure, variation_dimensions]
+      properties:
+        brand: { type: string, minLength: 1, maxLength: 120 }
+        name_zh: { type: string, minLength: 1, maxLength: 180 }
+        name_en: { type: string, minLength: 1, maxLength: 180 }
+        model_code: { type: string, minLength: 1, maxLength: 120 }
+        common_structure: { $ref: '#/components/schemas/ModelFamilyCommonStructure' }
+        variation_dimensions: { type: array, minItems: 1, uniqueItems: true, items: { type: string, enum: [color, material, finish, texture, trim, ports, controls, labels, accessories, packaging, other] } }
+    UpdateModelFamilyRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        brand: { type: string, minLength: 1, maxLength: 120 }
+        name_zh: { type: string, minLength: 1, maxLength: 180 }
+        name_en: { type: string, minLength: 1, maxLength: 180 }
+        model_code: { type: string, minLength: 1, maxLength: 120 }
+        common_structure: { $ref: '#/components/schemas/ModelFamilyCommonStructure' }
+        variation_dimensions: { type: array, minItems: 1, uniqueItems: true, items: { type: string, enum: [color, material, finish, texture, trim, ports, controls, labels, accessories, packaging, other] } }
+        status: { type: string, enum: [active, archived] }
+    AddModelFamilyMemberRequest:
+      type: object
+      additionalProperties: false
+      required: [sku_id]
+      properties: { sku_id: { type: string, format: uuid } }
+    ModelFamilyMember:
+      type: object
+      additionalProperties: false
+      required: [public_id, sku_id, removed_at, created_at]
+      properties:
+        public_id: { type: string, format: uuid }
+        sku_id: { type: string, format: uuid }
+        removed_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+    ModelFamily:
+      type: object
+      additionalProperties: false
+      required: [public_id, brand, name_zh, name_en, model_code, common_structure, variation_dimensions, status, created_at, updated_at]
+      properties:
+        public_id: { type: string, format: uuid }
+        brand: { type: string }
+        name_zh: { type: string }
+        name_en: { type: string }
+        model_code: { type: string }
+        common_structure: { $ref: '#/components/schemas/ModelFamilyCommonStructure' }
+        variation_dimensions: { type: array, items: { type: string, enum: [color, material, finish, texture, trim, ports, controls, labels, accessories, packaging, other] } }
+        status: { type: string, enum: [active, archived] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        members: { type: array, items: { $ref: '#/components/schemas/ModelFamilyMember' } }
     VersionMetadataRequest:
       type: object
       additionalProperties: false

@@ -90,6 +90,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/model-families": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listModelFamilies"];
+        put?: never;
+        post: operations["createModelFamily"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/model-families/{family_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                family_id: components["parameters"]["ModelFamilyID"];
+            };
+            cookie?: never;
+        };
+        get: operations["getModelFamily"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["updateModelFamily"];
+        trace?: never;
+    };
+    "/model-families/{family_id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                family_id: components["parameters"]["ModelFamilyID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["addModelFamilyMember"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/model-families/{family_id}/members/{member_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                family_id: components["parameters"]["ModelFamilyID"];
+                member_id: components["parameters"]["ModelFamilyMemberID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["removeModelFamilyMember"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/capture-sops/{sop_id}": {
         parameters: {
             query?: never;
@@ -1366,6 +1437,60 @@ export interface components {
             name: components["schemas"]["LocalizedText"];
             description?: components["schemas"]["LocalizedText"];
         };
+        ModelFamilyCommonStructure: {
+            /** @enum {string} */
+            schema: "model_family_common_structure_v1";
+            invariants: string[];
+        };
+        CreateModelFamilyRequest: {
+            brand: string;
+            name_zh: string;
+            name_en: string;
+            model_code: string;
+            common_structure: components["schemas"]["ModelFamilyCommonStructure"];
+            variation_dimensions: ("color" | "material" | "finish" | "texture" | "trim" | "ports" | "controls" | "labels" | "accessories" | "packaging" | "other")[];
+        };
+        UpdateModelFamilyRequest: {
+            brand?: string;
+            name_zh?: string;
+            name_en?: string;
+            model_code?: string;
+            common_structure?: components["schemas"]["ModelFamilyCommonStructure"];
+            variation_dimensions?: ("color" | "material" | "finish" | "texture" | "trim" | "ports" | "controls" | "labels" | "accessories" | "packaging" | "other")[];
+            /** @enum {string} */
+            status?: "active" | "archived";
+        };
+        AddModelFamilyMemberRequest: {
+            /** Format: uuid */
+            sku_id: string;
+        };
+        ModelFamilyMember: {
+            /** Format: uuid */
+            public_id: string;
+            /** Format: uuid */
+            sku_id: string;
+            /** Format: date-time */
+            removed_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        ModelFamily: {
+            /** Format: uuid */
+            public_id: string;
+            brand: string;
+            name_zh: string;
+            name_en: string;
+            model_code: string;
+            common_structure: components["schemas"]["ModelFamilyCommonStructure"];
+            variation_dimensions: ("color" | "material" | "finish" | "texture" | "trim" | "ports" | "controls" | "labels" | "accessories" | "packaging" | "other")[];
+            /** @enum {string} */
+            status: "active" | "archived";
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            members?: components["schemas"]["ModelFamilyMember"][];
+        };
         VersionMetadataRequest: {
             name: components["schemas"]["LocalizedText"];
             description: components["schemas"]["LocalizedText"];
@@ -1619,6 +1744,8 @@ export interface components {
         };
     };
     parameters: {
+        ModelFamilyID: string;
+        ModelFamilyMemberID: string;
         SOPID: string;
         VersionID: string;
         ViewID: string;
@@ -1873,6 +2000,176 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listModelFamilies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Model families */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ModelFamily"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    createModelFamily: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateModelFamilyRequest"];
+            };
+        };
+        responses: {
+            /** @description Model family created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelFamily"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    getModelFamily: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                family_id: components["parameters"]["ModelFamilyID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Model family */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelFamily"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    updateModelFamily: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                family_id: components["parameters"]["ModelFamilyID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateModelFamilyRequest"];
+            };
+        };
+        responses: {
+            /** @description Model family updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelFamily"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    addModelFamilyMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                family_id: components["parameters"]["ModelFamilyID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddModelFamilyMemberRequest"];
+            };
+        };
+        responses: {
+            /** @description Member added */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelFamilyMember"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    removeModelFamilyMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                family_id: components["parameters"]["ModelFamilyID"];
+                member_id: components["parameters"]["ModelFamilyMemberID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Member removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             500: components["responses"]["InternalServerError"];
         };
     };
