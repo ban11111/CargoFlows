@@ -166,6 +166,56 @@ func TestVariantManifestRejectsPublicationAfterFamilyIsArchived(t *testing.T) {
 	}
 }
 
+func TestVariantManifestReGroupingPreservesHistoryAndSelectsCurrentFamilyOnly(t *testing.T) {
+	db := variantManifestTestDB(t)
+	familyA, target, _ := createVariantManifestFamily(t, db, []string{"color", "material", "finish", "texture", "labels", "ports", "accessories"})
+	manifests := NewVariantManifestService(db)
+	oldDraft, err := manifests.CreateDraft(t.Context(), target.PublicID, CreateVariantManifestDraftInput{Identity: validVariantIdentityJSON(t), ActorID: 9})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldPublished, err := manifests.Publish(t.Context(), oldDraft.PublicID, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	families := NewModelFamilyService(db)
+	familyB, err := families.Create(t.Context(), CreateModelFamilyInput{Brand: "CargoFlow", NameZH: "新同款", NameEN: "New family", ModelCode: "REGROUP-" + t.Name(), CommonStructure: json.RawMessage(`{"schema":"model_family_common_structure_v1","invariants":["housing"]}`), VariationDimensions: []string{"color", "material", "finish", "texture", "labels", "ports", "accessories"}, CreatedByID: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var oldMember models.ModelFamilyMember
+	if err := db.Where("model_family_id = ? AND sk_uid = ? AND removed_at IS NULL", familyA.ID, target.ID).First(&oldMember).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := families.RemoveMember(t.Context(), familyA.PublicID, oldMember.PublicID, 10); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := families.AddMember(t.Context(), familyB.PublicID, target.PublicID, 10); err != nil {
+		t.Fatal(err)
+	}
+
+	newIdentity := json.RawMessage(strings.Replace(string(validVariantIdentityJSON(t)), "Midnight blue", "Family B blue", 1))
+	newDraft, err := manifests.CreateDraft(t.Context(), target.PublicID, CreateVariantManifestDraftInput{Identity: newIdentity, ActorID: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newPublished, err := manifests.Publish(t.Context(), newDraft.PublicID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newPublished.PublicID == oldPublished.PublicID || newPublished.VersionNumber != 1 {
+		t.Fatalf("new family manifest = %#v", newPublished)
+	}
+	current, err := manifests.GetForSKU(t.Context(), target.PublicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.PublicID != newPublished.PublicID || strings.Contains(string(current.IdentityJSON), "Midnight blue") {
+		t.Fatalf("current manifest = %#v; old = %#v", current, oldPublished)
+	}
+}
+
 func TestVariantManifestRequiresAllIdentityKeysAndNormalizesArrayFacts(t *testing.T) {
 	db := variantManifestTestDB(t)
 	_, target, _ := createVariantManifestFamily(t, db, []string{"color", "material", "finish", "texture", "labels", "ports", "accessories"})

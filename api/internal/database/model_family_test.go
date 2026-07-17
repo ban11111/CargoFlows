@@ -58,6 +58,16 @@ func TestModelFamilyAndVariantIdentityConstraints(t *testing.T) {
 	if err := db.Create(&models.ModelFamilyMember{PublicID: "32323232-3232-4323-8323-323232323232", ModelFamilyID: 3, SKUID: 102, ActiveGuard: &bypass, AddedByID: 3, RemovedAt: &removedAt}).Error; err == nil {
 		t.Fatal("removed family membership retained a non-null active guard")
 	}
+	firstManifest := models.VariantIdentityManifest{PublicID: "41414141-4141-4411-8411-414141414141", ModelFamilyID: 1, SKUID: first.SKUID, CreatedByID: 1}
+	if err := db.Create(&firstManifest).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&models.VariantIdentityManifest{PublicID: "42424242-4242-4422-8422-424242424242", ModelFamilyID: 2, SKUID: first.SKUID, CreatedByID: 2}).Error; err != nil {
+		t.Fatalf("SKU re-grouping must retain a separate family manifest: %v", err)
+	}
+	if err := db.Create(&models.VariantIdentityManifest{PublicID: "43434343-4343-4433-8433-434343434343", ModelFamilyID: 1, SKUID: first.SKUID, CreatedByID: 3}).Error; err == nil {
+		t.Fatal("one SKU must have only one manifest within a model family")
+	}
 
 	draft := "draft"
 	version := models.VariantIdentityManifestVersion{PublicID: "44444444-4444-4444-8444-444444444444", VariantIdentityManifestID: 1, VersionNumber: 1, Status: models.VariantManifestDraft, DraftGuard: &draft, IdentityJSON: []byte(`{}`), CreatedByID: 1}

@@ -119,8 +119,8 @@ func (member *ModelFamilyMember) BeforeCreate(*gorm.DB) error {
 type VariantIdentityManifest struct {
 	ID            uint                             `gorm:"primaryKey" json:"-"`
 	PublicID      string                           `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
-	ModelFamilyID uint                             `gorm:"index;not null" json:"-"`
-	SKUID         uint                             `gorm:"uniqueIndex;not null" json:"-"`
+	ModelFamilyID uint                             `gorm:"uniqueIndex:idx_variant_manifest_family_sku,priority:1;index;not null" json:"-"`
+	SKUID         uint                             `gorm:"uniqueIndex:idx_variant_manifest_family_sku,priority:2;index;not null" json:"-"`
 	CreatedByID   uint                             `gorm:"index;not null" json:"-"`
 	CreatedAt     time.Time                        `json:"created_at"`
 	UpdatedAt     time.Time                        `json:"updated_at"`

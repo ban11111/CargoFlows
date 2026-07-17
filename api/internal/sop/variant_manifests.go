@@ -123,7 +123,7 @@ func (s *VariantManifestService) CreateDraft(ctx context.Context, skuPublicID st
 			return err
 		}
 		var manifest models.VariantIdentityManifest
-		err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("sk_uid = ?", sku.ID).First(&manifest).Error
+		err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("model_family_id = ? AND sk_uid = ?", family.ID, sku.ID).First(&manifest).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			manifest = models.VariantIdentityManifest{PublicID: uuid.NewString(), ModelFamilyID: family.ID, SKUID: sku.ID, CreatedByID: input.ActorID}
 			if err := tx.Create(&manifest).Error; err != nil {
@@ -339,8 +339,23 @@ func (s *VariantManifestService) GetForSKU(ctx context.Context, skuPublicID stri
 		}
 		return nil, err
 	}
+	var member models.ModelFamilyMember
+	err := s.db.WithContext(ctx).Where("sk_uid = ? AND removed_at IS NULL", sku.ID).First(&member).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrVariantManifestNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	var family models.ModelFamily
+	if err := s.db.WithContext(ctx).Where("id = ? AND status = ?", member.ModelFamilyID, models.ModelFamilyActive).First(&family).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrVariantManifestNotFound
+		}
+		return nil, err
+	}
 	var version models.VariantIdentityManifestVersion
-	err := s.db.WithContext(ctx).Joins("JOIN variant_identity_manifests ON variant_identity_manifests.id = variant_identity_manifest_versions.variant_identity_manifest_id").Where("variant_identity_manifests.sk_uid = ? AND variant_identity_manifest_versions.status = ?", sku.ID, models.VariantManifestPublished).Order("variant_identity_manifest_versions.version_number DESC").Preload("Regions.EvidenceAssets").First(&version).Error
+	err = s.db.WithContext(ctx).Joins("JOIN variant_identity_manifests ON variant_identity_manifests.id = variant_identity_manifest_versions.variant_identity_manifest_id").Where("variant_identity_manifests.sk_uid = ? AND variant_identity_manifests.model_family_id = ? AND variant_identity_manifest_versions.status = ?", sku.ID, family.ID, models.VariantManifestPublished).Order("variant_identity_manifest_versions.version_number DESC").Preload("Regions.EvidenceAssets").First(&version).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrVariantManifestNotFound
 	}
