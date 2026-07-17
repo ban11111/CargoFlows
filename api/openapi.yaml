@@ -166,6 +166,70 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '500': { $ref: '#/components/responses/InternalServerError' }
+  /skus/{sku_id}/variant-identity:
+    parameters: [ { $ref: '#/components/parameters/SKUID' } ]
+    get:
+      operationId: getSKUVariantIdentity
+      responses:
+        '200': { description: Published target-SKU identity facts, content: { application/json: { schema: { $ref: '#/components/schemas/VariantIdentityManifestVersion' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /skus/{sku_id}/variant-identity/versions:
+    parameters: [ { $ref: '#/components/parameters/SKUID' } ]
+    post:
+      operationId: createSKUVariantIdentityVersion
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateVariantIdentityVersionRequest' } } }
+      responses:
+        '201': { description: Draft variant identity version, content: { application/json: { schema: { $ref: '#/components/schemas/VariantIdentityManifestVersion' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /variant-identity-versions/{version_id}:
+    parameters: [ { $ref: '#/components/parameters/VariantIdentityVersionID' } ]
+    patch:
+      operationId: updateVariantIdentityVersion
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateVariantIdentityVersionRequest' } } }
+      responses:
+        '200': { description: Updated draft variant identity version, content: { application/json: { schema: { $ref: '#/components/schemas/VariantIdentityManifestVersion' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /variant-identity-versions/{version_id}/validate:
+    parameters: [ { $ref: '#/components/parameters/VariantIdentityVersionID' } ]
+    post:
+      operationId: validateVariantIdentityVersion
+      responses:
+        '200': { description: Validation result, content: { application/json: { schema: { $ref: '#/components/schemas/VariantIdentityValidationResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /variant-identity-versions/{version_id}/publish:
+    parameters: [ { $ref: '#/components/parameters/VariantIdentityVersionID' } ]
+    post:
+      operationId: publishVariantIdentityVersion
+      responses:
+        '200': { description: Published immutable variant identity version, content: { application/json: { schema: { $ref: '#/components/schemas/VariantIdentityManifestVersion' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/VariantIdentityValidationFailed' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
   /capture-sops/{sop_id}:
     parameters: [ { $ref: '#/components/parameters/SOPID' } ]
     get:
@@ -743,6 +807,7 @@ components:
   parameters:
     ModelFamilyID: { in: path, name: family_id, required: true, schema: { type: string, format: uuid } }
     ModelFamilyMemberID: { in: path, name: member_id, required: true, schema: { type: string, format: uuid } }
+    VariantIdentityVersionID: { in: path, name: version_id, required: true, schema: { type: string, format: uuid } }
     SOPID: { in: path, name: sop_id, required: true, schema: { type: string, format: uuid } }
     VersionID: { in: path, name: version_id, required: true, schema: { type: string, format: uuid } }
     ViewID: { in: path, name: view_id, required: true, schema: { type: string, format: uuid } }
@@ -773,6 +838,7 @@ components:
     Conflict: { description: Lifecycle conflict, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
     PreconditionRequired: { description: X-SOP-Version-Updated-At is required for draft aggregate mutations, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
     ValidationFailed: { description: SOP aggregate validation failed, content: { application/json: { schema: { $ref: '#/components/schemas/ValidationResponse' } } } }
+    VariantIdentityValidationFailed: { description: Variant identity validation failed, content: { application/json: { schema: { $ref: '#/components/schemas/VariantIdentityValidationResponse' } } } }
     InternalServerError: { description: Unexpected database or server error, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
     ServiceUnavailable: { description: Required service or server dependency unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
   schemas:
@@ -1420,6 +1486,137 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         members: { type: array, items: { $ref: '#/components/schemas/ModelFamilyMember' } }
+    VariantColorRegion:
+      type: object
+      additionalProperties: false
+      required: [key, name]
+      properties:
+        key: { type: string, minLength: 1, maxLength: 80 }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        value: { type: string, pattern: '^#[0-9A-Fa-f]{6}$' }
+    VariantLabel:
+      type: object
+      additionalProperties: false
+      required: [key, text]
+      properties:
+        key: { type: string, minLength: 1, maxLength: 80 }
+        text: { type: string, minLength: 1, maxLength: 240 }
+        region_key: { type: string, maxLength: 80 }
+    VariantFeature:
+      type: object
+      additionalProperties: false
+      required: [key, description]
+      properties:
+        key: { type: string, minLength: 1, maxLength: 80 }
+        description: { type: string, minLength: 1, maxLength: 240 }
+        region_key: { type: string, maxLength: 80 }
+    VariantIdentityDocument:
+      type: object
+      additionalProperties: false
+      required: [schema, colors, material, finish, texture, labels, ports, controls, accessories, packaging, other, must_prove_with_target_assets]
+      properties:
+        schema: { type: string, enum: [variant_identity_v1] }
+        colors: { type: array, items: { $ref: '#/components/schemas/VariantColorRegion' } }
+        material: { type: string, maxLength: 180 }
+        finish: { type: string, maxLength: 180 }
+        texture: { type: string, maxLength: 180 }
+        labels: { type: array, items: { $ref: '#/components/schemas/VariantLabel' } }
+        ports: { type: array, items: { $ref: '#/components/schemas/VariantFeature' } }
+        controls: { type: array, items: { $ref: '#/components/schemas/VariantFeature' } }
+        accessories: { type: array, items: { type: string, minLength: 1, maxLength: 180 } }
+        packaging: { type: array, items: { $ref: '#/components/schemas/VariantFeature' } }
+        other: { type: array, items: { $ref: '#/components/schemas/VariantFeature' } }
+        must_prove_with_target_assets: { type: array, items: { type: string, minLength: 1, maxLength: 80 }, uniqueItems: true }
+    DifferenceRegionShape:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [kind, x, y, width, height]
+          properties:
+            kind: { type: string, enum: [rectangle] }
+            x: { type: number, minimum: 0, maximum: 1 }
+            y: { type: number, minimum: 0, maximum: 1 }
+            width: { type: number, exclusiveMinimum: 0, maximum: 1 }
+            height: { type: number, exclusiveMinimum: 0, maximum: 1 }
+        - type: object
+          additionalProperties: false
+          required: [kind, points]
+          properties:
+            kind: { type: string, enum: [polygon] }
+            points: { type: array, minItems: 3, items: { type: array, minItems: 2, maxItems: 2, items: { type: number, minimum: 0, maximum: 1 } } }
+    VariantDifferenceRegionInput:
+      type: object
+      additionalProperties: false
+      required: [key, difference_kind, strictness, shape]
+      properties:
+        key: { type: string, minLength: 1, maxLength: 80 }
+        difference_kind: { type: string, enum: [color, material, finish, texture, trim, ports, controls, labels, accessories, packaging, other] }
+        strictness: { type: string, enum: [exact, preserve, descriptive] }
+        description_zh: { type: string, maxLength: 1000 }
+        description_en: { type: string, maxLength: 1000 }
+        shape: { $ref: '#/components/schemas/DifferenceRegionShape' }
+        forbidden_inheritance: { type: array, uniqueItems: true, items: { type: string, minLength: 1, maxLength: 80 } }
+        required_view_keys: { type: array, uniqueItems: true, items: { type: string, minLength: 1, maxLength: 80 } }
+        evidence_asset_ids: { type: array, uniqueItems: true, items: { type: string, format: uuid } }
+    CreateVariantIdentityVersionRequest:
+      type: object
+      additionalProperties: false
+      oneOf:
+        - required: [identity, regions]
+        - required: [source_version_id]
+      properties:
+        identity: { $ref: '#/components/schemas/VariantIdentityDocument' }
+        regions: { type: array, items: { $ref: '#/components/schemas/VariantDifferenceRegionInput' } }
+        source_version_id: { type: string, format: uuid }
+    UpdateVariantIdentityVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [identity, regions]
+      properties:
+        identity: { $ref: '#/components/schemas/VariantIdentityDocument' }
+        regions: { type: array, items: { $ref: '#/components/schemas/VariantDifferenceRegionInput' } }
+    VariantDifferenceRegion:
+      type: object
+      additionalProperties: false
+      required: [public_id, key, difference_kind, strictness, description_zh, description_en, shape, forbidden_inheritance, required_view_keys, evidence_asset_ids]
+      properties:
+        public_id: { type: string, format: uuid }
+        key: { type: string }
+        difference_kind: { type: string, enum: [color, material, finish, texture, trim, ports, controls, labels, accessories, packaging, other] }
+        strictness: { type: string, enum: [exact, preserve, descriptive] }
+        description_zh: { type: string }
+        description_en: { type: string }
+        shape: { $ref: '#/components/schemas/DifferenceRegionShape' }
+        forbidden_inheritance: { type: array, items: { type: string } }
+        required_view_keys: { type: array, items: { type: string } }
+        evidence_asset_ids: { type: array, items: { type: string, format: uuid } }
+    VariantIdentityManifestVersion:
+      type: object
+      additionalProperties: false
+      required: [public_id, sku_id, version_number, status, identity, published_at, created_at, regions]
+      properties:
+        public_id: { type: string, format: uuid }
+        sku_id: { type: string, format: uuid }
+        version_number: { type: integer, minimum: 1 }
+        status: { type: string, enum: [draft, published, archived] }
+        identity: { $ref: '#/components/schemas/VariantIdentityDocument' }
+        published_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        regions: { type: array, items: { $ref: '#/components/schemas/VariantDifferenceRegion' } }
+    VariantIdentityValidationIssue:
+      type: object
+      additionalProperties: false
+      required: [code, path, message]
+      properties:
+        code: { type: string }
+        path: { type: string }
+        message: { type: string }
+    VariantIdentityValidationResponse:
+      type: object
+      required: [code, errors]
+      properties:
+        code: { type: string, enum: [variant_manifest_valid, variant_manifest_validation_failed] }
+        errors: { type: array, items: { $ref: '#/components/schemas/VariantIdentityValidationIssue' } }
     VersionMetadataRequest:
       type: object
       additionalProperties: false

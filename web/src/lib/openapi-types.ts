@@ -161,6 +161,96 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/skus/{sku_id}/variant-identity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sku_id: components["parameters"]["SKUID"];
+            };
+            cookie?: never;
+        };
+        get: operations["getSKUVariantIdentity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skus/{sku_id}/variant-identity/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sku_id: components["parameters"]["SKUID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createSKUVariantIdentityVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/variant-identity-versions/{version_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: components["parameters"]["VariantIdentityVersionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["updateVariantIdentityVersion"];
+        trace?: never;
+    };
+    "/variant-identity-versions/{version_id}/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: components["parameters"]["VariantIdentityVersionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["validateVariantIdentityVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/variant-identity-versions/{version_id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: components["parameters"]["VariantIdentityVersionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["publishVariantIdentityVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/capture-sops/{sop_id}": {
         parameters: {
             query?: never;
@@ -1491,6 +1581,111 @@ export interface components {
             updated_at: string;
             members?: components["schemas"]["ModelFamilyMember"][];
         };
+        VariantColorRegion: {
+            key: string;
+            name: string;
+            value?: string;
+        };
+        VariantLabel: {
+            key: string;
+            text: string;
+            region_key?: string;
+        };
+        VariantFeature: {
+            key: string;
+            description: string;
+            region_key?: string;
+        };
+        VariantIdentityDocument: {
+            /** @enum {string} */
+            schema: "variant_identity_v1";
+            colors: components["schemas"]["VariantColorRegion"][];
+            material: string;
+            finish: string;
+            texture: string;
+            labels: components["schemas"]["VariantLabel"][];
+            ports: components["schemas"]["VariantFeature"][];
+            controls: components["schemas"]["VariantFeature"][];
+            accessories: string[];
+            packaging: components["schemas"]["VariantFeature"][];
+            other: components["schemas"]["VariantFeature"][];
+            must_prove_with_target_assets: string[];
+        };
+        DifferenceRegionShape: {
+            /** @enum {string} */
+            kind: "rectangle";
+            x: number;
+            y: number;
+            width: number;
+            height: number;
+        } | {
+            /** @enum {string} */
+            kind: "polygon";
+            points: number[][];
+        };
+        VariantDifferenceRegionInput: {
+            key: string;
+            /** @enum {string} */
+            difference_kind: "color" | "material" | "finish" | "texture" | "trim" | "ports" | "controls" | "labels" | "accessories" | "packaging" | "other";
+            /** @enum {string} */
+            strictness: "exact" | "preserve" | "descriptive";
+            description_zh?: string;
+            description_en?: string;
+            shape: components["schemas"]["DifferenceRegionShape"];
+            forbidden_inheritance?: string[];
+            required_view_keys?: string[];
+            evidence_asset_ids?: string[];
+        };
+        CreateVariantIdentityVersionRequest: {
+            identity?: components["schemas"]["VariantIdentityDocument"];
+            regions?: components["schemas"]["VariantDifferenceRegionInput"][];
+            /** Format: uuid */
+            source_version_id?: string;
+        } & (unknown | unknown);
+        UpdateVariantIdentityVersionRequest: {
+            identity: components["schemas"]["VariantIdentityDocument"];
+            regions: components["schemas"]["VariantDifferenceRegionInput"][];
+        };
+        VariantDifferenceRegion: {
+            /** Format: uuid */
+            public_id: string;
+            key: string;
+            /** @enum {string} */
+            difference_kind: "color" | "material" | "finish" | "texture" | "trim" | "ports" | "controls" | "labels" | "accessories" | "packaging" | "other";
+            /** @enum {string} */
+            strictness: "exact" | "preserve" | "descriptive";
+            description_zh: string;
+            description_en: string;
+            shape: components["schemas"]["DifferenceRegionShape"];
+            forbidden_inheritance: string[];
+            required_view_keys: string[];
+            evidence_asset_ids: string[];
+        };
+        VariantIdentityManifestVersion: {
+            /** Format: uuid */
+            public_id: string;
+            /** Format: uuid */
+            sku_id: string;
+            version_number: number;
+            /** @enum {string} */
+            status: "draft" | "published" | "archived";
+            identity: components["schemas"]["VariantIdentityDocument"];
+            /** Format: date-time */
+            published_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            regions: components["schemas"]["VariantDifferenceRegion"][];
+        };
+        VariantIdentityValidationIssue: {
+            code: string;
+            path: string;
+            message: string;
+        };
+        VariantIdentityValidationResponse: {
+            /** @enum {string} */
+            code: "variant_manifest_valid" | "variant_manifest_validation_failed";
+            errors: components["schemas"]["VariantIdentityValidationIssue"][];
+        };
         VersionMetadataRequest: {
             name: components["schemas"]["LocalizedText"];
             description: components["schemas"]["LocalizedText"];
@@ -1724,6 +1919,15 @@ export interface components {
                 "application/json": components["schemas"]["ValidationResponse"];
             };
         };
+        /** @description Variant identity validation failed */
+        VariantIdentityValidationFailed: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["VariantIdentityValidationResponse"];
+            };
+        };
         /** @description Unexpected database or server error */
         InternalServerError: {
             headers: {
@@ -1746,6 +1950,7 @@ export interface components {
     parameters: {
         ModelFamilyID: string;
         ModelFamilyMemberID: string;
+        VariantIdentityVersionID: string;
         SOPID: string;
         VersionID: string;
         ViewID: string;
@@ -2170,6 +2375,152 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    getSKUVariantIdentity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sku_id: components["parameters"]["SKUID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Published target-SKU identity facts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VariantIdentityManifestVersion"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    createSKUVariantIdentityVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sku_id: components["parameters"]["SKUID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateVariantIdentityVersionRequest"];
+            };
+        };
+        responses: {
+            /** @description Draft variant identity version */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VariantIdentityManifestVersion"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    updateVariantIdentityVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: components["parameters"]["VariantIdentityVersionID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateVariantIdentityVersionRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated draft variant identity version */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VariantIdentityManifestVersion"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    validateVariantIdentityVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: components["parameters"]["VariantIdentityVersionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Validation result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VariantIdentityValidationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    publishVariantIdentityVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: components["parameters"]["VariantIdentityVersionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Published immutable variant identity version */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VariantIdentityManifestVersion"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["VariantIdentityValidationFailed"];
             500: components["responses"]["InternalServerError"];
         };
     };
