@@ -23,6 +23,7 @@ const navItems: Array<{ href: Route; labelKey: MessageKey; icon: typeof Package 
   { href: "/sop-templates", labelKey: "navSop", icon: ClipboardCheck },
   { href: "/assets/review", labelKey: "navAssets", icon: Images },
   { href: "/ai-jobs", labelKey: "navAi", icon: Bot },
+  { href: "/settings/openai", labelKey: "navOpenAISettings", icon: Settings2 },
   { href: "/users", labelKey: "navUsers", icon: Users },
 ];
 
@@ -57,9 +58,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
           <div className="flex items-center gap-2">
             <LanguageToggle />
-            <Button variant="secondary" size="sm">
-              <Settings2 className="h-4 w-4" />
-              {t("settings")}
+            <Button asChild className="min-h-11" variant="secondary" size="sm">
+              <Link href="/settings/openai">
+                <Settings2 className="h-4 w-4" />
+                {t("navOpenAISettings")}
+              </Link>
             </Button>
             <Button variant="ghost" size="icon" aria-label={t("logout")}>
               <LogOut className="h-4 w-4" />
