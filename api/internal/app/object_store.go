@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"strings"
 	"time"
 
 	"cargoflow/api/internal/ai"
 	"cargoflow/api/internal/config"
+	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
@@ -41,6 +43,9 @@ type assetStorage interface {
 }
 
 func newObjectStore(cfg config.Config) (*objectStore, error) {
+	if strings.TrimSpace(cfg.MinIOBucket) == "" || strings.TrimSpace(cfg.MinIOAIBucket) == "" || cfg.MinIOBucket == cfg.MinIOAIBucket {
+		return nil, fmt.Errorf("source and generated MinIO buckets must be distinct and non-empty")
+	}
 	options := &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.MinIOAccessKey, cfg.MinIOSecretKey, ""),
 		Secure: false,
@@ -124,20 +129,53 @@ func (s *objectStore) ReadSource(ctx context.Context, objectKey string) (ai.Imag
 	return ai.ImageInput{Bytes: value}, nil
 }
 
-func (s *objectStore) PutGenerated(ctx context.Context, objectKey, mimeType string, value []byte) (bool, error) {
+func (s *objectStore) ClaimGenerated(ctx context.Context, objectKey, mimeType string, value []byte) (ai.GeneratedObjectClaim, error) {
 	if err := s.ensureGeneratedBucket(ctx); err != nil {
-		return false, err
+		return ai.GeneratedObjectClaim{}, err
+	}
+	claim := ai.GeneratedObjectClaim{ObjectKey: objectKey, Token: uuid.NewString(), State: ai.GeneratedObjectCreated}
+	pendingKey := generatedPendingObjectKey(objectKey)
+	pendingOptions := minio.PutObjectOptions{ContentType: "application/octet-stream", DisableMultipart: true}
+	pendingOptions.SetMatchETagExcept("*")
+	if _, err := s.internal.PutObject(ctx, s.aiBucket, pendingKey, strings.NewReader(claim.Token), int64(len(claim.Token)), pendingOptions); err != nil {
+		if isConditionalWriteConflict(err) {
+			claim.State, claim.Token = ai.GeneratedObjectPending, ""
+			return claim, nil
+		}
+		return ai.GeneratedObjectClaim{}, err
 	}
 	options := minio.PutObjectOptions{ContentType: mimeType, DisableMultipart: true}
 	options.SetMatchETagExcept("*")
 	_, err := s.internal.PutObject(ctx, s.aiBucket, objectKey, bytes.NewReader(value), int64(len(value)), options)
 	if isConditionalWriteConflict(err) {
-		return false, nil
+		if err := s.internal.RemoveObject(ctx, s.aiBucket, pendingKey, minio.RemoveObjectOptions{}); err != nil {
+			return ai.GeneratedObjectClaim{}, err
+		}
+		claim.State, claim.Token = ai.GeneratedObjectCommitted, ""
+		return claim, nil
 	}
 	if err != nil {
-		return false, err
+		_ = s.internal.RemoveObject(ctx, s.aiBucket, pendingKey, minio.RemoveObjectOptions{})
+		return ai.GeneratedObjectClaim{}, err
 	}
-	return true, nil
+	return claim, nil
+}
+
+func (s *objectStore) CommitGenerated(ctx context.Context, claim ai.GeneratedObjectClaim) error {
+	if claim.State != ai.GeneratedObjectCreated || !s.ownsGeneratedClaim(ctx, claim) {
+		return fmt.Errorf("generated object claim is not owned")
+	}
+	return s.internal.RemoveObject(ctx, s.aiBucket, generatedPendingObjectKey(claim.ObjectKey), minio.RemoveObjectOptions{})
+}
+
+func (s *objectStore) CleanupGenerated(ctx context.Context, claim ai.GeneratedObjectClaim) error {
+	if claim.State != ai.GeneratedObjectCreated || !s.ownsGeneratedClaim(ctx, claim) {
+		return fmt.Errorf("generated object claim is not owned")
+	}
+	if err := s.internal.RemoveObject(ctx, s.aiBucket, claim.ObjectKey, minio.RemoveObjectOptions{}); err != nil {
+		return err
+	}
+	return s.internal.RemoveObject(ctx, s.aiBucket, generatedPendingObjectKey(claim.ObjectKey), minio.RemoveObjectOptions{})
 }
 
 func (s *objectStore) DeleteGenerated(ctx context.Context, objectKey string) error {
@@ -165,10 +203,27 @@ func (s *objectStore) ensureGeneratedBucket(ctx context.Context) error {
 	}
 	if !exists {
 		if err := s.internal.MakeBucket(ctx, s.aiBucket, minio.MakeBucketOptions{Region: "us-east-1"}); err != nil {
-			return err
+			response := minio.ToErrorResponse(err)
+			if response.Code != "BucketAlreadyOwnedByYou" && response.Code != "BucketAlreadyExists" && response.StatusCode != 409 {
+				return err
+			}
 		}
 	}
 	return s.internal.SetBucketPolicy(ctx, s.aiBucket, generatedBucketPolicy)
+}
+
+func generatedPendingObjectKey(objectKey string) string {
+	return objectKey + ".pending"
+}
+
+func (s *objectStore) ownsGeneratedClaim(ctx context.Context, claim ai.GeneratedObjectClaim) bool {
+	object, err := s.internal.GetObject(ctx, s.aiBucket, generatedPendingObjectKey(claim.ObjectKey), minio.GetObjectOptions{})
+	if err != nil {
+		return false
+	}
+	defer object.Close()
+	value, err := io.ReadAll(io.LimitReader(object, 128))
+	return err == nil && string(value) == claim.Token
 }
 
 func isMissingObject(err error) bool {

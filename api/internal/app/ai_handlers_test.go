@@ -51,7 +51,7 @@ func authenticatedAIRouter(t *testing.T, db *gorm.DB, verifier ai.ProviderVerifi
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := config.Config{JWTSecret: "ai-handler-test-secret", MinIOEndpoint: "127.0.0.1:9000", MinIOPublicEndpoint: "127.0.0.1:9000", MinIOAccessKey: "test", MinIOSecretKey: "test", MinIOBucket: "test"}
+	cfg := config.Config{JWTSecret: "ai-handler-test-secret", MinIOEndpoint: "127.0.0.1:9000", MinIOPublicEndpoint: "127.0.0.1:9000", MinIOAccessKey: "test", MinIOSecretKey: "test", MinIOBucket: "test", MinIOAIBucket: "test-ai-private"}
 	router := NewRouterWithAIDependencies(cfg, db, AIDependencies{
 		ProviderSettings: ai.NewProviderSettingsService(db, box, verifier),
 		Templates:        ai.NewTemplateService(db),
@@ -331,7 +331,7 @@ func TestAIContentTemplateDraftPreservesIncompleteAndArbitraryJSONUntilPublish(t
 
 func TestAIRouterConstructorsValidateProductionMasterKey(t *testing.T) {
 	db := newTestDB(t)
-	base := config.Config{AppEnv: "production", JWTSecret: "test", MinIOEndpoint: "127.0.0.1:9000", MinIOPublicEndpoint: "127.0.0.1:9000", MinIOAccessKey: "test", MinIOSecretKey: "test", MinIOBucket: "test"}
+	base := config.Config{AppEnv: "production", JWTSecret: "test", MinIOEndpoint: "127.0.0.1:9000", MinIOPublicEndpoint: "127.0.0.1:9000", MinIOAccessKey: "test", MinIOSecretKey: "test", MinIOBucket: "test", MinIOAIBucket: "test-ai-private"}
 	constructors := map[string]func(config.Config){
 		"default": func(cfg config.Config) { NewRouter(cfg, db) },
 		"injected": func(cfg config.Config) {

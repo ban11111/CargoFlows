@@ -17,7 +17,7 @@ import (
 
 func authenticatedSOPRouter(t *testing.T, db *gorm.DB, user models.User) (*httptest.Server, string) {
 	t.Helper()
-	cfg := config.Config{JWTSecret: "sop-handler-test-secret", MinIOEndpoint: "127.0.0.1:9000", MinIOPublicEndpoint: "127.0.0.1:9000", MinIOAccessKey: "test", MinIOSecretKey: "test", MinIOBucket: "test"}
+	cfg := config.Config{JWTSecret: "sop-handler-test-secret", MinIOEndpoint: "127.0.0.1:9000", MinIOPublicEndpoint: "127.0.0.1:9000", MinIOAccessKey: "test", MinIOSecretKey: "test", MinIOBucket: "test", MinIOAIBucket: "test-ai-private"}
 	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"sub": user.ID}).SignedString([]byte(cfg.JWTSecret))
 	if err != nil {
 		t.Fatal(err)

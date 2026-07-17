@@ -6,6 +6,20 @@ import (
 	"cargoflow/api/internal/config"
 )
 
+func TestNewObjectStoreRejectsEmptyOrSharedGeneratedBucket(t *testing.T) {
+	for name, cfg := range map[string]config.Config{
+		"empty source":    {MinIOEndpoint: "minio:9000", MinIOPublicEndpoint: "minio:9000", MinIOBucket: "", MinIOAIBucket: "private"},
+		"empty generated": {MinIOEndpoint: "minio:9000", MinIOPublicEndpoint: "minio:9000", MinIOBucket: "source", MinIOAIBucket: ""},
+		"shared bucket":   {MinIOEndpoint: "minio:9000", MinIOPublicEndpoint: "minio:9000", MinIOBucket: "source", MinIOAIBucket: "source"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := newObjectStore(cfg); err == nil {
+				t.Fatal("newObjectStore() accepted unsafe source/generated bucket configuration")
+			}
+		})
+	}
+}
+
 func TestGeneratedBucketUsesSeparatePrivateDefault(t *testing.T) {
 	t.Setenv("MINIO_AI_BUCKET", "")
 	if cfg := config.Load(); cfg.MinIOAIBucket != "cargoflow-ai-private" {

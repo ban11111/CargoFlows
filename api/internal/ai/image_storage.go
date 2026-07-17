@@ -14,6 +14,7 @@ import (
 	_ "image/png"
 	"math"
 	"strings"
+	"time"
 )
 
 const (
@@ -30,6 +31,8 @@ var (
 	ErrImageAspectInvalid      = errors.New("image aspect ratio does not match the request")
 	ErrGeneratedImageReference = errors.New("generated image reference is invalid")
 	ErrImageStorageUnavailable = errors.New("image storage is unavailable")
+	ErrImageStoragePending     = errors.New("generated image storage is pending")
+	ErrImageStorageCleanup     = errors.New("generated image storage cleanup failed")
 )
 
 // ImageObjectStore is the storage boundary for frozen source images and private
@@ -37,9 +40,24 @@ var (
 // derived by ImageStorage from immutable identifiers and the verified content hash.
 type ImageObjectStore interface {
 	ReadSource(context.Context, string) (ImageInput, error)
-	PutGenerated(context.Context, string, string, []byte) (created bool, err error)
-	DeleteGenerated(context.Context, string) error
+	ClaimGenerated(context.Context, string, string, []byte) (GeneratedObjectClaim, error)
+	CommitGenerated(context.Context, GeneratedObjectClaim) error
+	CleanupGenerated(context.Context, GeneratedObjectClaim) error
 	GeneratedReadURL(context.Context, string, int) (string, error)
+}
+
+type GeneratedObjectState string
+
+const (
+	GeneratedObjectCreated   GeneratedObjectState = "created"
+	GeneratedObjectPending   GeneratedObjectState = "pending"
+	GeneratedObjectCommitted GeneratedObjectState = "committed"
+)
+
+type GeneratedObjectClaim struct {
+	ObjectKey string
+	Token     string
+	State     GeneratedObjectState
 }
 
 type ImageValidationRequest struct {
@@ -62,16 +80,18 @@ type ValidatedImage struct {
 }
 
 type GeneratedImageStoreRequest struct {
-	JobPublicID    string
-	ItemPublicID   string
-	TurnPublicID   string
-	CandidateIndex int
-	Bytes          []byte
-	MaxBytes       int
-	MaxPixels      int64
-	ExpectedWidth  int
-	ExpectedHeight int
-	Persist        func(context.Context, StoredGeneratedImage) error
+	JobPublicID         string
+	ItemPublicID        string
+	TurnPublicID        string
+	CandidateIndex      int
+	Bytes               []byte
+	MaxBytes            int
+	MaxPixels           int64
+	ExpectedWidth       int
+	ExpectedHeight      int
+	ExpectedAspectRatio float64
+	AspectTolerance     float64
+	Persist             func(context.Context, StoredGeneratedImage) error
 }
 
 type StoredGeneratedImage struct {
@@ -136,14 +156,15 @@ func (s *ImageStorage) Validate(request ImageValidationRequest) (ValidatedImage,
 	if err != nil {
 		return ValidatedImage{}, err
 	}
-	width, height, err := imageDimensions(request.Bytes, mimeType)
+	width, height, innerWidth, innerHeight, err := imageGeometry(request.Bytes, mimeType)
 	if err != nil || width <= 0 || height <= 0 {
 		return ValidatedImage{}, ErrImageInvalid
 	}
-	if int64(width) > maxPixels/int64(height) {
+	if exceedsPixelLimit(width, height, maxPixels) || exceedsPixelLimit(innerWidth, innerHeight, maxPixels) {
 		return ValidatedImage{}, ErrImageTooManyPixels
 	}
-	if _, _, err := image.Decode(bytes.NewReader(request.Bytes)); err != nil {
+	decoded, format, err := image.Decode(bytes.NewReader(request.Bytes))
+	if err != nil || format != strings.TrimPrefix(mimeType, "image/") || decoded.Bounds().Dx() != width || decoded.Bounds().Dy() != height {
 		return ValidatedImage{}, ErrImageInvalid
 	}
 	if (request.ExpectedWidth == 0) != (request.ExpectedHeight == 0) {
@@ -169,7 +190,7 @@ func (s *ImageStorage) StoreGenerated(ctx context.Context, request GeneratedImag
 	if s == nil || s.objects == nil || request.CandidateIndex < 1 || !safeGeneratedPathSegment(request.JobPublicID, false) || !safeGeneratedPathSegment(request.ItemPublicID, false) || !safeGeneratedPathSegment(request.TurnPublicID, false) {
 		return StoredGeneratedImage{}, ErrGeneratedImageReference
 	}
-	validated, err := s.Validate(ImageValidationRequest{Bytes: request.Bytes, MaxBytes: request.MaxBytes, MaxPixels: request.MaxPixels, ExpectedWidth: request.ExpectedWidth, ExpectedHeight: request.ExpectedHeight})
+	validated, err := s.Validate(ImageValidationRequest{Bytes: request.Bytes, MaxBytes: request.MaxBytes, MaxPixels: request.MaxPixels, ExpectedWidth: request.ExpectedWidth, ExpectedHeight: request.ExpectedHeight, ExpectedAspectRatio: request.ExpectedAspectRatio, AspectTolerance: request.AspectTolerance})
 	if err != nil {
 		return StoredGeneratedImage{}, err
 	}
@@ -177,17 +198,32 @@ func (s *ImageStorage) StoreGenerated(ctx context.Context, request GeneratedImag
 		ObjectKey: fmt.Sprintf("generated/%s/%s/%s/%d-%s.%s", request.JobPublicID, request.ItemPublicID, request.TurnPublicID, request.CandidateIndex, validated.SHA256, validated.Extension),
 		MIMEType:  validated.MIMEType, Width: validated.Width, Height: validated.Height, ByteCount: validated.ByteCount, SHA256: validated.SHA256,
 	}
-	created, err := s.objects.PutGenerated(ctx, stored.ObjectKey, stored.MIMEType, request.Bytes)
+	claim, err := s.objects.ClaimGenerated(ctx, stored.ObjectKey, stored.MIMEType, request.Bytes)
 	if err != nil {
+		return StoredGeneratedImage{}, ErrImageStorageUnavailable
+	}
+	switch claim.State {
+	case GeneratedObjectPending:
+		return StoredGeneratedImage{}, ErrImageStoragePending
+	case GeneratedObjectCommitted:
+		return stored, nil
+	case GeneratedObjectCreated:
+	default:
 		return StoredGeneratedImage{}, ErrImageStorageUnavailable
 	}
 	if request.Persist != nil {
 		if err := request.Persist(ctx, stored); err != nil {
-			if created {
-				_ = s.objects.DeleteGenerated(ctx, stored.ObjectKey)
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			cleanupErr := s.objects.CleanupGenerated(cleanupCtx, claim)
+			cancel()
+			if cleanupErr != nil {
+				return StoredGeneratedImage{}, errors.Join(err, ErrImageStorageCleanup)
 			}
 			return StoredGeneratedImage{}, err
 		}
+	}
+	if err := s.objects.CommitGenerated(ctx, claim); err != nil {
+		return StoredGeneratedImage{}, ErrImageStorageUnavailable
 	}
 	return stored, nil
 }
@@ -205,43 +241,121 @@ func DetectImageMIME(value []byte) (string, error) {
 	}
 }
 
-func imageDimensions(value []byte, mimeType string) (int, int, error) {
+func exceedsPixelLimit(width, height int, maxPixels int64) bool {
+	return width <= 0 || height <= 0 || int64(width) > maxPixels/int64(height)
+}
+
+func imageGeometry(value []byte, mimeType string) (int, int, int, int, error) {
 	if mimeType == "image/webp" {
-		return webPDimensions(value)
+		geometry, err := parseWebPGeometry(value)
+		if err != nil {
+			return 0, 0, 0, 0, err
+		}
+		return geometry.canvasWidth, geometry.canvasHeight, geometry.frameWidth, geometry.frameHeight, nil
 	}
 	config, format, err := image.DecodeConfig(bytes.NewReader(value))
 	if err != nil || (mimeType == "image/png" && format != "png") || (mimeType == "image/jpeg" && format != "jpeg") {
-		return 0, 0, ErrImageInvalid
+		return 0, 0, 0, 0, ErrImageInvalid
 	}
-	return config.Width, config.Height, nil
+	return config.Width, config.Height, config.Width, config.Height, nil
 }
 
 func webPDimensions(value []byte) (int, int, error) {
-	if len(value) < 20 || string(value[:4]) != "RIFF" || string(value[8:12]) != "WEBP" {
+	geometry, err := parseWebPGeometry(value)
+	if err != nil {
+		return 0, 0, err
+	}
+	return geometry.canvasWidth, geometry.canvasHeight, nil
+}
+
+type webPGeometry struct {
+	canvasWidth  int
+	canvasHeight int
+	frameWidth   int
+	frameHeight  int
+}
+
+func parseWebPGeometry(value []byte) (webPGeometry, error) {
+	if len(value) < 20 || string(value[:4]) != "RIFF" || string(value[8:12]) != "WEBP" || uint64(binary.LittleEndian.Uint32(value[4:8]))+8 != uint64(len(value)) {
+		return webPGeometry{}, ErrImageInvalid
+	}
+	var result webPGeometry
+	var hasCanvas, hasFrame bool
+	for offset := 12; offset < len(value); {
+		if len(value)-offset < 8 {
+			return webPGeometry{}, ErrImageInvalid
+		}
+		kind := string(value[offset : offset+4])
+		size := int64(binary.LittleEndian.Uint32(value[offset+4 : offset+8]))
+		dataStart := offset + 8
+		dataEnd := int64(dataStart) + size
+		if size < 0 || dataEnd > int64(len(value)) {
+			return webPGeometry{}, ErrImageInvalid
+		}
+		data := value[dataStart:dataEnd]
+		next := dataEnd
+		if size%2 == 1 {
+			next++
+		}
+		if next > int64(len(value)) {
+			return webPGeometry{}, ErrImageInvalid
+		}
+		switch kind {
+		case "VP8X":
+			if hasCanvas || size != 10 {
+				return webPGeometry{}, ErrImageInvalid
+			}
+			hasCanvas = true
+			result.canvasWidth = 1 + int(data[4]) + int(data[5])<<8 + int(data[6])<<16
+			result.canvasHeight = 1 + int(data[7]) + int(data[8])<<8 + int(data[9])<<16
+		case "VP8L":
+			if hasFrame {
+				return webPGeometry{}, ErrImageInvalid
+			}
+			width, height, err := vp8LDimensions(data)
+			if err != nil {
+				return webPGeometry{}, err
+			}
+			hasFrame, result.frameWidth, result.frameHeight = true, width, height
+		case "VP8 ":
+			if hasFrame {
+				return webPGeometry{}, ErrImageInvalid
+			}
+			width, height, err := vp8Dimensions(data)
+			if err != nil {
+				return webPGeometry{}, err
+			}
+			hasFrame, result.frameWidth, result.frameHeight = true, width, height
+		case "ANIM", "ANMF":
+			return webPGeometry{}, ErrImageInvalid
+		}
+		offset = int(next)
+	}
+	if !hasFrame {
+		return webPGeometry{}, ErrImageInvalid
+	}
+	if !hasCanvas {
+		result.canvasWidth, result.canvasHeight = result.frameWidth, result.frameHeight
+	}
+	if result.canvasWidth <= 0 || result.canvasHeight <= 0 || result.frameWidth <= 0 || result.frameHeight <= 0 || result.frameWidth > result.canvasWidth || result.frameHeight > result.canvasHeight {
+		return webPGeometry{}, ErrImageInvalid
+	}
+	return result, nil
+}
+
+func vp8LDimensions(data []byte) (int, int, error) {
+	if len(data) < 5 || data[0] != 0x2f {
 		return 0, 0, ErrImageInvalid
 	}
-	switch string(value[12:16]) {
-	case "VP8X":
-		if len(value) < 30 || binary.LittleEndian.Uint32(value[16:20]) < 10 {
-			return 0, 0, ErrImageInvalid
-		}
-		width := 1 + int(value[24]) + int(value[25])<<8 + int(value[26])<<16
-		height := 1 + int(value[27]) + int(value[28])<<8 + int(value[29])<<16
-		return width, height, nil
-	case "VP8L":
-		if len(value) < 25 || value[20] != 0x2f || binary.LittleEndian.Uint32(value[16:20]) < 5 {
-			return 0, 0, ErrImageInvalid
-		}
-		packed := binary.LittleEndian.Uint32(value[21:25])
-		return 1 + int(packed&0x3fff), 1 + int((packed>>14)&0x3fff), nil
-	case "VP8 ":
-		if len(value) < 30 || binary.LittleEndian.Uint32(value[16:20]) < 10 || value[23] != 0x9d || value[24] != 0x01 || value[25] != 0x2a {
-			return 0, 0, ErrImageInvalid
-		}
-		return int(binary.LittleEndian.Uint16(value[26:28]) & 0x3fff), int(binary.LittleEndian.Uint16(value[28:30]) & 0x3fff), nil
-	default:
+	packed := binary.LittleEndian.Uint32(data[1:5])
+	return 1 + int(packed&0x3fff), 1 + int((packed>>14)&0x3fff), nil
+}
+
+func vp8Dimensions(data []byte) (int, int, error) {
+	if len(data) < 10 || data[3] != 0x9d || data[4] != 0x01 || data[5] != 0x2a {
 		return 0, 0, ErrImageInvalid
 	}
+	return int(binary.LittleEndian.Uint16(data[6:8]) & 0x3fff), int(binary.LittleEndian.Uint16(data[8:10]) & 0x3fff), nil
 }
 
 func imageExtension(mimeType string) string {

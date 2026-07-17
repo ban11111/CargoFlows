@@ -2,6 +2,9 @@ package app
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -76,6 +79,39 @@ func TestGeneratedBucketPrivateMinIOIntegration(t *testing.T) {
 	if response.StatusCode != http.StatusForbidden {
 		t.Fatalf("anonymous generated object GET status = %d, want %d", response.StatusCode, http.StatusForbidden)
 	}
+	pendingEntered := make(chan struct{})
+	pendingRelease := make(chan struct{})
+	pendingDone := make(chan error, 1)
+	pendingRequest := ai.GeneratedImageStoreRequest{JobPublicID: "job", ItemPublicID: "item", TurnPublicID: "pending", CandidateIndex: 1, Bytes: source, Persist: func(context.Context, ai.StoredGeneratedImage) error {
+		close(pendingEntered)
+		<-pendingRelease
+		return errors.New("database unavailable")
+	}}
+	go func() {
+		_, err := storage.StoreGenerated(context.Background(), pendingRequest)
+		pendingDone <- err
+	}()
+	<-pendingEntered
+	var pendingPersists atomic.Int32
+	secondPending := pendingRequest
+	secondPending.Persist = func(context.Context, ai.StoredGeneratedImage) error {
+		pendingPersists.Add(1)
+		return nil
+	}
+	if _, err := storage.StoreGenerated(t.Context(), secondPending); !errors.Is(err, ai.ErrImageStoragePending) {
+		t.Fatalf("concurrent pending StoreGenerated() error = %v, want ErrImageStoragePending", err)
+	}
+	if pendingPersists.Load() != 0 {
+		t.Fatalf("concurrent pending Persist calls = %d, want 0", pendingPersists.Load())
+	}
+	close(pendingRelease)
+	if err := <-pendingDone; err == nil {
+		t.Fatal("creator pending StoreGenerated() unexpectedly succeeded")
+	}
+	pendingKey := "generated/job/item/pending/1-" + fmt.Sprintf("%x", sha256.Sum256(source)) + ".png"
+	if _, err := store.internal.StatObject(t.Context(), cfg.MinIOAIBucket, pendingKey, minio.StatObjectOptions{}); !isMissingObject(err) {
+		t.Fatalf("failed creator left a generated object: %v", err)
+	}
 	concurrentKey := "generated/job/item/turn/2-concurrent.png"
 	defer func() { _ = store.DeleteGenerated(t.Context(), concurrentKey) }()
 	var created atomic.Int32
@@ -86,13 +122,16 @@ func TestGeneratedBucketPrivateMinIOIntegration(t *testing.T) {
 		go func() {
 			defer wait.Done()
 			<-start
-			wasCreated, err := store.PutGenerated(t.Context(), concurrentKey, "image/png", source)
+			claim, err := store.ClaimGenerated(t.Context(), concurrentKey, "image/png", source)
 			if err != nil {
 				t.Errorf("concurrent generated write failed: %v", err)
 				return
 			}
-			if wasCreated {
+			if claim.State == ai.GeneratedObjectCreated {
 				created.Add(1)
+				if err := store.CommitGenerated(t.Context(), claim); err != nil {
+					t.Errorf("concurrent generated commit failed: %v", err)
+				}
 			}
 		}()
 	}
@@ -101,6 +140,33 @@ func TestGeneratedBucketPrivateMinIOIntegration(t *testing.T) {
 	if created.Load() != 1 {
 		t.Fatalf("concurrent generated creates = %d, want exactly one exclusive create", created.Load())
 	}
+	firstUseStore := *store
+	firstUseStore.aiBucket = "cf-first-use-" + bucketSuffix
+	defer func() { _ = firstUseStore.internal.RemoveBucket(t.Context(), firstUseStore.aiBucket) }()
+	var firstUse sync.WaitGroup
+	firstUseStart := make(chan struct{})
+	for index := range 16 {
+		firstUse.Add(1)
+		go func(index int) {
+			defer firstUse.Done()
+			<-firstUseStart
+			key := fmt.Sprintf("generated/job/item/turn/first-%d.png", index)
+			claim, err := firstUseStore.ClaimGenerated(t.Context(), key, "image/png", source)
+			if err != nil {
+				t.Errorf("first-use generated claim failed: %v", err)
+				return
+			}
+			if claim.State != ai.GeneratedObjectCreated {
+				t.Errorf("first-use claim state = %q, want created", claim.State)
+				return
+			}
+			if err := firstUseStore.CleanupGenerated(t.Context(), claim); err != nil {
+				t.Errorf("first-use generated cleanup failed: %v", err)
+			}
+		}(index)
+	}
+	close(firstUseStart)
+	firstUse.Wait()
 }
 
 func minioPutPNG(t *testing.T) []byte {
