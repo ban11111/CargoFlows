@@ -1,6 +1,7 @@
 package models
 
 import (
+	"errors"
 	"time"
 
 	"gorm.io/gorm"
@@ -62,6 +63,7 @@ const (
 type AIExecutionStatus string
 
 const (
+	AIExecutionQueued         AIExecutionStatus = "queued"
 	AIExecutionPreparing      AIExecutionStatus = "preparing"
 	AIExecutionCallingOpenAI  AIExecutionStatus = "calling_openai"
 	AIExecutionStoring        AIExecutionStatus = "storing"
@@ -70,6 +72,17 @@ const (
 	AIExecutionNeedsAttention AIExecutionStatus = "needs_attention"
 	AIExecutionFailed         AIExecutionStatus = "failed"
 	AIExecutionCancelled      AIExecutionStatus = "cancelled"
+)
+
+type AIImageTurnStatus string
+
+const (
+	AIImageTurnQueued         AIImageTurnStatus = "queued"
+	AIImageTurnRunning        AIImageTurnStatus = "running"
+	AIImageTurnCompleted      AIImageTurnStatus = "completed"
+	AIImageTurnNeedsAttention AIImageTurnStatus = "needs_attention"
+	AIImageTurnFailed         AIImageTurnStatus = "failed"
+	AIImageTurnCancelled      AIImageTurnStatus = "cancelled"
 )
 
 type OpenAIProviderSetting struct {
@@ -191,6 +204,7 @@ type AIExecution struct {
 	ID                        uint                 `gorm:"primaryKey" json:"-"`
 	PublicID                  string               `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
 	AIJobItemID               uint                 `gorm:"index;uniqueIndex:idx_ai_execution_item_attempt,priority:1;not null" json:"-"`
+	AIImageTurnID             *uint                `gorm:"index" json:"-"`
 	ParentExecutionID         *uint                `gorm:"index" json:"-"`
 	Operation                 AIExecutionOperation `gorm:"size:32;index;not null" json:"operation"`
 	Status                    AIExecutionStatus    `gorm:"size:32;index;not null" json:"status"`
@@ -228,6 +242,131 @@ type AIExecution struct {
 	CompletedAt               *time.Time           `json:"completed_at"`
 	CreatedAt                 time.Time            `json:"created_at"`
 	UpdatedAt                 time.Time            `json:"updated_at"`
+}
+
+type AIImageThread struct {
+	ID               uint      `gorm:"primaryKey" json:"-"`
+	PublicID         string    `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
+	AIJobItemID      uint      `gorm:"uniqueIndex;not null" json:"-"`
+	SelectedResultID *uint     `gorm:"index" json:"-"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+func (thread *AIImageThread) BeforeSave(db *gorm.DB) error {
+	if thread.SelectedResultID == nil || db == nil {
+		return nil
+	}
+	var count int64
+	err := db.Session(&gorm.Session{NewDB: true}).
+		Table("ai_image_results AS result").
+		Joins("JOIN ai_image_turns AS turn ON turn.id = result.ai_image_turn_id").
+		Where("result.id = ? AND turn.ai_image_thread_id = ?", *thread.SelectedResultID, thread.ID).
+		Count(&count).Error
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return errors.New("selected image result must belong to the image thread")
+	}
+	return nil
+}
+
+type AIImageTurn struct {
+	ID                          uint                 `gorm:"primaryKey" json:"-"`
+	PublicID                    string               `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
+	AIImageThreadID             uint                 `gorm:"uniqueIndex:idx_ai_image_turn_sequence,priority:1;index;not null" json:"-"`
+	Sequence                    int                  `gorm:"uniqueIndex:idx_ai_image_turn_sequence,priority:2;check:chk_ai_image_turn_sequence,sequence > 0;not null" json:"sequence"`
+	Operation                   AIExecutionOperation `gorm:"size:32;index;not null;check:chk_ai_image_turn_parent,(operation = 'edit' AND parent_result_id IS NOT NULL) OR (operation IN ('generate','restart') AND parent_result_id IS NULL)" json:"operation"`
+	ParentResultID              *uint                `gorm:"index" json:"-"`
+	RequestedCandidateCount     int                  `gorm:"not null;default:1;check:chk_ai_image_turn_candidate_count,requested_candidate_count BETWEEN 1 AND 4" json:"requested_candidate_count"`
+	Size                        string               `gorm:"size:32;not null;default:1024x1024" json:"size"`
+	Quality                     string               `gorm:"size:32;not null;default:medium" json:"quality"`
+	Style                       string               `gorm:"size:64;not null;default:default" json:"style"`
+	UserInstruction             string               `gorm:"type:text" json:"user_instruction"`
+	CompiledRequestMetadataJSON []byte               `gorm:"type:json;not null" json:"-"`
+	Status                      AIImageTurnStatus    `gorm:"size:32;index;not null;default:queued" json:"status"`
+	ActorID                     uint                 `gorm:"index;not null" json:"-"`
+	LeaseOwner                  string               `gorm:"size:120;index" json:"-"`
+	LeaseExpiresAt              *time.Time           `gorm:"index" json:"-"`
+	SafeError                   string               `gorm:"type:text" json:"safe_error"`
+	InternalError               string               `gorm:"type:text" json:"-"`
+	StartedAt                   *time.Time           `json:"started_at"`
+	CompletedAt                 *time.Time           `json:"completed_at"`
+	CreatedAt                   time.Time            `json:"created_at"`
+	UpdatedAt                   time.Time            `json:"updated_at"`
+}
+
+func (turn *AIImageTurn) BeforeCreate(db *gorm.DB) error {
+	if len(turn.CompiledRequestMetadataJSON) == 0 {
+		turn.CompiledRequestMetadataJSON = []byte(`{}`)
+	}
+	if turn.Status == "" {
+		turn.Status = AIImageTurnQueued
+	}
+	if turn.RequestedCandidateCount == 0 {
+		turn.RequestedCandidateCount = 1
+	}
+	if turn.Size == "" {
+		turn.Size = "1024x1024"
+	}
+	if turn.Quality == "" {
+		turn.Quality = "medium"
+	}
+	if turn.Style == "" {
+		turn.Style = "default"
+	}
+	if turn.Operation != AIExecutionEdit || turn.ParentResultID == nil || db == nil {
+		return nil
+	}
+	var count int64
+	err := db.Session(&gorm.Session{NewDB: true}).
+		Table("ai_image_results AS result").
+		Joins("JOIN ai_image_turns AS parent_turn ON parent_turn.id = result.ai_image_turn_id").
+		Where("result.id = ? AND parent_turn.ai_image_thread_id = ?", *turn.ParentResultID, turn.AIImageThreadID).
+		Count(&count).Error
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return errors.New("parent image result must belong to the image thread")
+	}
+	return nil
+}
+
+type AIImageResult struct {
+	ID                  uint      `gorm:"primaryKey" json:"-"`
+	PublicID            string    `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
+	AIImageTurnID       uint      `gorm:"uniqueIndex:idx_ai_image_result_candidate,priority:1;index;not null" json:"-"`
+	AIExecutionID       uint      `gorm:"uniqueIndex;not null" json:"-"`
+	ParentResultID      *uint     `gorm:"index" json:"-"`
+	CandidateIndex      int       `gorm:"uniqueIndex:idx_ai_image_result_candidate,priority:2;check:chk_ai_image_result_candidate_index,candidate_index > 0;not null" json:"candidate_index"`
+	ObjectKey           string    `gorm:"size:768;not null" json:"-"`
+	MIMEType            string    `gorm:"size:80;not null" json:"mime_type"`
+	Width               int       `gorm:"not null;check:chk_ai_image_result_width,width > 0" json:"width"`
+	Height              int       `gorm:"not null;check:chk_ai_image_result_height,height > 0" json:"height"`
+	ByteCount           int64     `gorm:"not null;check:chk_ai_image_result_byte_count,byte_count > 0" json:"byte_count"`
+	SHA256              string    `gorm:"size:64;index;not null" json:"sha256"`
+	ProviderImageCallID string    `gorm:"size:255;index" json:"-"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
+}
+
+func (result *AIImageResult) BeforeCreate(db *gorm.DB) error {
+	if db == nil {
+		return nil
+	}
+	var turn AIImageTurn
+	if err := db.Session(&gorm.Session{NewDB: true}).Select("id", "parent_result_id").First(&turn, result.AIImageTurnID).Error; err != nil {
+		return err
+	}
+	if (turn.ParentResultID == nil) != (result.ParentResultID == nil) {
+		return errors.New("image result parent must match its turn parent")
+	}
+	if turn.ParentResultID != nil && *turn.ParentResultID != *result.ParentResultID {
+		return errors.New("image result parent must match its turn parent")
+	}
+	return nil
 }
 
 type AIAuditEvent struct {

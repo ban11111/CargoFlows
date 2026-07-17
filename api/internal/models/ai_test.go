@@ -8,16 +8,19 @@ import (
 )
 
 func TestAIModelsDoNotSerializeInternalRelationshipIDs(t *testing.T) {
-	values := []uint{910001, 910002, 910003, 910004, 910005, 910006, 910007, 910008, 910009, 910010, 910011, 910012, 910013, 910014, 910015, 910016, 910017}
+	values := []uint{910001, 910002, 910003, 910004, 910005, 910006, 910007, 910008, 910009, 910010, 910011, 910012, 910013, 910014, 910015, 910016, 910017, 910018, 910019, 910020, 910021, 910022, 910023, 910024}
 	models := []any{
 		AIContentTemplate{CreatedByID: values[0]},
 		AIContentTemplateVersion{AIContentTemplateID: values[1], CreatedByID: values[2], PublishedByID: &values[3]},
 		AIContentSlot{AIContentTemplateVersionID: values[4]},
 		AIJob{SKUID: values[5], AIContentTemplateVersionID: values[6], CreatedByID: values[7], IdempotencyKey: func() *string { v := "secret-idempotency"; return &v }(), RequestSHA256: "secret-hash"},
 		AIJobItem{AIJobID: values[8], AIContentSlotID: values[9], CurrentCandidateID: &values[10], EffectiveApprovedResultID: &values[11]},
-		AIExecution{AIJobItemID: values[12], ParentExecutionID: &values[13]},
+		AIExecution{AIJobItemID: values[12], ParentExecutionID: &values[13], AIImageTurnID: &values[17]},
 		AIAuditEvent{ActorID: &values[14], AIJobID: &values[8], AIJobItemID: &values[9], AIExecutionID: &values[15]},
 		AIUsageLedger{AIExecutionID: values[16]},
+		AIImageThread{AIJobItemID: values[18], SelectedResultID: &values[19]},
+		AIImageTurn{AIImageThreadID: values[20], ParentResultID: &values[21], ActorID: values[22]},
+		AIImageResult{AIImageTurnID: values[20], AIExecutionID: values[23], ParentResultID: &values[21], ObjectKey: "private/generated/internal.png"},
 	}
 
 	encoded, err := json.Marshal(models)
@@ -29,7 +32,8 @@ func TestAIModelsDoNotSerializeInternalRelationshipIDs(t *testing.T) {
 		"created_by_id", "published_by_id", "sku_id", "template_version_id",
 		"content_slot_id", "current_candidate_id", "effective_approved_result_id",
 		"job_id", "job_item_id", "parent_execution_id", "actor_id", "execution_id",
-		"idempotency_key", "request_sha256",
+		"image_turn_id", "image_thread_id", "parent_result_id", "selected_result_id",
+		"object_key", "idempotency_key", "request_sha256",
 	} {
 		if strings.Contains(text, `"`+key+`"`) {
 			t.Fatalf("serialized internal relationship key %q: %s", key, text)
