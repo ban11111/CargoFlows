@@ -1,44 +1,51 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Bot, Play } from "lucide-react";
+import { AlertCircle, Bot, Play, RefreshCw } from "lucide-react";
+import Link from "next/link";
 import { DataTable } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { apiRequest } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
-import { aiJobs } from "@/lib/mock-data";
 import type { AiJob, AiJobStatus } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
 
 function JobBadge({ status, label }: { status: AiJobStatus; label: string }) {
-  const variant = status === "failed" ? "danger" : status === "completed" ? "success" : "warning";
+  const variant = status === "failed" || status === "cancelled" ? "danger" : status === "completed" ? "success" : status === "partial" ? "neutral" : "warning";
   return <Badge variant={variant}>{label}</Badge>;
 }
 
 export default function AiJobsPage() {
   const { t } = useLanguage();
+  const jobsQuery = useQuery({
+    queryKey: ["ai-jobs"],
+    queryFn: () => apiRequest<{ data: AiJob[] }>("/ai-jobs"),
+  });
   const labels: Record<AiJobStatus, string> = {
-    pending: t("pendingSubmit"),
     queued: t("queued"),
     running: t("running"),
+    partial: t("partial"),
     completed: t("completed"),
     failed: t("failed"),
+    cancelled: t("cancelled"),
   };
   const columns: ColumnDef<AiJob>[] = [
-    { accessorKey: "id", header: t("job") },
-    { accessorKey: "skuCode", header: t("sku") },
-    { accessorKey: "targetPlatform", header: t("platform") },
-    { accessorKey: "inputAssets", header: t("inputAssets") },
+    { accessorKey: "public_id", header: t("job"), cell: ({ row }) => <span className="font-mono text-xs">{row.original.public_id.slice(0, 8)}</span> },
+    { accessorFn: (row) => row.input_snapshot.sku.code, id: "sku", header: t("sku"), cell: ({ row }) => <Link className="font-medium text-primary hover:underline" href={`/ai-jobs/${row.original.public_id}`}>{row.original.input_snapshot.sku.code}</Link> },
+    { accessorKey: "target_platform", header: t("platform") },
+    { accessorFn: (row) => row.input_snapshot.selected_assets.length, id: "inputAssets", header: t("inputAssets") },
     {
       accessorKey: "status",
       header: t("status"),
       cell: ({ row }) => <JobBadge status={row.original.status} label={labels[row.original.status]} />,
     },
     {
-      accessorKey: "createdAt",
+      accessorKey: "created_at",
       header: t("createdAt"),
-      cell: ({ row }) => formatDateTime(row.original.createdAt),
+      cell: ({ row }) => formatDateTime(row.original.created_at),
     },
   ];
 
@@ -49,10 +56,7 @@ export default function AiJobsPage() {
           <h1 className="text-2xl font-semibold">{t("aiJobs")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{t("aiJobsDesc")}</p>
         </div>
-        <Button>
-          <Play className="h-4 w-4" />
-          {t("newJob")}
-        </Button>
+        <Button asChild className="min-h-11"><Link href="/ai-jobs/new"><Play className="h-4 w-4" />{t("newJob")}</Link></Button>
       </div>
       <Card>
         <CardHeader>
@@ -62,7 +66,9 @@ export default function AiJobsPage() {
           </div>
         </CardHeader>
         <CardContent>
-          <DataTable columns={columns} data={aiJobs} searchPlaceholder={t("searchJobs")} />
+          {jobsQuery.isLoading ? <div className="h-32 animate-pulse rounded-lg bg-muted" aria-label={t("aiJobsLoading")} /> : null}
+          {jobsQuery.isError ? <div className="flex flex-col items-center gap-3 rounded-lg border border-danger/30 bg-danger/5 p-8 text-center" role="alert"><AlertCircle className="h-5 w-5 text-danger" /><p className="text-sm text-danger">{t("aiJobsLoadError")}</p><Button className="min-h-11" onClick={() => jobsQuery.refetch()} variant="secondary"><RefreshCw className="h-4 w-4" />{t("retry")}</Button></div> : null}
+          {jobsQuery.isSuccess ? <DataTable columns={columns} data={jobsQuery.data.data} searchPlaceholder={t("searchJobs")} /> : null}
         </CardContent>
       </Card>
     </div>

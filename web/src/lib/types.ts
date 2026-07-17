@@ -1,10 +1,12 @@
+import type { components } from "@/lib/openapi-types";
+
 export type Role = "admin" | "operator" | "photographer" | "viewer";
 
 export type SkuStatus = "active" | "draft" | "disabled";
 
 export type ReviewStatus = "pending" | "approved" | "rejected";
 
-export type AiJobStatus = "pending" | "queued" | "running" | "completed" | "failed";
+export type AiJobStatus = components["schemas"]["AIJob"]["status"];
 
 export interface Sku {
   id: string;
@@ -50,14 +52,7 @@ export interface AssetReviewItem {
   capturedAt: string;
 }
 
-export interface AiJob {
-  id: string;
-  skuCode: string;
-  targetPlatform: string;
-  status: AiJobStatus;
-  inputAssets: number;
-  createdAt: string;
-}
+export type AiJob = components["schemas"]["AIJob"];
 
 export interface User {
   id: string;
@@ -67,4 +62,3 @@ export interface User {
   status: "active" | "disabled";
   lastSeenAt: string;
 }
-

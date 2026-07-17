@@ -1,4 +1,4 @@
-import type { AiJob, AssetReviewItem, InventoryAdjustment, Sku, SopTemplate, User } from "@/lib/types";
+import type { AssetReviewItem, InventoryAdjustment, Sku, SopTemplate, User } from "@/lib/types";
 
 export const skus: Sku[] = [
   {
@@ -114,25 +114,6 @@ export const assetReviews: AssetReviewItem[] = [
   },
 ];
 
-export const aiJobs: AiJob[] = [
-  {
-    id: "job_001",
-    skuCode: "CF-CAP-CRM-F",
-    targetPlatform: "Shopee",
-    status: "pending",
-    inputAssets: 9,
-    createdAt: "2026-07-13T02:04:00.000Z",
-  },
-  {
-    id: "job_002",
-    skuCode: "CF-BAG-BLK-M",
-    targetPlatform: "Amazon",
-    status: "queued",
-    inputAssets: 10,
-    createdAt: "2026-07-12T16:40:00.000Z",
-  },
-];
-
 export const users: User[] = [
   {
     id: "user_001",
@@ -159,4 +140,3 @@ export const users: User[] = [
     lastSeenAt: "2026-07-12T10:45:00.000Z",
   },
 ];
-
