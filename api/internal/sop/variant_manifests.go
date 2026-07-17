@@ -166,19 +166,16 @@ func (s *VariantManifestService) CreateDraft(ctx context.Context, skuPublicID st
 func (s *VariantManifestService) UpdateDraft(ctx context.Context, versionPublicID string, input UpdateVariantManifestDraftInput) (*models.VariantIdentityManifestVersion, error) {
 	var updated models.VariantIdentityManifestVersion
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var locked models.VariantIdentityManifestVersion
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").Where("public_id = ?", versionPublicID).First(&locked).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrVariantManifestVersionNotFound
-			}
-			return err
-		}
-		version, manifest, family, sku, err := manifestVersionContext(tx, versionPublicID)
+		version, manifest, family, sku, err := manifestWriteContext(tx, versionPublicID)
 		if err != nil {
 			return err
 		}
 		if version.Status != models.VariantManifestDraft {
 			return ErrVariantManifestImmutable
+		}
+		family, err = revalidateManifestWriteContext(tx, manifest, sku)
+		if err != nil {
+			return err
 		}
 		identity, regions, err := normalizeManifestInput(input.Identity, input.Regions, family, sku.ID, tx)
 		if err != nil {
@@ -293,19 +290,16 @@ func (s *VariantManifestService) Validate(ctx context.Context, versionPublicID s
 func (s *VariantManifestService) Publish(ctx context.Context, versionPublicID string, actorID uint) (*models.VariantIdentityManifestVersion, error) {
 	var published models.VariantIdentityManifestVersion
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var locked models.VariantIdentityManifestVersion
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").Where("public_id = ?", versionPublicID).First(&locked).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrVariantManifestVersionNotFound
-			}
-			return err
-		}
-		version, manifest, family, sku, err := manifestVersionContext(tx, versionPublicID)
+		version, manifest, family, sku, err := manifestWriteContext(tx, versionPublicID)
 		if err != nil {
 			return err
 		}
 		if version.Status != models.VariantManifestDraft {
 			return ErrVariantManifestImmutable
+		}
+		family, err = revalidateManifestWriteContext(tx, manifest, sku)
+		if err != nil {
+			return err
 		}
 		if issues := validateManifestVersion(version, family, sku.ID, tx); len(issues) > 0 {
 			return &VariantManifestValidationError{Issues: issues}
@@ -422,6 +416,62 @@ func manifestVersionContext(tx *gorm.DB, versionPublicID string) (*models.Varian
 		return nil, nil, nil, nil, err
 	}
 	return &version, &manifest, &family, &sku, nil
+}
+
+// manifestWriteContext follows the model-family lifecycle lock order once the
+// immutable manifest has identified its family: family, SKU, then membership.
+// The version lock prevents a concurrent publish/update of the same version.
+func manifestWriteContext(tx *gorm.DB, versionPublicID string) (*models.VariantIdentityManifestVersion, *models.VariantIdentityManifest, *models.ModelFamily, *models.SKU, error) {
+	db := tx.Session(&gorm.Session{NewDB: true})
+	var version models.VariantIdentityManifestVersion
+	if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Regions.EvidenceAssets").Where("public_id = ?", versionPublicID).First(&version).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, nil, nil, ErrVariantManifestVersionNotFound
+		}
+		return nil, nil, nil, nil, err
+	}
+	var manifest models.VariantIdentityManifest
+	if err := db.First(&manifest, version.VariantIdentityManifestID).Error; err != nil {
+		return nil, nil, nil, nil, err
+	}
+	var family models.ModelFamily
+	if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).First(&family, manifest.ModelFamilyID).Error; err != nil {
+		return nil, nil, nil, nil, err
+	}
+	var sku models.SKU
+	if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).First(&sku, manifest.SKUID).Error; err != nil {
+		return nil, nil, nil, nil, err
+	}
+	confirmedFamily, err := revalidateManifestWriteContext(tx, &manifest, &sku)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	return &version, &manifest, confirmedFamily, &sku, nil
+}
+
+// revalidateManifestWriteContext is deliberately repeated immediately before
+// a mutation. It prevents a re-group/removal or a family lifecycle/dimension
+// change from being committed against a stale captured scope.
+func revalidateManifestWriteContext(tx *gorm.DB, manifest *models.VariantIdentityManifest, sku *models.SKU) (*models.ModelFamily, error) {
+	db := tx.Session(&gorm.Session{NewDB: true})
+	var family models.ModelFamily
+	if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).First(&family, manifest.ModelFamilyID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrVariantManifestInvalid
+		}
+		return nil, err
+	}
+	if family.Status != models.ModelFamilyActive {
+		return nil, ErrModelFamilyArchived
+	}
+	var member models.ModelFamilyMember
+	if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).Where("model_family_id = ? AND sk_uid = ? AND removed_at IS NULL", family.ID, sku.ID).First(&member).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrVariantManifestInvalid
+		}
+		return nil, err
+	}
+	return &family, nil
 }
 
 func normalizeManifestInput(identityRaw json.RawMessage, regionInputs []VariantDifferenceRegionInput, family *models.ModelFamily, skuID uint, tx *gorm.DB) (json.RawMessage, []VariantDifferenceRegionInput, error) {

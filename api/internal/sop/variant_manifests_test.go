@@ -5,8 +5,10 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"cargoflow/api/internal/models"
+	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -280,6 +282,78 @@ func TestVariantManifestConcurrentPublishPreventsDraftWriteAfterPublication(t *t
 	}
 	if stored.Status != models.VariantManifestPublished || strings.Contains(string(stored.IdentityJSON), "Ocean blue") {
 		t.Fatalf("published state was overwritten: %#v", stored)
+	}
+}
+
+func TestVariantManifestWriteRejectsInterleavedReGroup(t *testing.T) {
+	for _, operation := range []struct {
+		name string
+		run  func(*VariantManifestService, models.VariantIdentityManifestVersion) error
+	}{
+		{name: "update", run: func(service *VariantManifestService, draft models.VariantIdentityManifestVersion) error {
+			identity := json.RawMessage(strings.Replace(string(validVariantIdentityJSON(t)), "Midnight blue", "Ocean blue", 1))
+			_, err := service.UpdateDraft(t.Context(), draft.PublicID, UpdateVariantManifestDraftInput{Identity: identity, ActorID: 10})
+			return err
+		}},
+		{name: "publish", run: func(service *VariantManifestService, draft models.VariantIdentityManifestVersion) error {
+			_, err := service.Publish(t.Context(), draft.PublicID, 10)
+			return err
+		}},
+	} {
+		t.Run(operation.name, func(t *testing.T) {
+			db := variantManifestTestDB(t)
+			familyA, target, _ := createVariantManifestFamily(t, db, []string{"color", "material", "finish", "texture", "labels", "ports", "accessories"})
+			service := NewVariantManifestService(db)
+			draft, err := service.CreateDraft(t.Context(), target.PublicID, CreateVariantManifestDraftInput{Identity: validVariantIdentityJSON(t), ActorID: 9})
+			if err != nil {
+				t.Fatal(err)
+			}
+			familyB, err := NewModelFamilyService(db).Create(t.Context(), CreateModelFamilyInput{Brand: "CargoFlow", NameZH: "新同款", NameEN: "New family", ModelCode: "INTERLEAVE-" + operation.name + t.Name(), CommonStructure: json.RawMessage(`{"schema":"model_family_common_structure_v1","invariants":["housing"]}`), VariationDimensions: []string{"color", "material", "finish", "texture", "labels", "ports", "accessories"}, CreatedByID: 10})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var oldMember models.ModelFamilyMember
+			if err := db.Where("model_family_id = ? AND sk_uid = ? AND removed_at IS NULL", familyA.ID, target.ID).First(&oldMember).Error; err != nil {
+				t.Fatal(err)
+			}
+
+			memberQueries, injected := 0, false
+			if err := db.Callback().Query().Before("gorm:query").Register("test_interleave_variant_manifest_regroup", func(tx *gorm.DB) {
+				if tx.Statement.Table != "model_family_members" {
+					return
+				}
+				memberQueries++
+				if injected || memberQueries != 2 {
+					return
+				}
+				injected = true
+				now := time.Now().UTC()
+				if err := tx.Session(&gorm.Session{NewDB: true, SkipHooks: true}).Model(&models.ModelFamilyMember{}).Where("id = ?", oldMember.ID).Updates(map[string]any{"removed_at": now, "removed_by_id": uint(10), "active_guard": nil}).Error; err != nil {
+					t.Fatalf("interleave remove member: %v", err)
+				}
+				active := "active"
+				if err := tx.Session(&gorm.Session{NewDB: true, SkipHooks: true}).Create(&models.ModelFamilyMember{PublicID: uuid.NewString(), ModelFamilyID: familyB.ID, SKUID: target.ID, ActiveGuard: &active, AddedByID: 10}).Error; err != nil {
+					t.Fatalf("interleave add member: %v", err)
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
+			defer db.Callback().Query().Remove("test_interleave_variant_manifest_regroup")
+
+			if err := operation.run(service, *draft); !errors.Is(err, ErrVariantManifestInvalid) {
+				t.Fatalf("interleaved %s error = %v", operation.name, err)
+			}
+			if !injected {
+				t.Fatal("re-group did not interleave before final membership revalidation")
+			}
+			var stored models.VariantIdentityManifestVersion
+			if err := db.Where("public_id = ?", draft.PublicID).First(&stored).Error; err != nil {
+				t.Fatal(err)
+			}
+			if stored.Status != models.VariantManifestDraft || strings.Contains(string(stored.IdentityJSON), "Ocean blue") {
+				t.Fatalf("stale write committed after re-group: %#v", stored)
+			}
+		})
 	}
 }
 
