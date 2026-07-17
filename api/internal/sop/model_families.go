@@ -223,6 +223,21 @@ func (s *ModelFamilyService) RemoveMember(ctx context.Context, familyPublicID, m
 		if family.Status == models.ModelFamilyArchived {
 			return ErrModelFamilyArchived
 		}
+		// Resolve the immutable SKU reference without locking it. The
+		// authoritative row is loaded after the SKU lock below, keeping the
+		// lifecycle order shared with AddMember and manifest writes:
+		// family → SKU → active membership.
+		var memberRef models.ModelFamilyMember
+		if err := tx.Session(&gorm.Session{NewDB: true}).Where("public_id = ? AND model_family_id = ? AND removed_at IS NULL", memberPublicID, family.ID).First(&memberRef).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrModelFamilyMemberNotFound
+			}
+			return err
+		}
+		var sku models.SKU
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&sku, memberRef.SKUID).Error; err != nil {
+			return err
+		}
 		var member models.ModelFamilyMember
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("public_id = ? AND model_family_id = ? AND removed_at IS NULL", memberPublicID, family.ID).First(&member).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {

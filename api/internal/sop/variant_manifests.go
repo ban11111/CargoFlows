@@ -359,27 +359,55 @@ func (s *VariantManifestService) GetForSKU(ctx context.Context, skuPublicID stri
 	return &version, nil
 }
 
+// activeManifestMembership first resolves the current family without taking a
+// lock, then acquires the shared lifecycle lock order: family, SKU, membership.
+// The second, locked lookup is authoritative; a concurrent re-group therefore
+// becomes a safe conflict instead of letting a manifest write target stale
+// family dimensions.
 func activeManifestMembership(tx *gorm.DB, skuPublicID string) (*models.ModelFamilyMember, *models.ModelFamily, *models.SKU, error) {
+	db := tx.Session(&gorm.Session{NewDB: true})
 	var sku models.SKU
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("public_id = ?", skuPublicID).First(&sku).Error; err != nil {
+	if err := db.Where("public_id = ?", skuPublicID).First(&sku).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil, nil, ErrSKUNotFound
 		}
 		return nil, nil, nil, err
 	}
 	var member models.ModelFamilyMember
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("sk_uid = ? AND removed_at IS NULL", sku.ID).First(&member).Error; err != nil {
+	if err := db.Where("sk_uid = ? AND removed_at IS NULL", sku.ID).First(&member).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil, nil, ErrVariantManifestInvalid
 		}
 		return nil, nil, nil, err
 	}
+	return lockActiveManifestMembership(tx, member.ModelFamilyID, sku.ID)
+}
+
+// lockActiveManifestMembership is the only mutable manifest scope lock. It
+// matches ModelFamilyService membership mutations exactly: model family, SKU,
+// then the active membership row. Never acquire these rows in another order.
+func lockActiveManifestMembership(tx *gorm.DB, familyID, skuID uint) (*models.ModelFamilyMember, *models.ModelFamily, *models.SKU, error) {
+	db := tx.Session(&gorm.Session{NewDB: true})
 	var family models.ModelFamily
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&family, member.ModelFamilyID).Error; err != nil {
+	if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).First(&family, familyID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, nil, ErrVariantManifestInvalid
+		}
 		return nil, nil, nil, err
 	}
 	if family.Status != models.ModelFamilyActive {
 		return nil, nil, nil, ErrModelFamilyArchived
+	}
+	var sku models.SKU
+	if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).First(&sku, skuID).Error; err != nil {
+		return nil, nil, nil, err
+	}
+	var member models.ModelFamilyMember
+	if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).Where("model_family_id = ? AND sk_uid = ? AND removed_at IS NULL", family.ID, sku.ID).First(&member).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, nil, ErrVariantManifestInvalid
+		}
+		return nil, nil, nil, err
 	}
 	return &member, &family, &sku, nil
 }
@@ -418,13 +446,14 @@ func manifestVersionContext(tx *gorm.DB, versionPublicID string) (*models.Varian
 	return &version, &manifest, &family, &sku, nil
 }
 
-// manifestWriteContext follows the model-family lifecycle lock order once the
-// immutable manifest has identified its family: family, SKU, then membership.
-// The version lock prevents a concurrent publish/update of the same version.
+// manifestWriteContext resolves immutable version/manifest identifiers without
+// locks, then takes the shared lifecycle scope lock (family, SKU, membership)
+// before the version lock. Membership mutations never lock versions, so this
+// ordering cannot form a cycle with ModelFamilyService operations.
 func manifestWriteContext(tx *gorm.DB, versionPublicID string) (*models.VariantIdentityManifestVersion, *models.VariantIdentityManifest, *models.ModelFamily, *models.SKU, error) {
 	db := tx.Session(&gorm.Session{NewDB: true})
 	var version models.VariantIdentityManifestVersion
-	if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Regions.EvidenceAssets").Where("public_id = ?", versionPublicID).First(&version).Error; err != nil {
+	if err := db.Where("public_id = ?", versionPublicID).First(&version).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil, nil, nil, ErrVariantManifestVersionNotFound
 		}
@@ -434,44 +463,29 @@ func manifestWriteContext(tx *gorm.DB, versionPublicID string) (*models.VariantI
 	if err := db.First(&manifest, version.VariantIdentityManifestID).Error; err != nil {
 		return nil, nil, nil, nil, err
 	}
-	var family models.ModelFamily
-	if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).First(&family, manifest.ModelFamilyID).Error; err != nil {
-		return nil, nil, nil, nil, err
-	}
-	var sku models.SKU
-	if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).First(&sku, manifest.SKUID).Error; err != nil {
-		return nil, nil, nil, nil, err
-	}
-	confirmedFamily, err := revalidateManifestWriteContext(tx, &manifest, &sku)
+	_, family, sku, err := lockActiveManifestMembership(tx, manifest.ModelFamilyID, manifest.SKUID)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	return &version, &manifest, confirmedFamily, &sku, nil
+	var lockedVersion models.VariantIdentityManifestVersion
+	if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Regions.EvidenceAssets").Where("public_id = ?", versionPublicID).First(&lockedVersion).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, nil, nil, ErrVariantManifestVersionNotFound
+		}
+		return nil, nil, nil, nil, err
+	}
+	if lockedVersion.VariantIdentityManifestID != manifest.ID {
+		return nil, nil, nil, nil, ErrVariantManifestInvalid
+	}
+	return &lockedVersion, &manifest, family, sku, nil
 }
 
 // revalidateManifestWriteContext is deliberately repeated immediately before
 // a mutation. It prevents a re-group/removal or a family lifecycle/dimension
 // change from being committed against a stale captured scope.
 func revalidateManifestWriteContext(tx *gorm.DB, manifest *models.VariantIdentityManifest, sku *models.SKU) (*models.ModelFamily, error) {
-	db := tx.Session(&gorm.Session{NewDB: true})
-	var family models.ModelFamily
-	if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).First(&family, manifest.ModelFamilyID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrVariantManifestInvalid
-		}
-		return nil, err
-	}
-	if family.Status != models.ModelFamilyActive {
-		return nil, ErrModelFamilyArchived
-	}
-	var member models.ModelFamilyMember
-	if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).Where("model_family_id = ? AND sk_uid = ? AND removed_at IS NULL", family.ID, sku.ID).First(&member).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrVariantManifestInvalid
-		}
-		return nil, err
-	}
-	return &family, nil
+	_, family, _, err := lockActiveManifestMembership(tx, manifest.ModelFamilyID, sku.ID)
+	return family, err
 }
 
 func normalizeManifestInput(identityRaw json.RawMessage, regionInputs []VariantDifferenceRegionInput, family *models.ModelFamily, skuID uint, tx *gorm.DB) (json.RawMessage, []VariantDifferenceRegionInput, error) {

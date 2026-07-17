@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func variantManifestTestDB(t *testing.T) *gorm.DB {
@@ -353,6 +354,125 @@ func TestVariantManifestWriteRejectsInterleavedReGroup(t *testing.T) {
 			if stored.Status != models.VariantManifestDraft || strings.Contains(string(stored.IdentityJSON), "Ocean blue") {
 				t.Fatalf("stale write committed after re-group: %#v", stored)
 			}
+		})
+	}
+}
+
+// TestManifestAndMembershipWritesUseMySQLUpdateLockOrder inspects GORM's
+// locking clause rather than SQLite's generated SQL because SQLite intentionally
+// omits FOR UPDATE. The same clause is emitted by the MySQL dialect, making this
+// a deterministic regression for the lock order that protects production rows.
+func TestManifestAndMembershipWritesUseMySQLUpdateLockOrder(t *testing.T) {
+	assertUpdateLockOrder := func(t *testing.T, db *gorm.DB, run func() error, want []string) {
+		t.Helper()
+		var got []string
+		callbackName := "test_manifest_lock_order_" + uuid.NewString()
+		if err := db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+			lockingClause, ok := tx.Statement.Clauses["FOR"]
+			if !ok {
+				return
+			}
+			locking, ok := lockingClause.Expression.(clause.Locking)
+			if !ok || locking.Strength != "UPDATE" {
+				return
+			}
+			switch tx.Statement.Table {
+			case "model_families", "skus", "model_family_members", "variant_identity_manifests", "variant_identity_manifest_versions":
+				got = append(got, tx.Statement.Table)
+			}
+		}); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = db.Callback().Query().Remove(callbackName) })
+		if err := run(); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Fatalf("UPDATE lock order = %v, want %v", got, want)
+		}
+	}
+
+	newDraft := func(t *testing.T) (*gorm.DB, *ModelFamilyService, *VariantManifestService, models.ModelFamily, models.SKU, models.VariantIdentityManifestVersion) {
+		t.Helper()
+		db := variantManifestTestDB(t)
+		family, target, _ := createVariantManifestFamily(t, db, []string{"color", "material", "finish", "texture", "labels", "ports", "accessories"})
+		manifests := NewVariantManifestService(db)
+		draft, err := manifests.CreateDraft(t.Context(), target.PublicID, CreateVariantManifestDraftInput{Identity: validVariantIdentityJSON(t), ActorID: 9})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return db, NewModelFamilyService(db), manifests, family, target, *draft
+	}
+
+	t.Run("create", func(t *testing.T) {
+		db := variantManifestTestDB(t)
+		family, target, _ := createVariantManifestFamily(t, db, []string{"color", "material", "finish", "texture", "labels", "ports", "accessories"})
+		second := seedModelFamilySKU(t, db, "LOCK-ORDER-CREATE-"+t.Name())
+		if _, err := NewModelFamilyService(db).AddMember(t.Context(), family.PublicID, second.PublicID, 1); err != nil {
+			t.Fatal(err)
+		}
+		_ = target
+		assertUpdateLockOrder(t, db, func() error {
+			_, err := NewVariantManifestService(db).CreateDraft(t.Context(), second.PublicID, CreateVariantManifestDraftInput{Identity: validVariantIdentityJSON(t), ActorID: 9})
+			return err
+		}, []string{"model_families", "skus", "model_family_members", "variant_identity_manifests"})
+	})
+
+	t.Run("copy", func(t *testing.T) {
+		db, _, manifests, _, target, draft := newDraft(t)
+		published, err := manifests.Publish(t.Context(), draft.PublicID, 9)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertUpdateLockOrder(t, db, func() error {
+			_, err := manifests.CopyVersion(t.Context(), target.PublicID, published.PublicID, 10)
+			return err
+		}, []string{"model_families", "skus", "model_family_members", "variant_identity_manifests", "variant_identity_manifest_versions"})
+	})
+
+	for _, operation := range []struct {
+		name string
+		run  func(*VariantManifestService, models.VariantIdentityManifestVersion) error
+	}{
+		{name: "update", run: func(service *VariantManifestService, draft models.VariantIdentityManifestVersion) error {
+			_, err := service.UpdateDraft(t.Context(), draft.PublicID, UpdateVariantManifestDraftInput{Identity: validVariantIdentityJSON(t), ActorID: 10})
+			return err
+		}},
+		{name: "publish", run: func(service *VariantManifestService, draft models.VariantIdentityManifestVersion) error {
+			_, err := service.Publish(t.Context(), draft.PublicID, 10)
+			return err
+		}},
+	} {
+		t.Run(operation.name, func(t *testing.T) {
+			db, _, manifests, _, _, draft := newDraft(t)
+			assertUpdateLockOrder(t, db, func() error { return operation.run(manifests, draft) }, []string{"model_families", "skus", "model_family_members", "variant_identity_manifest_versions", "model_families", "skus", "model_family_members"})
+		})
+	}
+
+	for _, operation := range []struct {
+		name string
+		run  func(*ModelFamilyService, models.ModelFamily, models.SKU) error
+	}{
+		{name: "member_add", run: func(service *ModelFamilyService, family models.ModelFamily, sku models.SKU) error {
+			_, err := service.AddMember(t.Context(), family.PublicID, sku.PublicID, 10)
+			return err
+		}},
+		{name: "member_remove", run: func(service *ModelFamilyService, family models.ModelFamily, sku models.SKU) error {
+			var member models.ModelFamilyMember
+			if err := service.db.Where("model_family_id = ? AND sk_uid = ? AND removed_at IS NULL", family.ID, sku.ID).First(&member).Error; err != nil {
+				return err
+			}
+			return service.RemoveMember(t.Context(), family.PublicID, member.PublicID, 10)
+		}},
+	} {
+		t.Run(operation.name, func(t *testing.T) {
+			db := variantManifestTestDB(t)
+			family, target, _ := createVariantManifestFamily(t, db, []string{"color", "ports"})
+			if operation.name == "member_add" {
+				target = seedModelFamilySKU(t, db, "LOCK-ORDER-ADD-"+t.Name())
+			}
+			service := NewModelFamilyService(db)
+			assertUpdateLockOrder(t, db, func() error { return operation.run(service, family, target) }, []string{"model_families", "skus", "model_family_members"})
 		})
 	}
 }
