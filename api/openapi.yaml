@@ -306,6 +306,136 @@ paths:
         '200': { description: Review assets grouped by category and SKU, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/AssetReviewCategory' } } } } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalServerError' }
+  /settings/openai:
+    get:
+      operationId: getOpenAISetting
+      responses:
+        '200': { description: Masked OpenAI provider setting, content: { application/json: { schema: { $ref: '#/components/schemas/OpenAISetting' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    put:
+      operationId: putOpenAISetting
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/OpenAISettingRequest' } } }
+      responses:
+        '200': { description: Verified and activated OpenAI provider setting, content: { application/json: { schema: { $ref: '#/components/schemas/OpenAISetting' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: OpenAI rejected the supplied credential, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    delete:
+      operationId: disableOpenAISetting
+      responses:
+        '200': { description: Disabled OpenAI provider setting, content: { application/json: { schema: { $ref: '#/components/schemas/OpenAISetting' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /ai-content-templates:
+    get:
+      operationId: listAIContentTemplates
+      parameters:
+        - { in: query, name: include_all, description: When true includes draft and archived versions; otherwise returns templates with published versions only., schema: { type: boolean, default: false } }
+      responses:
+        '200': { description: AI content templates, content: { application/json: { schema: { type: object, additionalProperties: false, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/AIContentTemplate' } } } } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    post:
+      operationId: createAIContentTemplate
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AIContentTemplateMutationRequest' } } }
+      responses:
+        '201': { description: Created template with its initial draft, content: { application/json: { schema: { $ref: '#/components/schemas/AIContentTemplate' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /ai-content-templates/{template_id}:
+    parameters: [ { $ref: '#/components/parameters/AIContentTemplateID' } ]
+    get:
+      operationId: getAIContentTemplate
+      responses:
+        '200': { description: AI content template with ordered versions and slots, content: { application/json: { schema: { $ref: '#/components/schemas/AIContentTemplate' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /ai-content-templates/{template_id}/versions:
+    parameters: [ { $ref: '#/components/parameters/AIContentTemplateID' } ]
+    post:
+      operationId: copyAIContentTemplateVersion
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CopyAIContentTemplateVersionRequest' } } }
+      responses:
+        '201': { description: Copied draft version, content: { application/json: { schema: { $ref: '#/components/schemas/AIContentTemplateVersion' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /ai-content-template-versions/{version_id}:
+    parameters: [ { $ref: '#/components/parameters/AIContentTemplateVersionID' } ]
+    patch:
+      operationId: updateAIContentTemplateVersion
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AIContentTemplateMutationRequest' } } }
+      responses:
+        '200': { description: Updated draft version, content: { application/json: { schema: { $ref: '#/components/schemas/AIContentTemplateVersion' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /ai-content-template-versions/{version_id}/validate:
+    parameters: [ { $ref: '#/components/parameters/AIContentTemplateVersionID' } ]
+    post:
+      operationId: validateAIContentTemplateVersion
+      responses:
+        '200': { description: Template validation result, content: { application/json: { schema: { $ref: '#/components/schemas/AITemplateValidationResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /ai-content-template-versions/{version_id}/publish:
+    parameters: [ { $ref: '#/components/parameters/AIContentTemplateVersionID' } ]
+    post:
+      operationId: publishAIContentTemplateVersion
+      responses:
+        '200': { description: Published immutable template version, content: { application/json: { schema: { $ref: '#/components/schemas/AIContentTemplateVersion' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { description: Template validation failed, content: { application/json: { schema: { $ref: '#/components/schemas/AITemplateValidationResponse' } } } }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /ai-content-template-versions/{version_id}/archive:
+    parameters: [ { $ref: '#/components/parameters/AIContentTemplateVersionID' } ]
+    post:
+      operationId: archiveAIContentTemplateVersion
+      responses:
+        '200': { description: Archived template version, content: { application/json: { schema: { $ref: '#/components/schemas/AIContentTemplateVersion' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
@@ -314,6 +444,8 @@ components:
     VersionID: { in: path, name: version_id, required: true, schema: { type: string, format: uuid } }
     ViewID: { in: path, name: view_id, required: true, schema: { type: string, format: uuid } }
     ImageID: { in: path, name: image_id, required: true, schema: { type: string, format: uuid } }
+    AIContentTemplateID: { in: path, name: template_id, required: true, schema: { type: string, format: uuid } }
+    AIContentTemplateVersionID: { in: path, name: version_id, required: true, schema: { type: string, format: uuid } }
     SOPRevision:
       in: header
       name: X-SOP-Version-Updated-At
@@ -335,6 +467,122 @@ components:
     InternalServerError: { description: Unexpected database or server error, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
     ServiceUnavailable: { description: Object storage unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
   schemas:
+    OpenAISetting:
+      type: object
+      additionalProperties: false
+      required: [provider, status, key_fingerprint, verified_at, image_capability_verified_at, last_used_at]
+      properties:
+        provider: { type: string, enum: [openai] }
+        status: { type: string, enum: [unconfigured, active, invalid, disabled] }
+        key_fingerprint: { type: string, maxLength: 16, description: Non-secret display fingerprint; empty when unconfigured. }
+        verified_at: { type: string, format: date-time, nullable: true }
+        image_capability_verified_at: { type: string, format: date-time, nullable: true }
+        last_used_at: { type: string, format: date-time, nullable: true }
+    OpenAISettingRequest:
+      type: object
+      additionalProperties: false
+      required: [api_key]
+      properties:
+        api_key: { type: string, format: password, minLength: 20, writeOnly: true }
+    AIContentSlotMutation:
+      type: object
+      additionalProperties: false
+      required: [slot_key, kind, name_zh, name_en, description_zh, description_en, sequence, optional, default_selected, prompt_fragment, constraints, generation_config, layout_config]
+      properties:
+        slot_key: { type: string, maxLength: 80 }
+        kind: { type: string, enum: [image, title, seo_description] }
+        name_zh: { type: string, maxLength: 180 }
+        name_en: { type: string, maxLength: 180 }
+        description_zh: { type: string }
+        description_en: { type: string }
+        sequence: { type: integer, minimum: 1 }
+        optional: { type: boolean }
+        default_selected: { type: boolean }
+        prompt_fragment: { type: string }
+        constraints: { type: object, additionalProperties: true }
+        generation_config: { type: object, additionalProperties: true }
+        layout_config: { type: object, additionalProperties: true }
+    AIContentTemplateMutationRequest:
+      type: object
+      additionalProperties: false
+      required: [name_zh, name_en, target_platform, default_locale, prompt_compiler_version, platform_prompt, slots]
+      properties:
+        name_zh: { type: string, maxLength: 180 }
+        name_en: { type: string, maxLength: 180 }
+        target_platform: { type: string, maxLength: 80 }
+        default_locale: { type: string, maxLength: 32 }
+        prompt_compiler_version: { type: string, maxLength: 64 }
+        platform_prompt: { type: string }
+        slots: { type: array, items: { $ref: '#/components/schemas/AIContentSlotMutation' } }
+    CopyAIContentTemplateVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [source_version_id]
+      properties:
+        source_version_id: { type: string, format: uuid }
+    AIContentSlot:
+      type: object
+      additionalProperties: false
+      required: [public_id, slot_key, kind, name_zh, name_en, description_zh, description_en, sequence, optional, default_selected, prompt_fragment, constraints, generation_config, layout_config]
+      properties:
+        public_id: { type: string, format: uuid }
+        slot_key: { type: string }
+        kind: { type: string, enum: [image, title, seo_description] }
+        name_zh: { type: string }
+        name_en: { type: string }
+        description_zh: { type: string }
+        description_en: { type: string }
+        sequence: { type: integer, minimum: 1 }
+        optional: { type: boolean }
+        default_selected: { type: boolean }
+        prompt_fragment: { type: string }
+        constraints: { type: object, additionalProperties: true }
+        generation_config: { type: object, additionalProperties: true }
+        layout_config: { type: object, additionalProperties: true }
+    AIContentTemplateVersion:
+      type: object
+      additionalProperties: false
+      required: [public_id, version_number, status, default_locale, prompt_compiler_version, platform_prompt, published_at, archived_at, created_at, updated_at, slots]
+      properties:
+        public_id: { type: string, format: uuid }
+        version_number: { type: integer, minimum: 1 }
+        status: { type: string, enum: [draft, published, archived] }
+        default_locale: { type: string }
+        prompt_compiler_version: { type: string }
+        platform_prompt: { type: string }
+        published_at: { type: string, format: date-time, nullable: true }
+        archived_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        slots: { type: array, items: { $ref: '#/components/schemas/AIContentSlot' } }
+    AIContentTemplate:
+      type: object
+      additionalProperties: false
+      required: [public_id, name_zh, name_en, target_platform, status, created_at, updated_at, versions]
+      properties:
+        public_id: { type: string, format: uuid }
+        name_zh: { type: string }
+        name_en: { type: string }
+        target_platform: { type: string }
+        status: { type: string, enum: [active, archived] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        versions: { type: array, items: { $ref: '#/components/schemas/AIContentTemplateVersion' } }
+    AITemplateValidationIssue:
+      type: object
+      additionalProperties: false
+      required: [code, path, message]
+      properties:
+        code: { type: string }
+        path: { type: string }
+        message: { type: string }
+    AITemplateValidationResponse:
+      type: object
+      additionalProperties: false
+      required: [code, issues]
+      properties:
+        code: { type: string, enum: [template_valid, template_validation_failed] }
+        issues: { type: array, items: { $ref: '#/components/schemas/AITemplateValidationIssue' } }
     LocalizedText:
       type: object
       additionalProperties: false

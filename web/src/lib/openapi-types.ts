@@ -340,10 +340,270 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/settings/openai": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getOpenAISetting"];
+        put: operations["putOpenAISetting"];
+        post?: never;
+        delete: operations["disableOpenAISetting"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-content-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAIContentTemplates"];
+        put?: never;
+        post: operations["createAIContentTemplate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-content-templates/{template_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                template_id: components["parameters"]["AIContentTemplateID"];
+            };
+            cookie?: never;
+        };
+        get: operations["getAIContentTemplate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-content-templates/{template_id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                template_id: components["parameters"]["AIContentTemplateID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["copyAIContentTemplateVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-content-template-versions/{version_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: components["parameters"]["AIContentTemplateVersionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["updateAIContentTemplateVersion"];
+        trace?: never;
+    };
+    "/ai-content-template-versions/{version_id}/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: components["parameters"]["AIContentTemplateVersionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["validateAIContentTemplateVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-content-template-versions/{version_id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: components["parameters"]["AIContentTemplateVersionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["publishAIContentTemplateVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-content-template-versions/{version_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: components["parameters"]["AIContentTemplateVersionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["archiveAIContentTemplateVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        OpenAISetting: {
+            /** @enum {string} */
+            provider: "openai";
+            /** @enum {string} */
+            status: "unconfigured" | "active" | "invalid" | "disabled";
+            /** @description Non-secret display fingerprint; empty when unconfigured. */
+            key_fingerprint: string;
+            /** Format: date-time */
+            verified_at: string | null;
+            /** Format: date-time */
+            image_capability_verified_at: string | null;
+            /** Format: date-time */
+            last_used_at: string | null;
+        };
+        OpenAISettingRequest: {
+            /** Format: password */
+            api_key: string;
+        };
+        AIContentSlotMutation: {
+            slot_key: string;
+            /** @enum {string} */
+            kind: "image" | "title" | "seo_description";
+            name_zh: string;
+            name_en: string;
+            description_zh: string;
+            description_en: string;
+            sequence: number;
+            optional: boolean;
+            default_selected: boolean;
+            prompt_fragment: string;
+            constraints: {
+                [key: string]: unknown;
+            };
+            generation_config: {
+                [key: string]: unknown;
+            };
+            layout_config: {
+                [key: string]: unknown;
+            };
+        };
+        AIContentTemplateMutationRequest: {
+            name_zh: string;
+            name_en: string;
+            target_platform: string;
+            default_locale: string;
+            prompt_compiler_version: string;
+            platform_prompt: string;
+            slots: components["schemas"]["AIContentSlotMutation"][];
+        };
+        CopyAIContentTemplateVersionRequest: {
+            /** Format: uuid */
+            source_version_id: string;
+        };
+        AIContentSlot: {
+            /** Format: uuid */
+            public_id: string;
+            slot_key: string;
+            /** @enum {string} */
+            kind: "image" | "title" | "seo_description";
+            name_zh: string;
+            name_en: string;
+            description_zh: string;
+            description_en: string;
+            sequence: number;
+            optional: boolean;
+            default_selected: boolean;
+            prompt_fragment: string;
+            constraints: {
+                [key: string]: unknown;
+            };
+            generation_config: {
+                [key: string]: unknown;
+            };
+            layout_config: {
+                [key: string]: unknown;
+            };
+        };
+        AIContentTemplateVersion: {
+            /** Format: uuid */
+            public_id: string;
+            version_number: number;
+            /** @enum {string} */
+            status: "draft" | "published" | "archived";
+            default_locale: string;
+            prompt_compiler_version: string;
+            platform_prompt: string;
+            /** Format: date-time */
+            published_at: string | null;
+            /** Format: date-time */
+            archived_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            slots: components["schemas"]["AIContentSlot"][];
+        };
+        AIContentTemplate: {
+            /** Format: uuid */
+            public_id: string;
+            name_zh: string;
+            name_en: string;
+            target_platform: string;
+            /** @enum {string} */
+            status: "active" | "archived";
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            versions: components["schemas"]["AIContentTemplateVersion"][];
+        };
+        AITemplateValidationIssue: {
+            code: string;
+            path: string;
+            message: string;
+        };
+        AITemplateValidationResponse: {
+            /** @enum {string} */
+            code: "template_valid" | "template_validation_failed";
+            issues: components["schemas"]["AITemplateValidationIssue"][];
+        };
         LocalizedText: {
             "zh-CN": string;
             en: string;
@@ -694,6 +954,8 @@ export interface components {
         VersionID: string;
         ViewID: string;
         ImageID: string;
+        AIContentTemplateID: string;
+        AIContentTemplateVersionID: string;
         /** @description Exact updated_at value from the latest SOPVersion response; stale revisions return 409. */
         SOPRevision: string;
     };
@@ -1409,6 +1671,333 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    getOpenAISetting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Masked OpenAI provider setting */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenAISetting"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalServerError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    putOpenAISetting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenAISettingRequest"];
+            };
+        };
+        responses: {
+            /** @description Verified and activated OpenAI provider setting */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenAISetting"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description OpenAI rejected the supplied credential */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            500: components["responses"]["InternalServerError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    disableOpenAISetting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Disabled OpenAI provider setting */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenAISetting"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listAIContentTemplates: {
+        parameters: {
+            query?: {
+                /** @description When true includes draft and archived versions; otherwise returns templates with published versions only. */
+                include_all?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description AI content templates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AIContentTemplate"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    createAIContentTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AIContentTemplateMutationRequest"];
+            };
+        };
+        responses: {
+            /** @description Created template with its initial draft */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIContentTemplate"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    getAIContentTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                template_id: components["parameters"]["AIContentTemplateID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description AI content template with ordered versions and slots */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIContentTemplate"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    copyAIContentTemplateVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                template_id: components["parameters"]["AIContentTemplateID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CopyAIContentTemplateVersionRequest"];
+            };
+        };
+        responses: {
+            /** @description Copied draft version */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIContentTemplateVersion"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    updateAIContentTemplateVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: components["parameters"]["AIContentTemplateVersionID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AIContentTemplateMutationRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated draft version */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIContentTemplateVersion"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    validateAIContentTemplateVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: components["parameters"]["AIContentTemplateVersionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Template validation result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AITemplateValidationResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    publishAIContentTemplateVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: components["parameters"]["AIContentTemplateVersionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Published immutable template version */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIContentTemplateVersion"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            /** @description Template validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AITemplateValidationResponse"];
+                };
+            };
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    archiveAIContentTemplateVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: components["parameters"]["AIContentTemplateVersionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Archived template version */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIContentTemplateVersion"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             500: components["responses"]["InternalServerError"];
         };
     };

@@ -125,6 +125,24 @@ func (s *TemplateService) Get(ctx context.Context, publicID string) (*models.AIC
 	return &result, nil
 }
 
+func (s *TemplateService) GetVersion(ctx context.Context, publicID string) (*models.AIContentTemplateVersion, error) {
+	return getTemplateVersion(s.db.WithContext(ctx), publicID)
+}
+
+func (s *TemplateService) Validate(ctx context.Context, versionPublicID string) ([]ValidationIssue, error) {
+	version, err := getTemplateVersion(s.db.WithContext(ctx), versionPublicID)
+	if err != nil {
+		return nil, err
+	}
+	var parent models.AIContentTemplate
+	if err := s.db.WithContext(ctx).First(&parent, version.AIContentTemplateID).Error; err != nil {
+		return nil, err
+	}
+	issues := validateTemplateNames(parent)
+	issues = append(issues, ValidateTemplateVersion(*version, version.Slots)...)
+	return issues, nil
+}
+
 func (s *TemplateService) List(ctx context.Context, includeAll bool) ([]models.AIContentTemplate, error) {
 	var result []models.AIContentTemplate
 	db := s.db.WithContext(ctx).Model(&models.AIContentTemplate{})

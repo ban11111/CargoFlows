@@ -1,12 +1,16 @@
 package app
 
 import (
+	"encoding/base64"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"cargoflow/api/internal/ai"
 	"cargoflow/api/internal/config"
 	"cargoflow/api/internal/models"
+	"cargoflow/api/internal/secrets"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"gorm.io/gorm"
@@ -16,9 +20,27 @@ type Server struct {
 	cfg     config.Config
 	db      *gorm.DB
 	storage assetStorage
+	ai      AIDependencies
+}
+
+type AIDependencies struct {
+	ProviderSettings *ai.ProviderSettingsService
+	Templates        *ai.TemplateService
 }
 
 func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
+	deps, err := newAIDependencies(cfg, db)
+	if err != nil {
+		panic("configure AI services: " + err.Error())
+	}
+	return newRouter(cfg, db, deps)
+}
+
+func NewRouterWithAIDependencies(cfg config.Config, db *gorm.DB, deps AIDependencies) *gin.Engine {
+	return newRouter(cfg, db, deps)
+}
+
+func newRouter(cfg config.Config, db *gorm.DB, deps AIDependencies) *gin.Engine {
 	if cfg.AppEnv == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -27,7 +49,10 @@ func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
 	if err != nil {
 		panic("configure object storage: " + err.Error())
 	}
-	server := &Server{cfg: cfg, db: db, storage: storage}
+	if deps.Templates == nil {
+		deps.Templates = ai.NewTemplateService(db)
+	}
+	server := &Server{cfg: cfg, db: db, storage: storage, ai: deps}
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery())
 
@@ -40,6 +65,13 @@ func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
 
 	protected := v1.Group("")
 	protected.Use(server.requireAuth())
+	registerExistingRoutes(protected, server)
+	registerAIRoutes(protected, server)
+
+	return router
+}
+
+func registerExistingRoutes(protected *gin.RouterGroup, server *Server) {
 	protected.GET("/skus", server.listSKUs)
 	protected.POST("/skus", server.createSKU)
 	protected.GET("/skus/:id", server.getSKU)
@@ -78,8 +110,42 @@ func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
 	protected.GET("/ai-jobs", server.listAIJobs)
 	protected.POST("/ai-jobs", server.createAIJob)
 	protected.GET("/users", server.listUsers)
+}
 
-	return router
+func registerAIRoutes(protected *gin.RouterGroup, server *Server) {
+	aiAdmin := protected.Group("")
+	aiAdmin.Use(requireRoles(models.RoleAdmin))
+	aiAdmin.GET("/settings/openai", server.getOpenAISetting)
+	aiAdmin.PUT("/settings/openai", server.putOpenAISetting)
+	aiAdmin.DELETE("/settings/openai", server.disableOpenAISetting)
+	aiAdmin.GET("/ai-content-templates", server.listAIContentTemplates)
+	aiAdmin.POST("/ai-content-templates", server.createAIContentTemplate)
+	aiAdmin.GET("/ai-content-templates/:template_id", server.getAIContentTemplate)
+	aiAdmin.POST("/ai-content-templates/:template_id/versions", server.copyAIContentTemplateVersion)
+	aiAdmin.PATCH("/ai-content-template-versions/:version_id", server.updateAIContentTemplateVersion)
+	aiAdmin.POST("/ai-content-template-versions/:version_id/validate", server.validateAIContentTemplateVersion)
+	aiAdmin.POST("/ai-content-template-versions/:version_id/publish", server.publishAIContentTemplateVersion)
+	aiAdmin.POST("/ai-content-template-versions/:version_id/archive", server.archiveAIContentTemplateVersion)
+}
+
+func newAIDependencies(cfg config.Config, db *gorm.DB) (AIDependencies, error) {
+	deps := AIDependencies{Templates: ai.NewTemplateService(db)}
+	if strings.TrimSpace(cfg.SecretsMasterKey) == "" {
+		if cfg.AppEnv == "production" {
+			return AIDependencies{}, fmt.Errorf("CARGOFLOW_SECRETS_MASTER_KEY is required in production")
+		}
+		return deps, nil
+	}
+	key, err := base64.StdEncoding.DecodeString(cfg.SecretsMasterKey)
+	if err != nil {
+		return AIDependencies{}, fmt.Errorf("decode CARGOFLOW_SECRETS_MASTER_KEY: %w", err)
+	}
+	box, err := secrets.NewAESGCM(key)
+	if err != nil {
+		return AIDependencies{}, fmt.Errorf("configure CARGOFLOW_SECRETS_MASTER_KEY: %w", err)
+	}
+	deps.ProviderSettings = ai.NewProviderSettingsService(db, box, ai.NewHTTPProviderVerifier(cfg.OpenAIBaseURL, nil))
+	return deps, nil
 }
 
 func requireRoles(roles ...models.Role) gin.HandlerFunc {
