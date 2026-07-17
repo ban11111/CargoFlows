@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"cargoflow/api/internal/models"
@@ -132,10 +133,13 @@ func TestVariantIdentityRoutesEnforceMutationRolesAndPublishReadOnlyFacts(t *tes
 	defer server.Close()
 	_, operatorToken := authenticatedSOPRouter(t, db, operator)
 	_, viewerToken := authenticatedSOPRouter(t, db, viewer)
-	body := `{"identity":{"schema":"variant_identity_v1","colors":[{"key":"body","name":"blue","value":"#123ABC"}],"material":"","finish":"","texture":"","labels":[],"ports":[],"controls":[],"accessories":[],"packaging":[],"other":[],"must_prove_with_target_assets":[]},"regions":[]}`
+	body := `{"identity":{"schema":"variant_identity_v1","colors":[{"key":"body","name":"blue","value":"#123ABC"}],"material":"","finish":"","texture":"","labels":[],"ports":[],"controls":[],"accessories":[],"packaging":[],"other":[],"must_prove_with_target_assets":[]},"regions":[{"key":"body_region","difference_kind":"color","strictness":"preserve","shape":{"kind":"rectangle","x":0,"y":0,"width":1,"height":1}}]}`
 	denied := sopRequest(t, server, viewerToken, http.MethodPost, "/api/v1/skus/"+target.PublicID+"/variant-identity/versions", body)
 	defer denied.Body.Close()
 	assertHTTPErrorResponse(t, denied, http.StatusForbidden, "forbidden")
+	missingRequired := sopRequest(t, server, operatorToken, http.MethodPost, "/api/v1/skus/"+target.PublicID+"/variant-identity/versions", strings.Replace(body, `,"controls":[]`, ``, 1))
+	defer missingRequired.Body.Close()
+	assertHTTPErrorResponse(t, missingRequired, http.StatusBadRequest, "invalid_request")
 	created := sopRequest(t, server, operatorToken, http.MethodPost, "/api/v1/skus/"+target.PublicID+"/variant-identity/versions", body)
 	defer created.Body.Close()
 	if created.StatusCode != http.StatusCreated {
@@ -174,6 +178,14 @@ func TestVariantIdentityRoutesEnforceMutationRolesAndPublishReadOnlyFacts(t *tes
 		if _, found := response[unsafe]; found {
 			t.Fatalf("read leaked %s: %#v", unsafe, response)
 		}
+	}
+	regions, ok := response["regions"].([]any)
+	if !ok || len(regions) != 1 {
+		t.Fatalf("regions = %#v", response["regions"])
+	}
+	evidence, ok := regions[0].(map[string]any)["evidence_asset_ids"].([]any)
+	if !ok || len(evidence) != 0 {
+		t.Fatalf("evidence_asset_ids = %#v", regions[0])
 	}
 	immutable := sopRequest(t, server, operatorToken, http.MethodPatch, "/api/v1/variant-identity-versions/"+version.PublicID, body)
 	defer immutable.Body.Close()

@@ -166,6 +166,13 @@ func (s *VariantManifestService) CreateDraft(ctx context.Context, skuPublicID st
 func (s *VariantManifestService) UpdateDraft(ctx context.Context, versionPublicID string, input UpdateVariantManifestDraftInput) (*models.VariantIdentityManifestVersion, error) {
 	var updated models.VariantIdentityManifestVersion
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var locked models.VariantIdentityManifestVersion
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").Where("public_id = ?", versionPublicID).First(&locked).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrVariantManifestVersionNotFound
+			}
+			return err
+		}
 		version, manifest, family, sku, err := manifestVersionContext(tx, versionPublicID)
 		if err != nil {
 			return err
@@ -177,15 +184,19 @@ func (s *VariantManifestService) UpdateDraft(ctx context.Context, versionPublicI
 		if err != nil {
 			return err
 		}
+		// The lock handles MySQL and the status predicate is the final guard for
+		// any database where FOR UPDATE is weaker or unavailable in tests.
+		result := tx.Model(&models.VariantIdentityManifestVersion{}).Where("id = ? AND status = ?", version.ID, models.VariantManifestDraft).Update("identity_json", identity)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrVariantManifestImmutable
+		}
 		if err := tx.Where("variant_difference_region_id IN (?)", tx.Model(&models.VariantDifferenceRegion{}).Select("id").Where("variant_identity_manifest_version_id = ?", version.ID)).Delete(&models.VariantDifferenceRegionEvidenceAsset{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("variant_identity_manifest_version_id = ?", version.ID).Delete(&models.VariantDifferenceRegion{}).Error; err != nil {
-			return err
-		}
-		// version carries preloaded regions. Updating that struct would make GORM
-		// upsert its stale association slice after the replacement delete.
-		if err := tx.Model(&models.VariantIdentityManifestVersion{}).Where("id = ?", version.ID).Update("identity_json", identity).Error; err != nil {
 			return err
 		}
 		if err := createVariantRegions(tx, version.ID, regions); err != nil {
@@ -300,8 +311,12 @@ func (s *VariantManifestService) Publish(ctx context.Context, versionPublicID st
 			return &VariantManifestValidationError{Issues: issues}
 		}
 		now := time.Now().UTC()
-		if err := tx.Model(&version).Updates(map[string]any{"status": models.VariantManifestPublished, "draft_guard": nil, "published_by_id": actorID, "published_at": now}).Error; err != nil {
-			return err
+		result := tx.Model(&models.VariantIdentityManifestVersion{}).Where("id = ? AND status = ?", version.ID, models.VariantManifestDraft).Updates(map[string]any{"status": models.VariantManifestPublished, "draft_guard": nil, "published_by_id": actorID, "published_at": now})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrVariantManifestImmutable
 		}
 		if err := writeVariantManifestAudit(tx, actorID, "variant_identity_manifest.published", manifest.PublicID, map[string]string{"action": "publish", "manifest_id": manifest.PublicID, "version_id": version.PublicID, "sku_id": sku.PublicID}); err != nil {
 			return err
@@ -407,6 +422,15 @@ func normalizeManifestInput(identityRaw json.RawMessage, regionInputs []VariantD
 }
 
 func normalizeVariantIdentity(raw json.RawMessage, family *models.ModelFamily) (json.RawMessage, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, ErrVariantManifestInvalid
+	}
+	for _, key := range []string{"schema", "colors", "material", "finish", "texture", "labels", "ports", "controls", "accessories", "packaging", "other", "must_prove_with_target_assets"} {
+		if _, found := fields[key]; !found {
+			return nil, ErrVariantManifestInvalid
+		}
+	}
 	var document VariantIdentityDocumentV1
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -474,6 +498,13 @@ func normalizeVariantIdentity(raw json.RawMessage, family *models.ModelFamily) (
 	if !uniqueSafeKeys(document.MustProveWithTargetAssets, 80) {
 		return nil, ErrVariantManifestInvalid
 	}
+	document.Colors = normalizedColorRegions(document.Colors)
+	document.Labels = normalizedLabels(document.Labels)
+	document.Ports = normalizedFeatures(document.Ports)
+	document.Controls = normalizedFeatures(document.Controls)
+	document.Accessories = normalizedStrings(document.Accessories)
+	document.Packaging = normalizedFeatures(document.Packaging)
+	document.Other = normalizedFeatures(document.Other)
 	document.MustProveWithTargetAssets = normalizedStrings(document.MustProveWithTargetAssets)
 	encoded, err := json.Marshal(document)
 	if err != nil {
@@ -523,6 +554,24 @@ func uniqueSafeKeys(values []string, max int) bool {
 func normalizedStrings(values []string) []string {
 	if values == nil {
 		return []string{}
+	}
+	return values
+}
+func normalizedColorRegions(values []VariantColorRegion) []VariantColorRegion {
+	if values == nil {
+		return []VariantColorRegion{}
+	}
+	return values
+}
+func normalizedLabels(values []VariantLabel) []VariantLabel {
+	if values == nil {
+		return []VariantLabel{}
+	}
+	return values
+}
+func normalizedFeatures(values []VariantFeature) []VariantFeature {
+	if values == nil {
+		return []VariantFeature{}
 	}
 	return values
 }

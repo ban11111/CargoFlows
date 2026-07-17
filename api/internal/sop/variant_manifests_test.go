@@ -3,6 +3,7 @@ package sop
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"cargoflow/api/internal/models"
@@ -162,6 +163,73 @@ func TestVariantManifestRejectsPublicationAfterFamilyIsArchived(t *testing.T) {
 	}
 	if _, err := service.Publish(t.Context(), draft.PublicID, 9); !errors.Is(err, ErrModelFamilyArchived) {
 		t.Fatalf("archived family publish error = %v", err)
+	}
+}
+
+func TestVariantManifestRequiresAllIdentityKeysAndNormalizesArrayFacts(t *testing.T) {
+	db := variantManifestTestDB(t)
+	_, target, _ := createVariantManifestFamily(t, db, []string{"color", "material", "finish", "texture", "labels", "ports", "accessories"})
+	service := NewVariantManifestService(db)
+	missingControls := json.RawMessage(strings.Replace(string(validVariantIdentityJSON(t)), `,"controls":[]`, ``, 1))
+	if _, err := service.CreateDraft(t.Context(), target.PublicID, CreateVariantManifestDraftInput{Identity: missingControls, ActorID: 9}); !errors.Is(err, ErrVariantManifestInvalid) {
+		t.Fatalf("missing required key error = %v", err)
+	}
+	nullArrays := json.RawMessage(strings.NewReplacer(`"colors":[{"key":"body","name":"Midnight blue","value":"#123ABC"}]`, `"colors":null`, `"labels":[{"key":"front_logo","text":"CargoFlow","region_key":"logo"}]`, `"labels":null`, `"ports":[{"key":"usb_c","description":"USB-C charging port","region_key":"right_ports"}]`, `"ports":null`, `"controls":[]`, `"controls":null`, `"accessories":["charging cable"]`, `"accessories":null`, `"packaging":[]`, `"packaging":null`, `"other":[]`, `"other":null`, `"must_prove_with_target_assets":["body","logo","right_ports"]`, `"must_prove_with_target_assets":null`).Replace(string(validVariantIdentityJSON(t))))
+	draft, err := service.CreateDraft(t.Context(), target.PublicID, CreateVariantManifestDraftInput{Identity: nullArrays, ActorID: 9})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored map[string]json.RawMessage
+	if err := json.Unmarshal(draft.IdentityJSON, &stored); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"colors", "labels", "ports", "controls", "accessories", "packaging", "other", "must_prove_with_target_assets"} {
+		if got := string(stored[key]); got != "[]" {
+			t.Fatalf("%s = %s, want normalized array", key, got)
+		}
+	}
+}
+
+func TestVariantManifestConcurrentPublishPreventsDraftWriteAfterPublication(t *testing.T) {
+	db := variantManifestTestDB(t)
+	_, target, _ := createVariantManifestFamily(t, db, []string{"color", "material", "finish", "texture", "labels", "ports", "accessories"})
+	service := NewVariantManifestService(db)
+	draft, err := service.CreateDraft(t.Context(), target.PublicID, CreateVariantManifestDraftInput{Identity: validVariantIdentityJSON(t), ActorID: 9})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	injected := false
+	if err := db.Callback().Update().Before("gorm:update").Register("test_pause_variant_identity_draft_write", func(tx *gorm.DB) {
+		updates, ok := tx.Statement.Dest.(map[string]any)
+		if injected || !ok || tx.Statement.Table != "variant_identity_manifest_versions" || updates["identity_json"] == nil {
+			return
+		}
+		injected = true
+		if err := tx.Session(&gorm.Session{NewDB: true, SkipHooks: true}).Model(&models.VariantIdentityManifestVersion{}).Where("id = ?", draft.ID).Updates(map[string]any{"status": models.VariantManifestPublished, "draft_guard": nil}).Error; err != nil {
+			t.Fatalf("inject competing publication: %v", err)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer db.Callback().Update().Remove("test_pause_variant_identity_draft_write")
+
+	updatedIdentity := json.RawMessage(strings.Replace(string(validVariantIdentityJSON(t)), "Midnight blue", "Ocean blue", 1))
+	if _, err := service.UpdateDraft(t.Context(), draft.PublicID, UpdateVariantManifestDraftInput{Identity: updatedIdentity, ActorID: 10}); !errors.Is(err, ErrVariantManifestImmutable) {
+		t.Fatalf("concurrent update error = %v", err)
+	}
+	if !injected {
+		t.Fatal("competing publication was not interleaved before draft write")
+	}
+	if _, err := service.Publish(t.Context(), draft.PublicID, 11); err != nil {
+		t.Fatalf("publish after rejected draft write: %v", err)
+	}
+	var stored models.VariantIdentityManifestVersion
+	if err := db.Where("public_id = ?", draft.PublicID).First(&stored).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != models.VariantManifestPublished || strings.Contains(string(stored.IdentityJSON), "Ocean blue") {
+		t.Fatalf("published state was overwritten: %#v", stored)
 	}
 }
 

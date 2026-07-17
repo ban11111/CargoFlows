@@ -348,7 +348,11 @@ func (s *Server) variantIdentityVersionDTO(version models.VariantIdentityManifes
 	}
 	dto := variantIdentityVersionDTO{PublicID: version.PublicID, SKUId: sku.PublicID, VersionNumber: version.VersionNumber, Status: version.Status, Identity: append(json.RawMessage(nil), version.IdentityJSON...), PublishedAt: version.PublishedAt, CreatedAt: version.CreatedAt, Regions: make([]variantIdentityRegionDTO, 0, len(version.Regions))}
 	for _, region := range version.Regions {
-		dto.Regions = append(dto.Regions, variantIdentityRegionDTO{PublicID: region.PublicID, Key: region.Key, DifferenceKind: region.DifferenceKind, Strictness: region.Strictness, DescriptionZH: region.DescriptionZH, DescriptionEN: region.DescriptionEN, Shape: append(json.RawMessage(nil), region.ShapeJSON...), ForbiddenInheritance: append(json.RawMessage(nil), region.ForbiddenInheritanceJSON...), RequiredViewKeys: append(json.RawMessage(nil), region.RequiredViewKeysJSON...), EvidenceAssetIDs: regionAssetIDs[region.ID]})
+		evidenceAssetIDs := regionAssetIDs[region.ID]
+		if evidenceAssetIDs == nil {
+			evidenceAssetIDs = []string{}
+		}
+		dto.Regions = append(dto.Regions, variantIdentityRegionDTO{PublicID: region.PublicID, Key: region.Key, DifferenceKind: region.DifferenceKind, Strictness: region.Strictness, DescriptionZH: region.DescriptionZH, DescriptionEN: region.DescriptionEN, Shape: append(json.RawMessage(nil), region.ShapeJSON...), ForbiddenInheritance: append(json.RawMessage(nil), region.ForbiddenInheritanceJSON...), RequiredViewKeys: append(json.RawMessage(nil), region.RequiredViewKeysJSON...), EvidenceAssetIDs: evidenceAssetIDs})
 	}
 	return dto, nil
 }
