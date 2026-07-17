@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"cargoflow/api/internal/ai"
+	"cargoflow/api/internal/app"
 	"cargoflow/api/internal/config"
 	"cargoflow/api/internal/database"
 	"cargoflow/api/internal/secrets"
@@ -32,6 +33,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("open database: %v", err)
 	}
+	if _, err := buildImageStorage(cfg); err != nil {
+		log.Fatalf("configure AI image storage: %v", err)
+	}
 	workerID := newWorkerID()
 	executor, err := buildExecutor(cfg, db)
 	if err != nil {
@@ -48,6 +52,14 @@ func main() {
 	if err := run(ctx, worker, cfg.AIWorkerPollInterval); err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatalf("run AI worker: %v", err)
 	}
+}
+
+func buildImageStorage(cfg config.Config) (*ai.ImageStorage, error) {
+	objects, err := app.NewImageObjectStore(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return ai.NewImageStorage(objects), nil
 }
 
 func buildExecutor(cfg config.Config, db *gorm.DB) (ai.ItemExecutor, error) {

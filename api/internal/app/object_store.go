@@ -1,11 +1,14 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/url"
 	"time"
 
+	"cargoflow/api/internal/ai"
 	"cargoflow/api/internal/config"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -21,10 +24,13 @@ const publicReadPolicy = `{
   }]
 }`
 
+const generatedBucketPolicy = ""
+
 type objectStore struct {
 	internal  *minio.Client
 	public    *minio.Client
 	bucket    string
+	aiBucket  string
 	publicURL *url.URL
 }
 
@@ -52,7 +58,11 @@ func newObjectStore(cfg config.Config) (*objectStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &objectStore{internal: internal, public: public, bucket: cfg.MinIOBucket, publicURL: publicURL}, nil
+	return &objectStore{internal: internal, public: public, bucket: cfg.MinIOBucket, aiBucket: cfg.MinIOAIBucket, publicURL: publicURL}, nil
+}
+
+func NewImageObjectStore(cfg config.Config) (ai.ImageObjectStore, error) {
+	return newObjectStore(cfg)
 }
 
 func (s *objectStore) createUploadURL(ctx context.Context, objectKey string) (string, string, error) {
@@ -96,4 +106,80 @@ func (s *objectStore) ensureBucket(ctx context.Context) error {
 		}
 	}
 	return s.internal.SetBucketPolicy(ctx, s.bucket, fmt.Sprintf(publicReadPolicy, s.bucket))
+}
+
+func (s *objectStore) ReadSource(ctx context.Context, objectKey string) (ai.ImageInput, error) {
+	object, err := s.internal.GetObject(ctx, s.bucket, objectKey, minio.GetObjectOptions{})
+	if err != nil {
+		return ai.ImageInput{}, err
+	}
+	defer object.Close()
+	value, err := io.ReadAll(io.LimitReader(object, 50<<20+1))
+	if err != nil {
+		return ai.ImageInput{}, err
+	}
+	if len(value) > 50<<20 {
+		return ai.ImageInput{}, fmt.Errorf("source image exceeds byte limit")
+	}
+	return ai.ImageInput{Bytes: value}, nil
+}
+
+func (s *objectStore) PutGenerated(ctx context.Context, objectKey, mimeType string, value []byte) (bool, error) {
+	if err := s.ensureGeneratedBucket(ctx); err != nil {
+		return false, err
+	}
+	options := minio.PutObjectOptions{ContentType: mimeType, DisableMultipart: true}
+	options.SetMatchETagExcept("*")
+	_, err := s.internal.PutObject(ctx, s.aiBucket, objectKey, bytes.NewReader(value), int64(len(value)), options)
+	if isConditionalWriteConflict(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *objectStore) DeleteGenerated(ctx context.Context, objectKey string) error {
+	return s.internal.RemoveObject(ctx, s.aiBucket, objectKey, minio.RemoveObjectOptions{})
+}
+
+func (s *objectStore) GeneratedReadURL(ctx context.Context, objectKey string, expirySeconds int) (string, error) {
+	if expirySeconds <= 0 || expirySeconds > 900 {
+		return "", fmt.Errorf("generated read expiry is invalid")
+	}
+	if err := s.ensureGeneratedBucket(ctx); err != nil {
+		return "", err
+	}
+	url, err := s.public.PresignedGetObject(ctx, s.aiBucket, objectKey, time.Duration(expirySeconds)*time.Second, nil)
+	if err != nil {
+		return "", err
+	}
+	return url.String(), nil
+}
+
+func (s *objectStore) ensureGeneratedBucket(ctx context.Context) error {
+	exists, err := s.internal.BucketExists(ctx, s.aiBucket)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		if err := s.internal.MakeBucket(ctx, s.aiBucket, minio.MakeBucketOptions{Region: "us-east-1"}); err != nil {
+			return err
+		}
+	}
+	return s.internal.SetBucketPolicy(ctx, s.aiBucket, generatedBucketPolicy)
+}
+
+func isMissingObject(err error) bool {
+	response := minio.ToErrorResponse(err)
+	return response.Code == "NoSuchKey" || response.Code == "NoSuchObject" || response.StatusCode == 404
+}
+
+func isConditionalWriteConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	response := minio.ToErrorResponse(err)
+	return response.Code == "PreconditionFailed" || response.StatusCode == 412
 }

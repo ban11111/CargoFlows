@@ -52,6 +52,7 @@ services:
       MINIO_ROOT_USER: cargoflow
       MINIO_ROOT_PASSWORD: cargoflow123
       MINIO_BUCKET: cargoflow
+      MINIO_AI_BUCKET: cargoflow-ai-private
       CARGOFLOW_SECRETS_MASTER_KEY: ${CARGOFLOW_SECRETS_MASTER_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
     ports:
@@ -71,6 +72,12 @@ services:
       APP_ENV: development
       AI_WORKER_DRY_RUN: ${AI_WORKER_DRY_RUN:-true}
       AI_WORKER_POLL_INTERVAL: 1s
+      MINIO_ENDPOINT: minio:9000
+      MINIO_PUBLIC_ENDPOINT: 127.0.0.1:9000
+      MINIO_ROOT_USER: cargoflow
+      MINIO_ROOT_PASSWORD: cargoflow123
+      MINIO_BUCKET: cargoflow
+      MINIO_AI_BUCKET: cargoflow-ai-private
       CARGOFLOW_SECRETS_MASTER_KEY: ${CARGOFLOW_SECRETS_MASTER_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       OPENAI_TEXT_MODEL: ${OPENAI_TEXT_MODEL:-gpt-5.6-terra}

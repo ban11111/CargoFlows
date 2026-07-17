@@ -15,6 +15,7 @@ type Config struct {
 	MinIOAccessKey            string
 	MinIOSecretKey            string
 	MinIOBucket               string
+	MinIOAIBucket             string
 	SecretsMasterKey          string
 	OpenAIBaseURL             string
 	OpenAITextModel           string
@@ -37,6 +38,7 @@ func Load() Config {
 		MinIOAccessKey:            getEnv("MINIO_ROOT_USER", "cargoflow"),
 		MinIOSecretKey:            getEnv("MINIO_ROOT_PASSWORD", "cargoflow123"),
 		MinIOBucket:               getEnv("MINIO_BUCKET", "cargoflow"),
+		MinIOAIBucket:             getEnv("MINIO_AI_BUCKET", "cargoflow-ai-private"),
 		SecretsMasterKey:          getEnv("CARGOFLOW_SECRETS_MASTER_KEY", ""),
 		OpenAIBaseURL:             getEnv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
 		OpenAITextModel:           getEnv("OPENAI_TEXT_MODEL", "gpt-5.6-terra"),

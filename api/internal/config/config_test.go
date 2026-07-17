@@ -63,3 +63,14 @@ func TestLoadUsesAndReadsOpenAIImageDefaults(t *testing.T) {
 		t.Fatalf("unexpected configured image values: %#v", cfg)
 	}
 }
+
+func TestLoadUsesAndReadsPrivateGeneratedImageBucket(t *testing.T) {
+	t.Setenv("MINIO_AI_BUCKET", "")
+	if cfg := Load(); cfg.MinIOAIBucket != "cargoflow-ai-private" {
+		t.Fatalf("unexpected generated-image bucket default: %#v", cfg)
+	}
+	t.Setenv("MINIO_AI_BUCKET", "private-test-images")
+	if cfg := Load(); cfg.MinIOAIBucket != "private-test-images" {
+		t.Fatalf("unexpected configured generated-image bucket: %#v", cfg)
+	}
+}
