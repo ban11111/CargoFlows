@@ -108,7 +108,7 @@ func seedAIJobFixture(t *testing.T) (*gorm.DB, aiJobFixture) {
 	}
 	slots := []models.AIContentSlot{
 		{PublicID: uuid.NewString(), AIContentTemplateVersionID: published.ID, SlotKey: "hero", Kind: models.AIContentSlotImage, NameZH: "主图", NameEN: "Hero", Sequence: 2, Optional: true, DefaultSelected: true, PromptFragment: "hero", ConstraintsJSON: []byte(`{"required_views":["reference_front"]}`), GenerationConfigJSON: []byte(`{"size":"1024x1024"}`), LayoutConfigJSON: []byte(`{}`)},
-		{PublicID: uuid.NewString(), AIContentTemplateVersionID: published.ID, SlotKey: "title", Kind: models.AIContentSlotTitle, NameZH: "标题", NameEN: "Title", Sequence: 1, Optional: true, DefaultSelected: true, PromptFragment: "title", ConstraintsJSON: []byte(`{}`), GenerationConfigJSON: []byte(`{"candidate_count":3,"allowed_candidate_count":[1,3]}`), LayoutConfigJSON: []byte(`{}`)},
+		{PublicID: uuid.NewString(), AIContentTemplateVersionID: published.ID, SlotKey: "title", Kind: models.AIContentSlotTitle, NameZH: "标题", NameEN: "Title", Sequence: 1, Optional: true, DefaultSelected: true, PromptFragment: "title", ConstraintsJSON: []byte(`{}`), GenerationConfigJSON: []byte(`{"candidate_count":3,"allowed_candidate_count":[1,3],"allow_user_extra_prompt":true}`), LayoutConfigJSON: []byte(`{}`)},
 		{PublicID: uuid.NewString(), AIContentTemplateVersionID: published.ID, SlotKey: "seo", Kind: models.AIContentSlotSEODescription, NameZH: "搜索描述", NameEN: "SEO description", Sequence: 3, Optional: true, PromptFragment: "seo", ConstraintsJSON: []byte(`{}`), GenerationConfigJSON: []byte(`{"candidate_count":1}`), LayoutConfigJSON: []byte(`{}`)},
 	}
 	if err := db.Create(&slots).Error; err != nil {
@@ -336,6 +336,71 @@ func TestCreateJobRejectsInvalidRuntimeConfiguration(t *testing.T) {
 		t.Fatalf("malformed config error = %v", err)
 	}
 }
+
+func TestCreateJobRequiresEverySelectedSlotToAllowUserPreference(t *testing.T) {
+	db, fixture := seedAIJobFixture(t)
+	_, err := NewJobService(db).Create(t.Context(), CreateJobInput{SKUID: fixture.SKU.ID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title", "seo"}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-mixed-preference", UserPreference: "minimal premium"})
+	if !errors.Is(err, ErrUserPreferenceNotAllowed) {
+		t.Fatalf("mixed-slot preference error = %v", err)
+	}
+}
+
+func TestCreateJobTreatsLegacyNonBooleanPreferencePermissionAsBrokenConfig(t *testing.T) {
+	db, fixture := seedAIJobFixture(t)
+	update := db.Model(&models.AIContentSlot{}).Where(&models.AIContentSlot{AIContentTemplateVersionID: fixture.PublishedVersion.ID, SlotKey: "title"}).Update("generation_config_json", []byte(`{"allow_user_extra_prompt":"yes"}`))
+	if update.Error != nil || update.RowsAffected != 1 {
+		t.Fatal(update.Error)
+	}
+	_, err := NewJobService(db).Create(t.Context(), CreateJobInput{SKUID: fixture.SKU.ID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title"}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-broken-preference", UserPreference: "minimal"})
+	if !errors.Is(err, ErrPublishedTemplateConfigInvalid) {
+		t.Fatalf("legacy permission error = %v", err)
+	}
+}
+
+func TestCreateJobCanonicalizesTemplateUUIDForIdempotency(t *testing.T) {
+	db, fixture := seedAIJobFixture(t)
+	service := NewJobService(db)
+	input := CreateJobInput{SKUID: fixture.SKU.ID, TemplateVersionPublicID: strings.ToUpper(fixture.PublishedVersion.PublicID), SelectedSlotKeys: []string{"title"}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-uuid-canonical"}
+	first, err := service.Create(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.TemplateVersionPublicID = strings.ToLower(input.TemplateVersionPublicID)
+	second, err := service.Create(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.PublicID != second.PublicID {
+		t.Fatalf("UUID spelling created duplicate %s/%s", first.PublicID, second.PublicID)
+	}
+	input.IdempotencyKey = "job-invalid-uuid"
+	input.TemplateVersionPublicID = "not-a-uuid"
+	if _, err := service.Create(t.Context(), input); !errors.Is(err, ErrTemplateVersionIDInvalid) {
+		t.Fatalf("invalid UUID error = %v", err)
+	}
+}
+
+func TestCreateJobDefensivelyBoundsLegacyAllowedOverrideValues(t *testing.T) {
+	tests := []struct {
+		name, config string
+		override     GenerationOverride
+	}{{"candidate", `{"allowed_candidate_count":[5]}`, GenerationOverride{CandidateCount: intPointer(5)}}, {"size", `{"allowed_sizes":["999x999"]}`, GenerationOverride{Size: stringPointer("999x999")}}, {"quality", `{"allowed_qualities":["ultra"]}`, GenerationOverride{Quality: stringPointer("ultra")}}, {"style", `{"allowed_styles":["` + strings.Repeat("x", 81) + `"]}`, GenerationOverride{Style: stringPointer(strings.Repeat("x", 81))}}}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db, fixture := seedAIJobFixture(t)
+			update := db.Model(&models.AIContentSlot{}).Where(&models.AIContentSlot{AIContentTemplateVersionID: fixture.PublishedVersion.ID, SlotKey: "title"}).Update("generation_config_json", []byte(tc.config))
+			if update.Error != nil || update.RowsAffected != 1 {
+				t.Fatal(update.Error)
+			}
+			_, err := NewJobService(db).Create(t.Context(), CreateJobInput{SKUID: fixture.SKU.ID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title"}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-bound-" + tc.name, GenerationOverrides: map[string]GenerationOverride{"title": tc.override}})
+			if !errors.Is(err, ErrPublishedTemplateConfigInvalid) && !errors.Is(err, ErrGenerationOverrideInvalid) {
+				t.Fatalf("legacy boundary error = %v", err)
+			}
+		})
+	}
+}
+
+func stringPointer(value string) *string { return &value }
 
 func intPointer(value int) *int { return &value }
 

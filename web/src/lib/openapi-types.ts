@@ -633,8 +633,17 @@ export interface components {
         };
         AIJobGenerationOverride: {
             candidate_count?: number;
-            size?: string;
-            quality?: string;
+            /**
+             * @description Image slots only.
+             * @enum {string}
+             */
+            size?: "1024x1024" | "1536x1024" | "1024x1536";
+            /**
+             * @description Image slots only.
+             * @enum {string}
+             */
+            quality?: "low" | "medium" | "high" | "auto";
+            /** @description Image slots only; must exactly match a trimmed published allowed style. */
             style?: string;
         };
         AIJob: {

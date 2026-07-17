@@ -623,10 +623,10 @@ components:
       additionalProperties: false
       minProperties: 1
       properties:
-        candidate_count: { type: integer, minimum: 1 }
-        size: { type: string }
-        quality: { type: string }
-        style: { type: string }
+        candidate_count: { type: integer, minimum: 1, maximum: 4 }
+        size: { type: string, enum: [1024x1024, 1536x1024, 1024x1536], description: Image slots only. }
+        quality: { type: string, enum: [low, medium, high, auto], description: Image slots only. }
+        style: { type: string, minLength: 1, maxLength: 80, description: Image slots only; must exactly match a trimmed published allowed style. }
     AIJob:
       type: object
       additionalProperties: false

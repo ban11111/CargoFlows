@@ -127,6 +127,47 @@ func TestPublishRejectsMalformedImageRequiredViews(t *testing.T) {
 	assertIssueCodes(t, issues, "required_views_invalid")
 }
 
+func TestPublishValidatesGenerationAllowLists(t *testing.T) {
+	service := NewTemplateService(templateTestDB(t))
+	input := validTemplateInput()
+	input.Version.Slots[0].GenerationConfig = json.RawMessage(`{"size":"1024x1024","allowed_candidate_count":[0,2,2],"allowed_sizes":["999x999"],"allowed_qualities":["ultra"],"allowed_styles":["", "` + strings.Repeat("x", 81) + `"]}`)
+	created, err := service.Create(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issues, err := service.Publish(t.Context(), created.Version.PublicID, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertIssueCodes(t, issues, "allowed_candidate_count_invalid", "allowed_sizes_invalid", "allowed_qualities_invalid", "allowed_styles_invalid")
+	wantPaths := map[string]string{"allowed_candidate_count_invalid": "slots[0].generation_config.allowed_candidate_count", "allowed_sizes_invalid": "slots[0].generation_config.allowed_sizes", "allowed_qualities_invalid": "slots[0].generation_config.allowed_qualities", "allowed_styles_invalid": "slots[0].generation_config.allowed_styles"}
+	for _, issue := range issues {
+		if want, ok := wantPaths[issue.Code]; ok && issue.Path != want {
+			t.Errorf("%s path = %q, want %q", issue.Code, issue.Path, want)
+		}
+	}
+}
+
+func TestPublishRejectsNonBooleanUserExtraPromptPermission(t *testing.T) {
+	service := NewTemplateService(templateTestDB(t))
+	input := validTemplateInput()
+	input.Version.Slots[0].GenerationConfig = json.RawMessage(`{"size":"1024x1024","allow_user_extra_prompt":"yes"}`)
+	created, err := service.Create(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issues, err := service.Publish(t.Context(), created.Version.PublicID, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertIssueCodes(t, issues, "allow_user_extra_prompt_invalid")
+	for _, issue := range issues {
+		if issue.Code == "allow_user_extra_prompt_invalid" && issue.Path != "slots[0].generation_config.allow_user_extra_prompt" {
+			t.Fatalf("issue path = %q", issue.Path)
+		}
+	}
+}
+
 func TestUpdateDraftPersistsDuplicateKeysAndPublishReturnsAllIssues(t *testing.T) {
 	service := NewTemplateService(templateTestDB(t))
 	created, err := service.Create(t.Context(), validTemplateInput())

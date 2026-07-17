@@ -269,8 +269,10 @@ func respondAIError(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
 	case errors.Is(err, ai.ErrSlotSelectionInvalid):
 		respondAIBadRequest(c, err)
-	case errors.Is(err, ai.ErrIdempotencyKeyInvalid), errors.Is(err, ai.ErrLocaleInvalid), errors.Is(err, ai.ErrUserPreferenceInvalid), errors.Is(err, ai.ErrGenerationOverrideInvalid), errors.Is(err, ai.ErrPublishedTemplateConfigInvalid):
+	case errors.Is(err, ai.ErrIdempotencyKeyInvalid), errors.Is(err, ai.ErrLocaleInvalid), errors.Is(err, ai.ErrUserPreferenceInvalid), errors.Is(err, ai.ErrUserPreferenceNotAllowed), errors.Is(err, ai.ErrGenerationOverrideInvalid), errors.Is(err, ai.ErrTemplateVersionIDInvalid):
 		respondAIBadRequest(c, err)
+	case errors.Is(err, ai.ErrPublishedTemplateConfigInvalid):
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "ai_template_configuration_invalid", "message": "Published AI template configuration is invalid"})
 	case errors.Is(err, ai.ErrIdempotencyConflict):
 		c.JSON(http.StatusConflict, gin.H{"code": "idempotency_conflict", "message": err.Error()})
 	case errors.Is(err, ai.ErrAssetNotEligible), errors.Is(err, ai.ErrPublishedSOPNotFound):

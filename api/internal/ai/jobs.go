@@ -33,6 +33,8 @@ var (
 	ErrUserPreferenceInvalid          = errors.New("user preference is too long")
 	ErrGenerationOverrideInvalid      = errors.New("generation override is not explicitly allowed by the published slot")
 	ErrPublishedTemplateConfigInvalid = errors.New("published template configuration is invalid")
+	ErrUserPreferenceNotAllowed       = errors.New("user preference is not allowed by every selected slot")
+	ErrTemplateVersionIDInvalid       = errors.New("template version ID must be a UUID")
 )
 
 type CreateJobInput struct {
@@ -239,6 +241,9 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 		if err != nil {
 			return err
 		}
+		if err := validateUserPreference(selectedSlots, normalized.UserPreference); err != nil {
+			return err
+		}
 		if err := validateGenerationOverrides(selectedSlots, normalized.GenerationOverrides); err != nil {
 			return err
 		}
@@ -329,6 +334,11 @@ func normalizeCreateJobInput(input CreateJobInput) (CreateJobInput, string, erro
 	if !idempotencyKeyPattern.MatchString(input.IdempotencyKey) {
 		return input, "", ErrIdempotencyKeyInvalid
 	}
+	parsedTemplateID, err := uuid.Parse(strings.TrimSpace(input.TemplateVersionPublicID))
+	if err != nil {
+		return input, "", ErrTemplateVersionIDInvalid
+	}
+	input.TemplateVersionPublicID = parsedTemplateID.String()
 	input.Locale = strings.TrimSpace(input.Locale)
 	if len(input.Locale) == 0 || len(input.Locale) > 32 || !localePattern.MatchString(input.Locale) {
 		return input, "", ErrLocaleInvalid
@@ -559,23 +569,127 @@ func validateGenerationOverrides(slots []models.AIContentSlot, overrides map[str
 		if json.Unmarshal(slot.GenerationConfigJSON, &config) != nil || config == nil {
 			return ErrPublishedTemplateConfigInvalid
 		}
-		if override.CandidateCount != nil && !allowedNumber(config["allowed_candidate_count"], float64(*override.CandidateCount)) {
+		if slot.Kind != models.AIContentSlotImage && (override.Size != nil || override.Quality != nil || override.Style != nil) {
 			return ErrGenerationOverrideInvalid
 		}
-		if override.Size != nil && !allowedString(config["allowed_sizes"], *override.Size) {
-			return ErrGenerationOverrideInvalid
+		if override.CandidateCount != nil {
+			if *override.CandidateCount < 1 || *override.CandidateCount > 4 {
+				return ErrGenerationOverrideInvalid
+			}
+			if !validRuntimeNumberList(config["allowed_candidate_count"], 1, 4) {
+				return ErrPublishedTemplateConfigInvalid
+			}
+			if !allowedNumber(config["allowed_candidate_count"], float64(*override.CandidateCount)) {
+				return ErrGenerationOverrideInvalid
+			}
 		}
-		if override.Quality != nil && !allowedString(config["allowed_qualities"], *override.Quality) {
-			return ErrGenerationOverrideInvalid
+		if override.Size != nil {
+			if !supportedImageSize(*override.Size) {
+				return ErrGenerationOverrideInvalid
+			}
+			if !validRuntimeStringList(config["allowed_sizes"], func(v string) bool { return supportedImageSize(v) }) {
+				return ErrPublishedTemplateConfigInvalid
+			}
+			if !allowedString(config["allowed_sizes"], *override.Size) {
+				return ErrGenerationOverrideInvalid
+			}
 		}
-		if override.Style != nil && !allowedString(config["allowed_styles"], *override.Style) {
-			return ErrGenerationOverrideInvalid
+		if override.Quality != nil {
+			if !supportedQuality(*override.Quality) {
+				return ErrGenerationOverrideInvalid
+			}
+			if !validRuntimeStringList(config["allowed_qualities"], supportedQuality) {
+				return ErrPublishedTemplateConfigInvalid
+			}
+			if !allowedString(config["allowed_qualities"], *override.Quality) {
+				return ErrGenerationOverrideInvalid
+			}
+		}
+		if override.Style != nil {
+			if strings.TrimSpace(*override.Style) != *override.Style || len(*override.Style) == 0 || utf8.RuneCountInString(*override.Style) > 80 {
+				return ErrGenerationOverrideInvalid
+			}
+			if !validRuntimeStringList(config["allowed_styles"], func(v string) bool { return strings.TrimSpace(v) == v && v != "" && utf8.RuneCountInString(v) <= 80 }) {
+				return ErrPublishedTemplateConfigInvalid
+			}
+			if !allowedString(config["allowed_styles"], *override.Style) {
+				return ErrGenerationOverrideInvalid
+			}
 		}
 		if override.CandidateCount == nil && override.Size == nil && override.Quality == nil && override.Style == nil {
 			return ErrGenerationOverrideInvalid
 		}
 	}
 	return nil
+}
+
+func validateUserPreference(slots []models.AIContentSlot, preference string) error {
+	if preference == "" {
+		return nil
+	}
+	for _, slot := range slots {
+		var config map[string]any
+		if json.Unmarshal(slot.GenerationConfigJSON, &config) != nil || config == nil {
+			return ErrPublishedTemplateConfigInvalid
+		}
+		value, exists := config["allow_user_extra_prompt"]
+		if !exists {
+			return ErrUserPreferenceNotAllowed
+		}
+		allowed, ok := value.(bool)
+		if !ok {
+			return ErrPublishedTemplateConfigInvalid
+		}
+		if !allowed {
+			return ErrUserPreferenceNotAllowed
+		}
+	}
+	return nil
+}
+func supportedImageSize(value string) bool {
+	switch value {
+	case "1024x1024", "1536x1024", "1024x1536":
+		return true
+	}
+	return false
+}
+func supportedQuality(value string) bool {
+	switch value {
+	case "low", "medium", "high", "auto":
+		return true
+	}
+	return false
+}
+func validRuntimeNumberList(value any, min, max int) bool {
+	items, ok := value.([]any)
+	if !ok || len(items) == 0 {
+		return false
+	}
+	seen := map[int]bool{}
+	for _, item := range items {
+		number, ok := item.(float64)
+		integer := int(number)
+		if !ok || number != float64(integer) || integer < min || integer > max || seen[integer] {
+			return false
+		}
+		seen[integer] = true
+	}
+	return true
+}
+func validRuntimeStringList(value any, valid func(string) bool) bool {
+	items, ok := value.([]any)
+	if !ok || len(items) == 0 || len(items) > 20 {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, item := range items {
+		text, ok := item.(string)
+		if !ok || !valid(text) || seen[text] {
+			return false
+		}
+		seen[text] = true
+	}
+	return true
 }
 func allowedNumber(value any, want float64) bool {
 	items, ok := value.([]any)

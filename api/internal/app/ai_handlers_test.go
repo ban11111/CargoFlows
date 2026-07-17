@@ -423,6 +423,14 @@ func TestAIJobEndpointsUseTypedArraysUUIDsAndSafeDTOs(t *testing.T) {
 	if longLocale.Code != http.StatusBadRequest {
 		t.Fatalf("long locale = %d %s", longLocale.Code, longLocale.Body.String())
 	}
+	if err := db.Model(&slot).Update("generation_config_json", []byte(`[]`)).Error; err != nil {
+		t.Fatal(err)
+	}
+	badConfigBody := strings.Replace(createBody, `"locale":"zh-CN"}`, `"locale":"zh-CN","generation_overrides":{"title":{"candidate_count":1}}}`, 1)
+	badConfig := aiRequestWithIdempotency(t, server, token, http.MethodPost, "/api/v1/ai-jobs", badConfigBody, "http-job-config-0001")
+	if badConfig.Code != http.StatusInternalServerError || !strings.Contains(badConfig.Body.String(), `"code":"ai_template_configuration_invalid"`) {
+		t.Fatalf("published config error = %d %s", badConfig.Code, badConfig.Body.String())
+	}
 	assertNoAIInternalFields(t, created.Body.Bytes())
 	for _, path := range []string{"/api/v1/ai-jobs", "/api/v1/ai-jobs/" + job.PublicID} {
 		response := aiRequest(t, server, token, http.MethodGet, path, "")

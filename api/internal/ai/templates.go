@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"cargoflow/api/internal/models"
 	"github.com/google/uuid"
@@ -389,6 +390,14 @@ func ValidateTemplateVersion(version models.AIContentTemplateVersion, slots []mo
 				issues = append(issues, validateCandidateCount(config, path)...)
 			}
 		}
+		if generation != nil {
+			issues = append(issues, validateGenerationAllowLists(generation, slot.Kind, path+".generation_config")...)
+			if value, exists := generation["allow_user_extra_prompt"]; exists {
+				if _, ok := value.(bool); !ok {
+					issues = appendIssue(issues, "allow_user_extra_prompt_invalid", path+".generation_config.allow_user_extra_prompt", "User extra prompt permission must be a boolean.")
+				}
+			}
+		}
 		if slot.Kind == models.AIContentSlotImage {
 			issues = append(issues, validateImageSize(generation, path+".generation_config.size")...)
 			issues = append(issues, validateRequiredViews(constraints, path+".constraints.required_views")...)
@@ -575,12 +584,62 @@ func validateImageSize(config map[string]any, path string) []ValidationIssue {
 	if !ok {
 		return []ValidationIssue{{Code: "image_size_invalid", Path: path, Message: "Image size is not supported."}}
 	}
-	switch size {
-	case "1024x1024", "1536x1024", "1024x1536":
+	if supportedImageSize(size) {
 		return nil
-	default:
-		return []ValidationIssue{{Code: "image_size_invalid", Path: path, Message: "Image size is not supported."}}
 	}
+	return []ValidationIssue{{Code: "image_size_invalid", Path: path, Message: "Image size is not supported."}}
+}
+
+func validateGenerationAllowLists(config map[string]any, kind models.AIContentSlotKind, path string) []ValidationIssue {
+	var issues []ValidationIssue
+	if value, ok := config["allowed_candidate_count"]; ok && !validNumberAllowList(value, 1, 4) {
+		issues = appendIssue(issues, "allowed_candidate_count_invalid", path+".allowed_candidate_count", "Allowed candidate counts must be unique integers from 1 to 4.")
+	}
+	imageOnly := []struct {
+		key, code, message string
+		valid              func(string) bool
+	}{{"allowed_sizes", "allowed_sizes_invalid", "Allowed sizes must be a unique non-empty list of supported image sizes.", supportedImageSize}, {"allowed_qualities", "allowed_qualities_invalid", "Allowed qualities must be a unique non-empty list using low, medium, high, or auto.", supportedQuality}, {"allowed_styles", "allowed_styles_invalid", "Allowed styles must be unique, trimmed, non-empty, at most 80 characters, and at most 20 entries.", func(v string) bool { return strings.TrimSpace(v) == v && v != "" && utf8.RuneCountInString(v) <= 80 }}}
+	for _, rule := range imageOnly {
+		value, exists := config[rule.key]
+		if !exists {
+			continue
+		}
+		if kind != models.AIContentSlotImage || !validStringAllowList(value, rule.valid) {
+			issues = appendIssue(issues, rule.code, path+"."+rule.key, rule.message)
+		}
+	}
+	return issues
+}
+func validNumberAllowList(value any, min, max int) bool {
+	items, ok := value.([]any)
+	if !ok || len(items) == 0 {
+		return false
+	}
+	seen := map[int]bool{}
+	for _, item := range items {
+		number, ok := item.(float64)
+		integer := int(number)
+		if !ok || number != float64(integer) || integer < min || integer > max || seen[integer] {
+			return false
+		}
+		seen[integer] = true
+	}
+	return true
+}
+func validStringAllowList(value any, valid func(string) bool) bool {
+	items, ok := value.([]any)
+	if !ok || len(items) == 0 || len(items) > 20 {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, item := range items {
+		text, ok := item.(string)
+		if !ok || !valid(text) || seen[text] {
+			return false
+		}
+		seen[text] = true
+	}
+	return true
 }
 
 func validateSafeArea(config map[string]any, path string) []ValidationIssue {
