@@ -106,7 +106,7 @@ func (s *Server) createCaptureSOP(c *gin.Context) {
 			return
 		}
 	}
-	created, err := NewSOPService(s.db).Create(c, CreateSOPInput{CategoryID: *req.CategoryID, CreatedByID: currentUser(c).ID, NameZH: name.ZHCN, NameEN: name.EN, DescriptionZH: description.ZHCN, DescriptionEN: description.EN})
+	created, err := NewSOPService(s.db).Create(c.Request.Context(), CreateSOPInput{CategoryID: *req.CategoryID, CreatedByID: currentUser(c).ID, NameZH: name.ZHCN, NameEN: name.EN, DescriptionZH: description.ZHCN, DescriptionEN: description.EN})
 	if err != nil {
 		respondSOPError(c, err)
 		return
@@ -129,7 +129,7 @@ func (s *Server) listCaptureSOPs(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": "insufficient permissions"})
 		return
 	}
-	values, err := NewSOPService(s.db).List(c, categoryID, includeAll)
+	values, err := NewSOPService(s.db).List(c.Request.Context(), categoryID, includeAll)
 	if err != nil {
 		respondSOPError(c, err)
 		return
@@ -145,7 +145,7 @@ func (s *Server) getCaptureSOP(c *gin.Context) {
 	if !requireUUIDParam(c, "sop_id") {
 		return
 	}
-	value, err := NewSOPService(s.db).Get(c, c.Param("sop_id"))
+	value, err := NewSOPService(s.db).Get(c.Request.Context(), c.Param("sop_id"))
 	if err != nil {
 		respondSOPError(c, err)
 		return
@@ -170,7 +170,7 @@ func (s *Server) getSOPVersion(c *gin.Context) {
 	if !requireUUIDParam(c, "version_id") {
 		return
 	}
-	version, err := NewSOPService(s.db).GetVersion(c, c.Param("version_id"))
+	version, err := NewSOPService(s.db).GetVersion(c.Request.Context(), c.Param("version_id"))
 	if err != nil {
 		respondSOPError(c, err)
 		return
@@ -314,7 +314,7 @@ func (s *Server) validateSOPVersion(c *gin.Context) {
 	if !requireUUIDParam(c, "version_id") {
 		return
 	}
-	errorsFound, err := NewSOPService(s.db).Validate(c, c.Param("version_id"))
+	errorsFound, err := NewSOPService(s.db).Validate(c.Request.Context(), c.Param("version_id"))
 	if err != nil {
 		respondSOPError(c, err)
 		return
@@ -351,7 +351,7 @@ func (s *Server) copySOPVersion(c *gin.Context) {
 		respondSOPBadRequest(c, errOr(err, "source_version_id must be a UUID"))
 		return
 	}
-	version, err := NewSOPService(s.db).CopyVersion(c, c.Param("sop_id"), *req.SourceVersionID)
+	version, err := NewSOPService(s.db).CopyVersion(c.Request.Context(), c.Param("sop_id"), *req.SourceVersionID)
 	if err != nil {
 		respondSOPError(c, err)
 		return
@@ -363,7 +363,7 @@ func (s *Server) archiveSOPVersion(c *gin.Context) {
 	if !requireUUIDParam(c, "version_id") {
 		return
 	}
-	if err := NewSOPService(s.db).Archive(c, c.Param("version_id")); err != nil {
+	if err := NewSOPService(s.db).Archive(c.Request.Context(), c.Param("version_id")); err != nil {
 		respondSOPError(c, err)
 		return
 	}
@@ -386,7 +386,7 @@ func (s *Server) createSOPReferenceUploadURL(c *gin.Context) {
 		respondSOPBadRequest(c, errors.New("only image uploads are supported"))
 		return
 	}
-	if err := NewSOPService(s.db).RequireDraftView(c, c.Param("version_id"), c.Param("view_id")); err != nil {
+	if err := NewSOPService(s.db).RequireDraftView(c.Request.Context(), c.Param("version_id"), c.Param("view_id")); err != nil {
 		respondSOPError(c, err)
 		return
 	}
@@ -396,7 +396,7 @@ func (s *Server) createSOPReferenceUploadURL(c *gin.Context) {
 		return
 	}
 	key := fmt.Sprintf("sop-references/%s/%s/%d-%s", c.Param("version_id"), c.Param("view_id"), time.Now().UnixNano(), name)
-	uploadURL, assetURL, err := s.storage.createUploadURL(c, key)
+	uploadURL, assetURL, err := s.storage.createUploadURL(c.Request.Context(), key)
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "object_storage_unavailable", "message": "prepare object storage upload failed"})
 		return
@@ -542,7 +542,7 @@ func requiredComposition(value *compositionRequest) (models.Composition, error) 
 }
 
 func (s *Server) respondVersion(c *gin.Context, status int, versionID string) {
-	version, err := NewSOPService(s.db).GetVersion(c, versionID)
+	version, err := NewSOPService(s.db).GetVersion(c.Request.Context(), versionID)
 	if err != nil {
 		respondSOPError(c, err)
 		return
@@ -557,7 +557,7 @@ func (s *Server) respondVersionModel(c *gin.Context, status int, version models.
 		return
 	}
 	if len(version.Views) == 0 {
-		loaded, err := NewSOPService(s.db).GetVersion(c, version.PublicID)
+		loaded, err := NewSOPService(s.db).GetVersion(c.Request.Context(), version.PublicID)
 		if err != nil {
 			respondSOPError(c, err)
 			return

@@ -16,7 +16,7 @@ func (s *Server) getOpenAISetting(c *gin.Context) {
 		respondAIUnavailable(c)
 		return
 	}
-	value, err := s.ai.ProviderSettings.Get(c)
+	value, err := s.ai.ProviderSettings.Get(c.Request.Context())
 	if err != nil {
 		respondAIError(c, err)
 		return
@@ -37,7 +37,7 @@ func (s *Server) putOpenAISetting(c *gin.Context) {
 		respondAIBadRequest(c, err)
 		return
 	}
-	value, err := s.ai.ProviderSettings.Configure(c, currentUser(c).ID, *req.APIKey)
+	value, err := s.ai.ProviderSettings.Configure(c.Request.Context(), currentUser(c).ID, *req.APIKey)
 	if err != nil {
 		respondAIError(c, err)
 		return
@@ -50,7 +50,7 @@ func (s *Server) disableOpenAISetting(c *gin.Context) {
 		respondAIUnavailable(c)
 		return
 	}
-	value, err := s.ai.ProviderSettings.Disable(c, currentUser(c).ID)
+	value, err := s.ai.ProviderSettings.Disable(c.Request.Context(), currentUser(c).ID)
 	if err != nil {
 		respondAIError(c, err)
 		return
@@ -68,7 +68,7 @@ func (s *Server) createAIJob(c *gin.Context) {
 		respondAIBadRequest(c, errors.New("sku_id, a UUID template_version_id, locale, selected_asset_ids array, and at least one selected_slot_key are required"))
 		return
 	}
-	value, err := s.ai.Jobs.Create(c, ai.CreateJobInput{
+	value, err := s.ai.Jobs.Create(c.Request.Context(), ai.CreateJobInput{
 		SKUID: req.SKUID, TemplateVersionPublicID: req.TemplateVersionPublicID,
 		SelectedSlotKeys: req.SelectedSlotKeys, SelectedAssetIDs: *req.SelectedAssetIDs,
 		Locale: req.Locale, CreatedByID: currentUser(c).ID,
@@ -86,7 +86,7 @@ func (s *Server) createAIJob(c *gin.Context) {
 }
 
 func (s *Server) listAIJobs(c *gin.Context) {
-	values, err := s.ai.Jobs.List(c)
+	values, err := s.ai.Jobs.List(c.Request.Context())
 	if err != nil {
 		respondAIError(c, err)
 		return
@@ -101,7 +101,7 @@ func (s *Server) getAIJob(c *gin.Context) {
 	if !requireAIUUIDParam(c, "job_id") {
 		return
 	}
-	value, err := s.ai.Jobs.Get(c, c.Param("job_id"))
+	value, err := s.ai.Jobs.Get(c.Request.Context(), c.Param("job_id"))
 	if err != nil {
 		respondAIError(c, err)
 		return
@@ -119,7 +119,7 @@ func (s *Server) listAIContentTemplates(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": "insufficient permissions"})
 		return
 	}
-	values, err := s.ai.Templates.List(c, includeAll)
+	values, err := s.ai.Templates.List(c.Request.Context(), includeAll)
 	if err != nil {
 		respondAIError(c, err)
 		return
@@ -138,7 +138,7 @@ func (s *Server) createAIContentTemplate(c *gin.Context) {
 		return
 	}
 	versionInput := templateMutationInput(req)
-	created, err := s.ai.Templates.Create(c, ai.CreateTemplateInput{
+	created, err := s.ai.Templates.Create(c.Request.Context(), ai.CreateTemplateInput{
 		NameZH: req.NameZH, NameEN: req.NameEN, TargetPlatform: req.TargetPlatform,
 		CreatedByID: currentUser(c).ID, Version: versionInput,
 	})
@@ -154,7 +154,7 @@ func (s *Server) getAIContentTemplate(c *gin.Context) {
 	if !requireAIUUIDParam(c, "template_id") {
 		return
 	}
-	value, err := s.ai.Templates.Get(c, c.Param("template_id"))
+	value, err := s.ai.Templates.Get(c.Request.Context(), c.Param("template_id"))
 	if err != nil {
 		respondAIError(c, err)
 		return
@@ -171,7 +171,7 @@ func (s *Server) updateAIContentTemplateVersion(c *gin.Context) {
 		respondAIBadRequest(c, err)
 		return
 	}
-	value, err := s.ai.Templates.UpdateDraft(c, c.Param("version_id"), templateMutationInput(req))
+	value, err := s.ai.Templates.UpdateDraft(c.Request.Context(), c.Param("version_id"), templateMutationInput(req))
 	if err != nil {
 		respondAIError(c, err)
 		return
@@ -183,7 +183,7 @@ func (s *Server) validateAIContentTemplateVersion(c *gin.Context) {
 	if !requireAIUUIDParam(c, "version_id") {
 		return
 	}
-	issues, err := s.ai.Templates.Validate(c, c.Param("version_id"))
+	issues, err := s.ai.Templates.Validate(c.Request.Context(), c.Param("version_id"))
 	if err != nil {
 		respondAIError(c, err)
 		return
@@ -195,7 +195,7 @@ func (s *Server) publishAIContentTemplateVersion(c *gin.Context) {
 	if !requireAIUUIDParam(c, "version_id") {
 		return
 	}
-	issues, err := s.ai.Templates.Publish(c, c.Param("version_id"), currentUser(c).ID)
+	issues, err := s.ai.Templates.Publish(c.Request.Context(), c.Param("version_id"), currentUser(c).ID)
 	if err != nil {
 		respondAIError(c, err)
 		return
@@ -204,7 +204,7 @@ func (s *Server) publishAIContentTemplateVersion(c *gin.Context) {
 		c.JSON(http.StatusUnprocessableEntity, templateValidationDTO(issues))
 		return
 	}
-	value, err := s.ai.Templates.GetVersion(c, c.Param("version_id"))
+	value, err := s.ai.Templates.GetVersion(c.Request.Context(), c.Param("version_id"))
 	if err != nil {
 		respondAIError(c, err)
 		return
@@ -224,7 +224,7 @@ func (s *Server) copyAIContentTemplateVersion(c *gin.Context) {
 		respondAIBadRequest(c, err)
 		return
 	}
-	value, err := s.ai.Templates.CopyVersion(c, c.Param("template_id"), *req.SourceVersionID, currentUser(c).ID)
+	value, err := s.ai.Templates.CopyVersion(c.Request.Context(), c.Param("template_id"), *req.SourceVersionID, currentUser(c).ID)
 	if err != nil {
 		respondAIError(c, err)
 		return
@@ -236,11 +236,11 @@ func (s *Server) archiveAIContentTemplateVersion(c *gin.Context) {
 	if !requireAIUUIDParam(c, "version_id") {
 		return
 	}
-	if err := s.ai.Templates.Archive(c, c.Param("version_id")); err != nil {
+	if err := s.ai.Templates.Archive(c.Request.Context(), c.Param("version_id")); err != nil {
 		respondAIError(c, err)
 		return
 	}
-	value, err := s.ai.Templates.GetVersion(c, c.Param("version_id"))
+	value, err := s.ai.Templates.GetVersion(c.Request.Context(), c.Param("version_id"))
 	if err != nil {
 		respondAIError(c, err)
 		return

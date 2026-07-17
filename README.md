@@ -48,6 +48,45 @@ Open:
 http://localhost:3005
 ```
 
+### Phase 1 AI dry-run
+
+Phase 1 exercises the complete template, snapshot, queue, and worker flow without
+sending product content or images to OpenAI. It does not need an OpenAI API key.
+Keep `AI_WORKER_DRY_RUN=true`; the worker refuses to start if dry-run is disabled.
+
+Generate a fresh 32-byte local encryption master key in the API terminal. This
+command assigns the base64 value to the environment without printing it:
+
+```bash
+export CARGOFLOW_SECRETS_MASTER_KEY="$(openssl rand -base64 32)"
+```
+
+The master key protects any credential configured later through the admin UI.
+Do not commit it, paste it into logs, or reuse the development key in production.
+Losing it makes encrypted credentials unrecoverable, so production deployments
+must store it in their secret manager.
+
+Start MySQL and MinIO, then run the API from the same terminal so it receives the
+master key:
+
+```bash
+docker compose up -d --wait mysql minio
+cd api
+go run ./cmd/server
+```
+
+In a second terminal, start the Phase 1 worker explicitly in dry-run mode:
+
+```bash
+cd api
+export AI_WORKER_DRY_RUN=true
+export AI_WORKER_POLL_INTERVAL=1s
+go run ./cmd/worker
+```
+
+The worker records zero-usage dry-run executions locally and has no Phase 1
+product-content provider call path. Never place an OpenAI key in these commands.
+
 The Web product-capture SOP routes are:
 
 - `/sop-templates` for lifecycle management;

@@ -301,7 +301,7 @@ func (s *Server) createPhotoSession(c *gin.Context) {
 	user := currentUser(c)
 	var session models.PhotoSession
 	var selectedVersionPublicID string
-	err := s.db.WithContext(c).Transaction(func(tx *gorm.DB) error {
+	err := s.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		var version models.SOPVersion
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("public_id = ?", req.SOPVersionID).First(&version).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -614,7 +614,7 @@ func isScopedAssetObjectKey(objectKey, sessionID, viewID string) bool {
 
 func (s *Server) resolveCaptureBinding(c *gin.Context, sessionPublicID, viewPublicID string) (models.PhotoSession, models.SOPView, error) {
 	var session models.PhotoSession
-	if err := s.db.WithContext(c).Where("public_id = ?", sessionPublicID).First(&session).Error; err != nil {
+	if err := s.db.WithContext(c.Request.Context()).Where("public_id = ?", sessionPublicID).First(&session).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return session, models.SOPView{}, errPhotoSessionNotFound
 		}
@@ -624,7 +624,7 @@ func (s *Server) resolveCaptureBinding(c *gin.Context, sessionPublicID, viewPubl
 		return session, models.SOPView{}, errPhotoSessionForbidden
 	}
 	var view models.SOPView
-	if err := s.db.WithContext(c).Where("public_id = ?", viewPublicID).First(&view).Error; err != nil {
+	if err := s.db.WithContext(c.Request.Context()).Where("public_id = ?", viewPublicID).First(&view).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return session, view, errSOPViewNotFound
 		}
