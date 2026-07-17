@@ -40,6 +40,8 @@ type assetStorage interface {
 	assetURL(string) string
 	objectExists(context.Context, string) (bool, error)
 	ReadSource(context.Context, string) (ai.ImageInput, error)
+	promoteSource(context.Context, string, string, string, []byte) error
+	deleteSource(context.Context, string) error
 }
 
 func newObjectStore(cfg config.Config) (*objectStore, error) {
@@ -145,6 +147,23 @@ func (s *objectStore) ReadSource(ctx context.Context, objectKey string) (ai.Imag
 		return ai.ImageInput{}, fmt.Errorf("source image exceeds byte limit")
 	}
 	return ai.ImageInput{Bytes: value}, nil
+}
+
+func (s *objectStore) promoteSource(ctx context.Context, temporaryKey, finalKey, mimeType string, value []byte) error {
+	if temporaryKey == finalKey || len(value) == 0 {
+		return fmt.Errorf("invalid source object promotion")
+	}
+	if err := s.ensureBucket(ctx); err != nil {
+		return err
+	}
+	if _, err := s.internal.PutObject(ctx, s.bucket, finalKey, bytes.NewReader(value), int64(len(value)), minio.PutObjectOptions{ContentType: mimeType, DisableMultipart: true}); err != nil {
+		return err
+	}
+	return s.internal.RemoveObject(ctx, s.bucket, temporaryKey, minio.RemoveObjectOptions{})
+}
+
+func (s *objectStore) deleteSource(ctx context.Context, objectKey string) error {
+	return s.internal.RemoveObject(ctx, s.bucket, objectKey, minio.RemoveObjectOptions{})
 }
 
 func (s *objectStore) ClaimGenerated(ctx context.Context, objectKey, mimeType string, value []byte) (ai.GeneratedObjectClaim, error) {

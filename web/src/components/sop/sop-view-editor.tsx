@@ -188,7 +188,7 @@ export function SOPViewEditor({
             <ul className="mt-3 grid gap-3 sm:grid-cols-2">
               {view.reference_images.map((image, index) => <li className="flex gap-3 rounded-md border border-border bg-card p-2" key={image.public_id}>
                 <Image alt={localizedText(language, image.caption) || `${displayName} ${c.references} ${index + 1}`} className="h-20 w-20 rounded object-cover" height={80} src={authenticatedMediaURL(image.thumbnail_url)} unoptimized width={80} />
-                <div className="min-w-0 flex-1"><p className="truncate text-xs">{localizedText(language, image.caption) || image.object_key}</p><div className="mt-2 flex gap-1">
+                <div className="min-w-0 flex-1"><p className="truncate text-xs">{localizedText(language, image.caption) || image.public_id}</p><div className="mt-2 flex gap-1">
                   <Button aria-label={`${c.referenceUp} ${index + 1}`} className="min-h-11 min-w-11" disabled={allDisabled || aggregateLocked || index === 0} onClick={() => onReferenceMove?.(image.public_id, -1)} size="icon" type="button" variant="ghost"><ArrowUp className="h-4 w-4" /></Button>
                   <Button aria-label={`${c.referenceDown} ${index + 1}`} className="min-h-11 min-w-11" disabled={allDisabled || aggregateLocked || index === view.reference_images.length - 1} onClick={() => onReferenceMove?.(image.public_id, 1)} size="icon" type="button" variant="ghost"><ArrowDown className="h-4 w-4" /></Button>
                   <Button aria-label={`${c.removeReference} ${index + 1}`} className="min-h-11 min-w-11" disabled={allDisabled || aggregateLocked} onClick={() => onReferenceDelete?.(image.public_id)} size="icon" type="button" variant="ghost"><Trash2 className="h-4 w-4" /></Button>

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -28,6 +29,7 @@ type fakeAssetStorage struct {
 	exists        bool
 	err           error
 	source        []byte
+	objects       map[string][]byte
 	lastObjectKey string
 }
 
@@ -53,18 +55,48 @@ func (s *fakeAssetStorage) assetURL(objectKey string) string {
 	return "https://assets.example.test/cargoflow/" + objectKey
 }
 
-func (s *fakeAssetStorage) objectExists(_ context.Context, _ string) (bool, error) {
+func (s *fakeAssetStorage) objectExists(_ context.Context, objectKey string) (bool, error) {
+	if s.objects != nil {
+		_, exists := s.objects[objectKey]
+		return exists, s.err
+	}
 	return s.exists, s.err
 }
 
-func (s *fakeAssetStorage) ReadSource(_ context.Context, _ string) (ai.ImageInput, error) {
+func (s *fakeAssetStorage) ReadSource(_ context.Context, objectKey string) (ai.ImageInput, error) {
 	if s.err != nil {
 		return ai.ImageInput{}, s.err
+	}
+	if s.objects != nil {
+		value, exists := s.objects[objectKey]
+		if !exists {
+			return ai.ImageInput{}, errors.New("source object not found")
+		}
+		return ai.ImageInput{Bytes: value}, nil
 	}
 	if len(s.source) == 0 {
 		return ai.ImageInput{Bytes: defaultFakeAssetImage}, nil
 	}
 	return ai.ImageInput{Bytes: s.source}, nil
+}
+
+func (s *fakeAssetStorage) promoteSource(_ context.Context, temporaryKey, finalKey, _ string, value []byte) error {
+	if s.err != nil {
+		return s.err
+	}
+	if s.objects == nil {
+		s.objects = make(map[string][]byte)
+	}
+	s.objects[finalKey] = append([]byte(nil), value...)
+	delete(s.objects, temporaryKey)
+	return nil
+}
+
+func (s *fakeAssetStorage) deleteSource(_ context.Context, objectKey string) error {
+	if s.objects != nil {
+		delete(s.objects, objectKey)
+	}
+	return s.err
 }
 
 func assetImageFixture(t *testing.T, width, height int, encode func(*bytes.Buffer, image.Image) error) []byte {
@@ -307,13 +339,61 @@ func TestCompleteAssetPersistsValidatedAssetMetadata(t *testing.T) {
 	if response.Code != http.StatusCreated {
 		t.Fatalf("expected validated asset completion, got %d: %s", response.Code, response.Body.String())
 	}
+	var receipt completedAssetResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &receipt); err != nil {
+		t.Fatal(err)
+	}
 	var asset models.Asset
-	if err := db.Where("object_key = ?", ticket.ObjectKey).First(&asset).Error; err != nil {
+	if err := db.Where("public_id = ?", receipt.PublicID).First(&asset).Error; err != nil {
 		t.Fatal(err)
 	}
 	hash := sha256.Sum256(source)
 	if asset.MIMEType != "image/jpeg" || asset.Width != 2 || asset.Height != 3 || asset.ByteCount != int64(len(source)) || asset.SHA256 != fmt.Sprintf("%x", hash) {
 		t.Fatalf("persisted asset metadata = %#v", asset)
+	}
+}
+
+func TestCompleteAssetPromotesValidatedBytesToAnImmutableFinalObject(t *testing.T) {
+	db := newTestDB(t)
+	version := createCaptureVersionFixture(t, db, models.SOPVersionPublished, "61616161-6161-4616-8616-616161616161")
+	view := createCaptureViewFixture(t, db, version.ID, "62626262-6262-4626-8626-626262626262", "正面", "Front")
+	session := createPhotoSessionFixture(t, db, version.ID, "63636363-6363-4636-8636-636363636363")
+	first := assetImageFixture(t, 2, 2, func(output *bytes.Buffer, value image.Image) error { return jpeg.Encode(output, value, nil) })
+	overwrite := assetImageFixture(t, 3, 3, func(output *bytes.Buffer, value image.Image) error { return jpeg.Encode(output, value, nil) })
+	storage := &fakeAssetStorage{objects: make(map[string][]byte)}
+	server := &Server{db: db, cfg: testAssetConfig(), storage: storage}
+	ticket := createAssetUploadTicket(t, server, session, view, "capture.jpg")
+	storage.objects[ticket.ObjectKey] = first
+
+	response := performCompleteAssetWithTicket(t, server, session, view, ticket.CompletionToken, "")
+	if response.Code != http.StatusCreated {
+		t.Fatalf("completion = %d %s", response.Code, response.Body.String())
+	}
+	var receipt completedAssetResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &receipt); err != nil {
+		t.Fatal(err)
+	}
+	var asset models.Asset
+	if err := db.Where("public_id = ?", receipt.PublicID).First(&asset).Error; err != nil {
+		t.Fatal(err)
+	}
+	if asset.ObjectKey == ticket.ObjectKey || strings.HasPrefix(asset.ObjectKey, "photo-sessions/") {
+		t.Fatalf("asset retained mutable temporary key %q", asset.ObjectKey)
+	}
+	storage.objects[ticket.ObjectKey] = overwrite // The still-valid presigned URL overwrites its temporary destination.
+
+	media := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(media)
+	context.Params = gin.Params{{Key: "asset_id", Value: asset.PublicID}}
+	context.Request = httptest.NewRequest(http.MethodGet, "/assets/"+asset.PublicID+"/media", nil)
+	context.Set("user", models.User{ID: 1, Role: models.RoleOperator})
+	server.assetMedia(context)
+	if media.Code != http.StatusOK || !bytes.Equal(media.Body.Bytes(), first) {
+		t.Fatalf("final media changed after temporary overwrite: status=%d bytes=%d", media.Code, media.Body.Len())
+	}
+	hash := sha256.Sum256(first)
+	if asset.SHA256 != fmt.Sprintf("%x", hash) || asset.ByteCount != int64(len(first)) {
+		t.Fatalf("asset metadata no longer matches promoted bytes: %#v", asset)
 	}
 }
 
@@ -357,8 +437,12 @@ func TestCompleteAssetIsIdempotentForRepeatedTicket(t *testing.T) {
 	if firstAsset.PublicID != secondAsset.PublicID || !firstAsset.CapturedAt.Equal(secondAsset.CapturedAt) {
 		t.Fatalf("replay must return the originally created asset: first=%#v second=%#v", firstAsset, secondAsset)
 	}
+	claims, err := server.verifyAssetUploadTicket(ticket.CompletionToken)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var count int64
-	if err := db.Model(&models.Asset{}).Where("object_key = ?", ticket.ObjectKey).Count(&count).Error; err != nil || count != 1 {
+	if err := db.Model(&models.Asset{}).Where("upload_id = ?", claims.UploadID).Count(&count).Error; err != nil || count != 1 {
 		t.Fatalf("expected exactly one asset for ticket, count=%d err=%v", count, err)
 	}
 }
@@ -402,8 +486,12 @@ func TestCompleteAssetIsIdempotentForConcurrentTicketConsumption(t *testing.T) {
 	if statuses[http.StatusCreated] != 1 || statuses[http.StatusOK] != 1 || len(ids) != 2 || ids[0] != ids[1] {
 		t.Fatalf("expected one create and one replay for the same asset, statuses=%v ids=%v", statuses, ids)
 	}
+	claims, err := server.verifyAssetUploadTicket(ticket.CompletionToken)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var count int64
-	if err := db.Model(&models.Asset{}).Where("object_key = ?", ticket.ObjectKey).Count(&count).Error; err != nil || count != 1 {
+	if err := db.Model(&models.Asset{}).Where("upload_id = ?", claims.UploadID).Count(&count).Error; err != nil || count != 1 {
 		t.Fatalf("expected exactly one concurrent asset, count=%d err=%v", count, err)
 	}
 }

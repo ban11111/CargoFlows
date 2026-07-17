@@ -78,7 +78,6 @@ const poseSchema = z.object({
 
 const referenceImageSchema = z.object({
   public_id: z.string().uuid(),
-  object_key: z.string().min(1),
   thumbnail_url: z.string().min(1),
   sort_order: z.number().int().positive(),
   caption: localizedTextSchema,

@@ -67,8 +67,8 @@ type UpdateViewInput struct {
 }
 
 type ReferenceImageInput struct {
-	ObjectKey, ThumbnailURL, CaptionZH, CaptionEN string
-	SortOrder                                     int
+	PublicID, ObjectKey, ThumbnailURL, CaptionZH, CaptionEN string
+	SortOrder                                               int
 }
 
 type CreatedSOP struct {
@@ -515,8 +515,11 @@ func (s *SOPService) AddReferenceImage(ctx context.Context, versionPublicID, vie
 			}
 		}
 		added = models.SOPViewReferenceImage{
-			PublicID: uuid.NewString(), SOPViewID: view.ID, ObjectKey: input.ObjectKey,
+			PublicID: input.PublicID, SOPViewID: view.ID, ObjectKey: input.ObjectKey,
 			ThumbnailURL: input.ThumbnailURL, SortOrder: position, CaptionZH: input.CaptionZH, CaptionEN: input.CaptionEN,
+		}
+		if added.PublicID == "" {
+			added.PublicID = uuid.NewString()
 		}
 		if err := tx.Create(&added).Error; err != nil {
 			return err

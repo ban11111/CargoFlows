@@ -390,19 +390,19 @@ describe("SOPVersionEditor", () => {
   });
 
   it("uploads a reference image before registering its metadata", async () => {
-    const objectKey = `sop-references/${versionID}/${backID}/sample.jpg`;
+    const completionToken = "55555555-5555-4555-8555-555555555555";
     const calls: Array<{ url: string; method?: string }> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
       calls.push({ url, method: init?.method });
       if (url.endsWith("/upload-url")) return response({
-        method: "PUT", upload_url: "https://uploads.example/sample.jpg", asset_url: "/media/sample.jpg",
-        object_key: objectKey, expires_in: 900, headers: { "content-type": "image/jpeg" },
+        method: "PUT", upload_url: "https://uploads.example/sample.jpg", completion_token: completionToken,
+        expires_in: 900, headers: { "content-type": "image/jpeg" },
       });
       if (url === "https://uploads.example/sample.jpg") return response(undefined, 204);
       if (url.endsWith("/reference-images")) return response({ ...draftFixture, updated_at: "2026-07-16T10:00:00.001Z", views: [referenceView, { ...backView, reference_images: [{
-        public_id: "66666666-6666-4666-8666-666666666666", object_key: objectKey,
-        thumbnail_url: "/media/sample.jpg", sort_order: 1, caption: { "zh-CN": "", en: "" },
+        public_id: "66666666-6666-4666-8666-666666666666",
+        thumbnail_url: "/api/v1/sop-reference-images/66666666-6666-4666-8666-666666666666/media", sort_order: 1, caption: { "zh-CN": "", en: "" },
       }] }] }, 201);
       throw new Error(`Unexpected request ${url}`);
     });
@@ -422,8 +422,7 @@ describe("SOPVersionEditor", () => {
     ]);
     const metadataRequest = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[2][1] as RequestInit;
     expect(JSON.parse(String(metadataRequest.body))).toEqual({
-      object_key: objectKey,
-      thumbnail_url: "/media/sample.jpg",
+      completion_token: completionToken,
       caption: { "zh-CN": "包装细节示例", en: "Packaging detail example" },
     });
     const cached = client.getQueryData<SOPVersion>(["sop-version", versionID]);
@@ -432,8 +431,8 @@ describe("SOPVersionEditor", () => {
   });
 
   it("updates and invalidates the exact version cache after reference reorder and delete", async () => {
-    const firstImage = { public_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", object_key: "one.jpg", thumbnail_url: "/one.jpg", sort_order: 1, caption: { "zh-CN": "一", en: "One" } };
-    const secondImage = { public_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", object_key: "two.jpg", thumbnail_url: "/two.jpg", sort_order: 2, caption: { "zh-CN": "二", en: "Two" } };
+    const firstImage = { public_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", thumbnail_url: "/one.jpg", sort_order: 1, caption: { "zh-CN": "一", en: "One" } };
+    const secondImage = { public_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", thumbnail_url: "/two.jpg", sort_order: 2, caption: { "zh-CN": "二", en: "Two" } };
     const withImages = { ...draftFixture, views: [referenceView, { ...backView, reference_images: [firstImage, secondImage] }] };
     const reordered = { ...withImages, views: [referenceView, { ...backView, reference_images: [{ ...secondImage, sort_order: 1 }, { ...firstImage, sort_order: 2 }] }] };
     vi.spyOn(window, "confirm").mockReturnValue(true);

@@ -73,8 +73,33 @@ func TestGeneratedBucketPrivateMinIOIntegration(t *testing.T) {
 		_ = store.internal.RemoveObject(t.Context(), cfg.MinIOBucket, sourceKey, minio.RemoveObjectOptions{})
 	}()
 	storage := ai.NewImageStorage(store)
-	if _, err := storage.ReadSource(t.Context(), sourceKey); err != nil {
+	validated, err := storage.ReadSource(t.Context(), sourceKey)
+	if err != nil {
 		t.Fatalf("authenticated worker source read failed: %v", err)
+	}
+	finalKey := "assets/final/immutable.png"
+	defer func() { _ = store.deleteSource(t.Context(), finalKey) }()
+	if err := store.promoteSource(t.Context(), sourceKey, finalKey, "image/png", validated.Bytes); err != nil {
+		t.Fatalf("promote validated source failed: %v", err)
+	}
+	overwrite := append([]byte(nil), source...)
+	overwrite[len(overwrite)-1] ^= 0x01
+	overwriteRequest, err := http.NewRequestWithContext(t.Context(), http.MethodPut, uploadURL, bytes.NewReader(overwrite))
+	if err != nil {
+		t.Fatal(err)
+	}
+	overwriteRequest.Header.Set("Content-Type", "image/png")
+	overwriteResponse, err := http.DefaultClient.Do(overwriteRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	overwriteResponse.Body.Close()
+	if overwriteResponse.StatusCode < 200 || overwriteResponse.StatusCode >= 300 {
+		t.Fatalf("presigned temporary overwrite status = %d, want 2xx", overwriteResponse.StatusCode)
+	}
+	final, err := storage.ReadSource(t.Context(), finalKey)
+	if err != nil || !bytes.Equal(final.Bytes, source) {
+		t.Fatalf("final object changed after temporary URL overwrite: bytes=%d err=%v", len(final.Bytes), err)
 	}
 	sourcePolicy, err := store.internal.GetBucketPolicy(t.Context(), cfg.MinIOBucket)
 	if err != nil || sourcePolicy != "" {

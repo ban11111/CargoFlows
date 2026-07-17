@@ -105,6 +105,7 @@ type Asset struct {
 	SKUID          uint         `gorm:"index;not null" json:"-"`
 	PhotoSessionID uint         `gorm:"index" json:"-"`
 	SOPViewID      uint         `gorm:"index" json:"-"`
+	UploadID       *string      `gorm:"size:36;uniqueIndex" json:"-"`
 	ObjectKey      string       `gorm:"size:500;uniqueIndex;not null" json:"-"`
 	OriginalURL    string       `gorm:"size:500;not null" json:"-"`
 	ThumbnailURL   string       `gorm:"size:500" json:"-"`

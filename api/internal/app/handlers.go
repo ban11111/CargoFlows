@@ -548,12 +548,12 @@ func (s *Server) completeAssetUpload(c *gin.Context) {
 		respondCaptureError(c, errInvalidUploadTicket)
 		return
 	}
-	objectKey := fmt.Sprintf("photo-sessions/%s/views/%s/%s%s", session.PublicID, view.PublicID, claims.UploadID, extension)
-	if !isScopedAssetObjectKey(objectKey, session.PublicID, view.PublicID) {
+	temporaryObjectKey := fmt.Sprintf("photo-sessions/%s/views/%s/%s%s", session.PublicID, view.PublicID, claims.UploadID, extension)
+	if !isScopedAssetObjectKey(temporaryObjectKey, session.PublicID, view.PublicID) {
 		respondCaptureError(c, errInvalidUploadTicket)
 		return
 	}
-	existing, found, err := s.findCompletedAsset(objectKey)
+	existing, found, err := s.findCompletedAsset(claims.UploadID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "internal server error"})
 		return
@@ -566,16 +566,32 @@ func (s *Server) completeAssetUpload(c *gin.Context) {
 		s.writeCompletedAsset(c, http.StatusOK, existing, session.PublicID, view.PublicID)
 		return
 	}
-	exists, err := s.storage.objectExists(c.Request.Context(), objectKey)
+	exists, err := s.storage.objectExists(c.Request.Context(), temporaryObjectKey)
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "object_storage_unavailable", "message": "verify uploaded object failed"})
 		return
 	}
 	if !exists {
+		for attempt := 0; attempt < 6; attempt++ {
+			existing, found, lookupErr := s.findCompletedAsset(claims.UploadID)
+			if lookupErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "internal server error"})
+				return
+			}
+			if found {
+				if existing.SKUID != session.SKUID || existing.PhotoSessionID != session.ID || existing.SOPViewID != view.ID {
+					respondCaptureError(c, errInvalidUploadTicket)
+					return
+				}
+				s.writeCompletedAsset(c, http.StatusOK, existing, session.PublicID, view.PublicID)
+				return
+			}
+			time.Sleep(time.Duration(1<<attempt) * time.Millisecond)
+		}
 		respondCaptureError(c, errUploadedObjectNotFound)
 		return
 	}
-	source, err := s.storage.ReadSource(c.Request.Context(), objectKey)
+	source, err := s.storage.ReadSource(c.Request.Context(), temporaryObjectKey)
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "object_storage_unavailable", "message": "read uploaded object failed"})
 		return
@@ -585,11 +601,20 @@ func (s *Server) completeAssetUpload(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_uploaded_image", "message": "uploaded image is invalid"})
 		return
 	}
+	assetPublicID := uuid.NewString()
+	finalObjectKey := finalizedAssetObjectKey(assetPublicID, extension)
+	if err := s.storage.promoteSource(c.Request.Context(), temporaryObjectKey, finalObjectKey, metadata.MIMEType, source.Bytes); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "object_storage_unavailable", "message": "finalize uploaded object failed"})
+		return
+	}
+	uploadID := claims.UploadID
 	asset := models.Asset{
+		PublicID:       assetPublicID,
 		SKUID:          session.SKUID,
 		PhotoSessionID: session.ID,
 		SOPViewID:      view.ID,
-		ObjectKey:      objectKey,
+		UploadID:       &uploadID,
+		ObjectKey:      finalObjectKey,
 		OriginalURL:    "",
 		ReviewStatus:   "pending",
 		MIMEType:       metadata.MIMEType,
@@ -601,8 +626,12 @@ func (s *Server) completeAssetUpload(c *gin.Context) {
 	}
 	asset, created, err := s.createCompletedAsset(asset)
 	if err != nil {
+		_ = s.storage.deleteSource(c.Request.Context(), finalObjectKey)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "internal server error"})
 		return
+	}
+	if !created {
+		_ = s.storage.deleteSource(c.Request.Context(), finalObjectKey)
 	}
 	if asset.SKUID != session.SKUID || asset.PhotoSessionID != session.ID || asset.SOPViewID != view.ID {
 		respondCaptureError(c, errInvalidUploadTicket)
@@ -615,11 +644,11 @@ func (s *Server) completeAssetUpload(c *gin.Context) {
 	s.writeCompletedAsset(c, status, asset, session.PublicID, view.PublicID)
 }
 
-func (s *Server) findCompletedAsset(objectKey string) (models.Asset, bool, error) {
+func (s *Server) findCompletedAsset(uploadID string) (models.Asset, bool, error) {
 	var lastErr error
 	for attempt := 0; attempt < 6; attempt++ {
 		var asset models.Asset
-		err := s.db.Where("object_key = ?", objectKey).First(&asset).Error
+		err := s.db.Where("upload_id = ?", uploadID).First(&asset).Error
 		if err == nil {
 			return asset, true, nil
 		}
@@ -649,7 +678,10 @@ func (s *Server) createCompletedAsset(asset models.Asset) (models.Asset, bool, e
 				return models.Asset{}, false, result.Error
 			}
 		} else {
-			existing, found, err := s.findCompletedAsset(asset.ObjectKey)
+			if asset.UploadID == nil {
+				return models.Asset{}, false, fmt.Errorf("asset upload ID is required")
+			}
+			existing, found, err := s.findCompletedAsset(*asset.UploadID)
 			if err == nil && found {
 				return existing, false, nil
 			}
@@ -663,6 +695,10 @@ func (s *Server) createCompletedAsset(asset models.Asset) (models.Asset, bool, e
 		time.Sleep(time.Duration(1<<attempt) * time.Millisecond)
 	}
 	return models.Asset{}, false, lastErr
+}
+
+func finalizedAssetObjectKey(assetPublicID, extension string) string {
+	return "assets/final/" + assetPublicID + extension
 }
 
 func (s *Server) retryableAssetDBError(err error) bool {

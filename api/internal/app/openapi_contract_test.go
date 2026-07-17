@@ -96,7 +96,7 @@ func TestOpenAPIUsesDistinctUploadResponseSchemas(t *testing.T) {
 		t.Fatalf("asset upload response must require its completion ticket, got %q", got)
 	}
 	if got := schemaRef("/sop-versions/{version_id}/views/{view_id}/reference-images/upload-url"); got != "#/components/schemas/SOPReferenceUploadEnvelope" {
-		t.Fatalf("SOP reference upload response must use its runtime schema without a completion ticket, got %q", got)
+		t.Fatalf("SOP reference upload response must use its opaque completion-ticket schema, got %q", got)
 	}
 
 	schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
@@ -116,8 +116,18 @@ func TestOpenAPIUsesDistinctUploadResponseSchemas(t *testing.T) {
 			t.Errorf("asset upload response exposes internal locator %s", forbidden)
 		}
 	}
-	if requiredFields("SOPReferenceUploadEnvelope")["completion_token"] {
-		t.Fatal("SOP reference upload response must not claim a completion_token")
+	referenceUploadProperties := schemas["SOPReferenceUploadEnvelope"].(map[string]any)["properties"].(map[string]any)
+	if !requiredFields("SOPReferenceUploadEnvelope")["completion_token"] {
+		t.Fatal("SOP reference upload response must require completion_token")
+	}
+	for _, forbidden := range []string{"asset_url", "object_key"} {
+		if _, exists := referenceUploadProperties[forbidden]; exists {
+			t.Errorf("SOP reference upload response exposes internal locator %s", forbidden)
+		}
+	}
+	referenceProperties := schemas["ReferenceImage"].(map[string]any)["properties"].(map[string]any)
+	if _, exists := referenceProperties["object_key"]; exists {
+		t.Error("SOP reference DTO exposes object_key")
 	}
 }
 

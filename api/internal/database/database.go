@@ -108,6 +108,7 @@ func migrateSchema(db *gorm.DB) error {
 		&models.SOPVersion{},
 		&models.SOPView{},
 		&models.SOPViewReferenceImage{},
+		&models.SOPReferenceUpload{},
 		&models.PhotoSession{},
 		&models.Asset{},
 		&models.AssetReview{},

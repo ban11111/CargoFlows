@@ -196,13 +196,13 @@ export function SOPVersionEditor({ initialVersion, onVersionChange }: SOPVersion
   async function uploadReference(viewIndex: number, file: File, caption: LocalizedText) {
     const view = version.views[viewIndex];
     await run(`reference-${view.public_id}`, async () => {
-      const upload = await apiRequest<{ method: "PUT"; upload_url: string; asset_url: string; object_key: string; headers: Record<string, string> }>(`/sop-versions/${version.public_id}/views/${view.public_id}/reference-images/upload-url`, {
+      const upload = await apiRequest<{ method: "PUT"; upload_url: string; completion_token: string; headers: Record<string, string> }>(`/sop-versions/${version.public_id}/views/${view.public_id}/reference-images/upload-url`, {
         method: "POST", body: JSON.stringify({ file_name: file.name, content_type: file.type }),
       });
       const result = await fetch(upload.upload_url, { method: upload.method, headers: upload.headers, body: file });
       if (!result.ok) throw new Error("reference upload failed");
       const confirmed = await apiRequest<SOPVersion>(`/sop-versions/${version.public_id}/views/${view.public_id}/reference-images`, {
-        method: "POST", body: JSON.stringify({ object_key: upload.object_key, thumbnail_url: upload.asset_url, caption }), headers: sopRevisionHeaders(version),
+        method: "POST", body: JSON.stringify({ completion_token: upload.completion_token, caption }), headers: sopRevisionHeaders(version),
       });
       replaceVersion(confirmed);
     });

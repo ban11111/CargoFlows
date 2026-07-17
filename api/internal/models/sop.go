@@ -93,10 +93,23 @@ type SOPViewReferenceImage struct {
 	ID           uint      `gorm:"primaryKey" json:"-"`
 	PublicID     string    `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
 	SOPViewID    uint      `gorm:"uniqueIndex:idx_view_reference_order;not null" json:"-"`
-	ObjectKey    string    `gorm:"size:500;not null" json:"object_key"`
-	ThumbnailURL string    `gorm:"size:500;not null" json:"thumbnail_url"`
+	ObjectKey    string    `gorm:"size:500;not null" json:"-"`
+	ThumbnailURL string    `gorm:"size:500;not null" json:"-"`
 	SortOrder    int       `gorm:"uniqueIndex:idx_view_reference_order;not null" json:"sort_order"`
 	CaptionZH    string    `gorm:"size:240;not null" json:"-"`
 	CaptionEN    string    `gorm:"size:240;not null" json:"-"`
 	CreatedAt    time.Time `json:"created_at"`
+}
+
+type SOPReferenceUpload struct {
+	ID           uint       `gorm:"primaryKey" json:"-"`
+	PublicID     string     `gorm:"size:36;uniqueIndex;not null" json:"-"`
+	SOPVersionID uint       `gorm:"index;not null" json:"-"`
+	SOPViewID    uint       `gorm:"index;not null" json:"-"`
+	CreatedByID  uint       `gorm:"index;not null" json:"-"`
+	TemporaryKey string     `gorm:"size:500;uniqueIndex;not null" json:"-"`
+	ContentType  string     `gorm:"size:80;not null" json:"-"`
+	ExpiresAt    time.Time  `gorm:"index;not null" json:"-"`
+	ConsumedAt   *time.Time `gorm:"index" json:"-"`
+	CreatedAt    time.Time  `json:"-"`
 }

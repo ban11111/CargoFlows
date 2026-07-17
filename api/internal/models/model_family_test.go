@@ -127,6 +127,19 @@ func TestVariantIdentityModelsDoNotSerializeInternalIDsOrPublishedActor(t *testi
 	}
 }
 
+func TestVariantDifferenceEvidenceDoesNotSerializeInternalIDs(t *testing.T) {
+	evidence := models.VariantDifferenceRegionEvidenceAsset{ID: 1, VariantDifferenceRegionID: 2, AssetID: 3}
+	encoded, err := json.Marshal(evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"ID", "VariantIdentityManifestVersionID", "VariantDifferenceRegionID", "AssetID"} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("evidence leaked %q: %s", forbidden, encoded)
+		}
+	}
+}
+
 func TestVariantIdentityJSONFieldsSerializeAsJSONValues(t *testing.T) {
 	values := []struct {
 		name  string

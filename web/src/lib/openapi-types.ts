@@ -1274,7 +1274,6 @@ export interface components {
         ReferenceImage: {
             /** Format: uuid */
             public_id: string;
-            object_key: string;
             thumbnail_url: string;
             sort_order: number;
             caption: components["schemas"]["LocalizedText"];
@@ -1372,8 +1371,8 @@ export interface components {
             description: components["schemas"]["LocalizedText"];
         };
         AddReferenceImageRequest: {
-            object_key: string;
-            thumbnail_url: string;
+            /** Format: uuid */
+            completion_token: string;
             caption: components["schemas"]["LocalizedText"];
             sort_order?: number;
         };
@@ -1399,9 +1398,11 @@ export interface components {
             method: "PUT";
             /** Format: uri */
             upload_url: string;
-            /** Format: uri */
-            asset_url: string;
-            object_key: string;
+            /**
+             * Format: uuid
+             * @description One-time opaque ticket required to register this uploaded reference image.
+             */
+            completion_token: string;
             expires_in: number;
             headers: {
                 [key: string]: string;

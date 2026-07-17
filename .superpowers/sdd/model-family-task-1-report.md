@@ -154,3 +154,26 @@ git diff --check
 ```
 
 Result: all Go packages and vet passed; the real MinIO privacy/presigned-upload test passed; Web passed 14 files / 79 tests; lint, TypeScript, and whitespace validation passed.
+
+## Final object and opaque-ticket remediation
+
+The final Important review was addressed by removing all client-visible object locators from the SOP-reference upload lifecycle and by sealing every completed upload into a server-derived final object key:
+
+- SOP reference upload URLs now return only a short-lived opaque UUID `completion_token`, the presigned PUT URL, and display-safe upload metadata. The temporary storage key is held only in `SOPReferenceUpload`, bound to the draft version, view, requesting user, content type, expiry, and one-time consumption state.
+- SOP reference completion accepts only the opaque token, caption, and optional sort order. It validates and reads the temporary bytes server-side, promotes those exact bytes to `sop-references/final/{public_id}`, deletes the temporary object, and exposes references only through the authenticated same-origin media URL. Public reference DTOs and generated TypeScript types no longer contain `object_key`, `asset_url`, or an internal thumbnail URL.
+- Capture asset completion now promotes the already validated byte slice to `assets/final/{asset_public_id}` before persistence. The database stores that immutable final key only; its upload nonce is retained internally for idempotent completion. A later PUT through the still-valid temporary presigned URL cannot change stored metadata or the media served for the completed asset.
+- `VariantDifferenceRegionEvidenceAsset` relationship fields are explicitly `json:"-"`; the serialization regression test verifies only safe relationship-independent fields are emitted.
+
+Regression coverage includes both handler-level asset/SOP reference tests and a real MinIO test that performs: PUT A to a presigned temporary URL, completion/promotion, PUT B through the old temporary URL, then reads the final object and verifies it is still A.
+
+Final verification:
+
+```sh
+cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test ./... -count=1
+cd api && GOCACHE=/private/tmp/cargoflow-go-cache go vet ./...
+cd api && MINIO_INTEGRATION_ENDPOINT=127.0.0.1:9000 MINIO_INTEGRATION_ACCESS_KEY=cargoflow MINIO_INTEGRATION_SECRET_KEY=cargoflow123 GOCACHE=/private/tmp/cargoflow-go-cache go test ./internal/app -run TestGeneratedBucketPrivateMinIOIntegration -count=1 -v
+cd web && pnpm run generate:api && pnpm test && pnpm lint && pnpm typecheck
+git diff --check
+```
+
+Result: all commands passed; Web passed 14 files / 79 tests.

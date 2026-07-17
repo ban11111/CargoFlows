@@ -1196,10 +1196,9 @@ components:
         target: { $ref: '#/components/schemas/Vector3' }
     ReferenceImage:
       type: object
-      required: [public_id, object_key, thumbnail_url, sort_order, caption]
+      required: [public_id, thumbnail_url, sort_order, caption]
       properties:
         public_id: { type: string, format: uuid }
-        object_key: { type: string }
         thumbnail_url: { type: string }
         sort_order: { type: integer, minimum: 1 }
         caption: { $ref: '#/components/schemas/LocalizedText' }
@@ -1300,10 +1299,9 @@ components:
     AddReferenceImageRequest:
       type: object
       additionalProperties: false
-      required: [object_key, thumbnail_url, caption]
+      required: [completion_token, caption]
       properties:
-        object_key: { type: string, minLength: 1 }
-        thumbnail_url: { type: string, minLength: 1 }
+        completion_token: { type: string, format: uuid }
         caption: { $ref: '#/components/schemas/LocalizedText' }
         sort_order: { type: integer, minimum: 1 }
     ValidationError:
@@ -1326,12 +1324,12 @@ components:
       properties: { message: { type: string } }
     SOPReferenceUploadEnvelope:
       type: object
-      required: [method, upload_url, asset_url, object_key, expires_in, headers]
+      additionalProperties: false
+      required: [method, upload_url, completion_token, expires_in, headers]
       properties:
         method: { type: string, enum: [PUT] }
         upload_url: { type: string, format: uri }
-        asset_url: { type: string, format: uri }
-        object_key: { type: string }
+        completion_token: { type: string, format: uuid, description: "One-time opaque ticket required to register this uploaded reference image." }
         expires_in: { type: integer }
         headers: { type: object, additionalProperties: { type: string } }
     AssetUploadEnvelope:

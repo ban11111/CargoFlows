@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"cargoflow/api/internal/ai"
 	"cargoflow/api/internal/models"
 	"cargoflow/api/internal/sop"
 	"github.com/gin-gonic/gin"
@@ -413,8 +414,13 @@ func (s *Server) createSOPReferenceUploadURL(c *gin.Context) {
 		respondSOPBadRequest(c, err)
 		return
 	}
-	if req.FileName == nil || req.ContentType == nil || !strings.HasPrefix(*req.ContentType, "image/") {
+	if req.FileName == nil || req.ContentType == nil || !strings.HasPrefix(normalizedImageContentType(*req.ContentType), "image/") {
 		respondSOPBadRequest(c, errors.New("only image uploads are supported"))
+		return
+	}
+	extension, supported := imageExtension(*req.ContentType)
+	if !supported {
+		respondSOPBadRequest(c, errors.New("unsupported image content type"))
 		return
 	}
 	if err := NewSOPService(s.db).RequireDraftView(c.Request.Context(), c.Param("version_id"), c.Param("view_id")); err != nil {
@@ -426,13 +432,31 @@ func (s *Server) createSOPReferenceUploadURL(c *gin.Context) {
 		respondSOPBadRequest(c, errors.New("file_name is required"))
 		return
 	}
-	key := fmt.Sprintf("sop-references/%s/%s/%d-%s", c.Param("version_id"), c.Param("view_id"), time.Now().UnixNano(), name)
-	uploadURL, assetURL, err := s.storage.createUploadURL(c.Request.Context(), key)
+	ticketID := uuid.NewString()
+	temporaryKey := "sop-reference-uploads/" + ticketID + extension
+	upload := models.SOPReferenceUpload{PublicID: ticketID, SOPVersionID: 0, SOPViewID: 0, CreatedByID: currentUser(c).ID, TemporaryKey: temporaryKey, ContentType: normalizedImageContentType(*req.ContentType), ExpiresAt: time.Now().Add(15 * time.Minute)}
+	var version models.SOPVersion
+	var view models.SOPView
+	if err := s.db.Where("public_id = ?", c.Param("version_id")).First(&version).Error; err != nil {
+		respondSOPError(c, ErrVersionNotFound)
+		return
+	}
+	if err := s.db.Where("public_id = ? AND sop_version_id = ?", c.Param("view_id"), version.ID).First(&view).Error; err != nil {
+		respondSOPBadRequest(c, errors.New("SOP view not found"))
+		return
+	}
+	upload.SOPVersionID, upload.SOPViewID = version.ID, view.ID
+	if err := s.db.Create(&upload).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "internal server error"})
+		return
+	}
+	uploadURL, _, err := s.storage.createUploadURL(c.Request.Context(), temporaryKey)
 	if err != nil {
+		_ = s.db.Delete(&upload).Error
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "object_storage_unavailable", "message": "prepare object storage upload failed"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"method": "PUT", "upload_url": uploadURL, "asset_url": assetURL, "object_key": key, "expires_in": 900, "headers": gin.H{"content-type": *req.ContentType}})
+	c.JSON(http.StatusOK, gin.H{"method": "PUT", "upload_url": uploadURL, "completion_token": ticketID, "expires_in": 900, "headers": gin.H{"content-type": upload.ContentType}})
 }
 
 func (s *Server) addSOPReferenceImage(c *gin.Context) {
@@ -444,23 +468,17 @@ func (s *Server) addSOPReferenceImage(c *gin.Context) {
 		return
 	}
 	var req struct {
-		ObjectKey    *string               `json:"object_key"`
-		ThumbnailURL *string               `json:"thumbnail_url"`
-		Caption      *localizedTextRequest `json:"caption"`
-		SortOrder    *int                  `json:"sort_order"`
+		CompletionToken *string               `json:"completion_token"`
+		Caption         *localizedTextRequest `json:"caption"`
+		SortOrder       *int                  `json:"sort_order"`
 	}
 	if err := decodeJSONStrict(c, &req); err != nil {
 		respondSOPBadRequest(c, err)
 		return
 	}
 	caption, err := requiredLocalized(req.Caption, "caption")
-	if err != nil || req.ObjectKey == nil || req.ThumbnailURL == nil || strings.TrimSpace(*req.ThumbnailURL) == "" {
-		respondSOPBadRequest(c, errOr(err, "object_key, thumbnail_url, and caption are required"))
-		return
-	}
-	prefix := fmt.Sprintf("sop-references/%s/%s/", c.Param("version_id"), c.Param("view_id"))
-	if !strings.HasPrefix(*req.ObjectKey, prefix) || strings.TrimPrefix(*req.ObjectKey, prefix) == "" {
-		respondSOPBadRequest(c, errors.New("object_key is outside this SOP view upload scope"))
+	if err != nil || req.CompletionToken == nil || !isUUID(*req.CompletionToken) {
+		respondSOPBadRequest(c, errOr(err, "completion_token and caption are required"))
 		return
 	}
 	sortOrder := 0
@@ -471,8 +489,65 @@ func (s *Server) addSOPReferenceImage(c *gin.Context) {
 	if req.SortOrder != nil {
 		sortOrder = *req.SortOrder
 	}
-	_, err = NewSOPService(s.db).AddReferenceImage(ctx, c.Param("version_id"), c.Param("view_id"), ReferenceImageInput{ObjectKey: *req.ObjectKey, ThumbnailURL: *req.ThumbnailURL, CaptionZH: caption.ZHCN, CaptionEN: caption.EN, SortOrder: sortOrder})
+	if err := NewSOPService(s.db).RequireDraftView(c.Request.Context(), c.Param("version_id"), c.Param("view_id")); err != nil {
+		respondSOPError(c, err)
+		return
+	}
+	var version models.SOPVersion
+	var view models.SOPView
+	if err := s.db.Where("public_id = ?", c.Param("version_id")).First(&version).Error; err != nil {
+		respondSOPError(c, ErrVersionNotFound)
+		return
+	}
+	if err := s.db.Where("public_id = ? AND sop_version_id = ?", c.Param("view_id"), version.ID).First(&view).Error; err != nil {
+		respondSOPBadRequest(c, errors.New("SOP view not found"))
+		return
+	}
+	var upload models.SOPReferenceUpload
+	if err := s.db.Where("public_id = ? AND sop_version_id = ? AND sop_view_id = ? AND created_by_id = ? AND consumed_at IS NULL", *req.CompletionToken, version.ID, view.ID, currentUser(c).ID).First(&upload).Error; err != nil {
+		respondSOPBadRequest(c, errors.New("reference upload ticket is invalid or already used"))
+		return
+	}
+	if upload.SOPVersionID != version.ID || upload.SOPViewID != view.ID || upload.ExpiresAt.Before(time.Now()) {
+		respondSOPBadRequest(c, errors.New("reference upload ticket is invalid or expired"))
+		return
+	}
+	exists, err := s.storage.objectExists(c.Request.Context(), upload.TemporaryKey)
+	if err != nil || !exists {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "object_storage_unavailable", "message": "verify uploaded reference failed"})
+		return
+	}
+	source, err := s.storage.ReadSource(c.Request.Context(), upload.TemporaryKey)
 	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "object_storage_unavailable", "message": "read uploaded reference failed"})
+		return
+	}
+	metadata, err := new(ai.ImageStorage).Validate(ai.ImageValidationRequest{Bytes: source.Bytes})
+	if err != nil || metadata.MIMEType != upload.ContentType {
+		respondSOPBadRequest(c, errors.New("uploaded reference image is invalid"))
+		return
+	}
+	now := time.Now()
+	claimed := s.db.Model(&models.SOPReferenceUpload{}).Where("id = ? AND consumed_at IS NULL", upload.ID).Update("consumed_at", now)
+	if claimed.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "internal server error"})
+		return
+	}
+	if claimed.RowsAffected != 1 {
+		respondSOPBadRequest(c, errors.New("reference upload ticket is already used"))
+		return
+	}
+	extension, _ := imageExtension(upload.ContentType)
+	imagePublicID := uuid.NewString()
+	finalKey := "sop-references/final/" + imagePublicID + extension
+	if err := s.storage.promoteSource(c.Request.Context(), upload.TemporaryKey, finalKey, metadata.MIMEType, source.Bytes); err != nil {
+		_ = s.db.Model(&models.SOPReferenceUpload{}).Where("id = ?", upload.ID).Update("consumed_at", nil).Error
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "object_storage_unavailable", "message": "finalize uploaded reference failed"})
+		return
+	}
+	_, err = NewSOPService(s.db).AddReferenceImage(ctx, c.Param("version_id"), c.Param("view_id"), ReferenceImageInput{PublicID: imagePublicID, ObjectKey: finalKey, CaptionZH: caption.ZHCN, CaptionEN: caption.EN, SortOrder: sortOrder})
+	if err != nil {
+		_ = s.storage.deleteSource(c.Request.Context(), finalKey)
 		respondSOPError(c, err)
 		return
 	}

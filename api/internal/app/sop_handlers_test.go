@@ -429,7 +429,7 @@ func TestPublishedVersionRejectsAllReferenceImageMutations(t *testing.T) {
 
 	cases := []struct{ method, path, body string }{
 		{http.MethodPost, "/api/v1/sop-versions/" + created.Version.PublicID + "/views/" + view.PublicID + "/reference-images/upload-url", `{"file_name":"next.jpg","content_type":"image/jpeg"}`},
-		{http.MethodPost, "/api/v1/sop-versions/" + created.Version.PublicID + "/views/" + view.PublicID + "/reference-images", `{"object_key":"` + prefix + `next.jpg","thumbnail_url":"/next.jpg","caption":{"zh-CN":"","en":""}}`},
+		{http.MethodPost, "/api/v1/sop-versions/" + created.Version.PublicID + "/views/" + view.PublicID + "/reference-images", `{"completion_token":"11111111-1111-4111-8111-111111111111","caption":{"zh-CN":"","en":""}}`},
 		{http.MethodDelete, "/api/v1/sop-versions/" + created.Version.PublicID + "/views/" + view.PublicID + "/reference-images/" + image.PublicID, ""},
 		{http.MethodPut, "/api/v1/sop-versions/" + created.Version.PublicID + "/views/" + view.PublicID + "/reference-image-order", `{"public_ids":["` + image.PublicID + `"]}`},
 	}
@@ -485,8 +485,6 @@ func TestMutationBodiesEnforceNestedRequiredFields(t *testing.T) {
 	defer server.Close()
 	versionPath := "/api/v1/sop-versions/" + created.Version.PublicID
 	viewPath := versionPath + "/views/" + created.Version.Views[0].PublicID
-	prefix := "sop-references/" + created.Version.PublicID + "/" + created.Version.Views[0].PublicID + "/"
-
 	cases := []struct{ name, method, path, body string }{
 		{"partial create description", http.MethodPost, "/api/v1/capture-sops", `{"category_id":` + jsonNumber(category.ID) + `,"name":{"zh-CN":"新建","en":"New"},"description":{"en":"Only English"}}`},
 		{"custom view missing allow_mirror", http.MethodPost, versionPath + "/views", `{"custom":{"role":"capture","view_kind":"standard","name":{"zh-CN":"背面","en":"Back"},"instruction":{"zh-CN":"","en":""},"required":true,"pose":{"space":"object","camera_position_direction":[0,0,-1],"image_up_direction":[1,0,0],"target":[0,0,0]},"composition":{"frame_occupancy":0.8,"aspect_ratio":"1:1","allow_rotation_correction":true}}}`},
@@ -494,8 +492,8 @@ func TestMutationBodiesEnforceNestedRequiredFields(t *testing.T) {
 		{"view reorder missing IDs", http.MethodPut, versionPath + "/view-order", `{}`},
 		{"copy missing source", http.MethodPost, "/api/v1/capture-sops/" + created.SOP.PublicID + "/versions", `{}`},
 		{"upload missing content type", http.MethodPost, viewPath + "/reference-images/upload-url", `{"file_name":"example.jpg"}`},
-		{"reference missing thumbnail", http.MethodPost, viewPath + "/reference-images", `{"object_key":"` + prefix + `example.jpg","caption":{"zh-CN":"","en":""}}`},
-		{"reference missing caption language", http.MethodPost, viewPath + "/reference-images", `{"object_key":"` + prefix + `example.jpg","thumbnail_url":"/thumb.jpg","caption":{"zh-CN":"示例"}}`},
+		{"reference missing completion token", http.MethodPost, viewPath + "/reference-images", `{"caption":{"zh-CN":"","en":""}}`},
+		{"reference missing caption language", http.MethodPost, viewPath + "/reference-images", `{"completion_token":"11111111-1111-4111-8111-111111111111","caption":{"zh-CN":"示例"}}`},
 		{"reference reorder missing IDs", http.MethodPut, viewPath + "/reference-image-order", `{}`},
 	}
 	for _, tc := range cases {
@@ -573,8 +571,7 @@ func TestReferenceImageExplicitInvalidSortOrderDoesNotAppend(t *testing.T) {
 			view := created.Version.Views[0]
 			server, token := authenticatedSOPRouter(t, db, user)
 			defer server.Close()
-			prefix := "sop-references/" + created.Version.PublicID + "/" + view.PublicID + "/"
-			body := map[string]any{"object_key": prefix + "example.jpg", "thumbnail_url": "/example.jpg", "caption": map[string]any{"zh-CN": "", "en": ""}, "sort_order": sortOrder}
+			body := map[string]any{"completion_token": "11111111-1111-4111-8111-111111111111", "caption": map[string]any{"zh-CN": "", "en": ""}, "sort_order": sortOrder}
 			response := sopRequest(t, server, token, http.MethodPost, "/api/v1/sop-versions/"+created.Version.PublicID+"/views/"+view.PublicID+"/reference-images", string(mustJSON(body)))
 			response.Body.Close()
 			if response.StatusCode != http.StatusBadRequest {
@@ -650,12 +647,8 @@ func TestThreeElementVectorsRoundTripAndOmittedSortOrderAppends(t *testing.T) {
 	}
 
 	view := version.Views[1]
-	prefix := "sop-references/" + created.Version.PublicID + "/" + view.PublicID + "/"
-	imageBody := map[string]any{"object_key": prefix + "example.jpg", "thumbnail_url": "/example.jpg", "caption": map[string]any{"zh-CN": "", "en": ""}}
-	createdImage := sopRequest(t, server, token, http.MethodPost, "/api/v1/sop-versions/"+created.Version.PublicID+"/views/"+view.PublicID+"/reference-images", string(mustJSON(imageBody)))
-	createdImage.Body.Close()
-	if createdImage.StatusCode != http.StatusCreated {
-		t.Fatalf("image status = %d", createdImage.StatusCode)
+	if _, err := service.AddReferenceImage(t.Context(), created.Version.PublicID, view.PublicID, ReferenceImageInput{ObjectKey: "sop-references/final/example.jpg"}); err != nil {
+		t.Fatal(err)
 	}
 	version, err = service.GetVersion(t.Context(), created.Version.PublicID)
 	if err != nil {
