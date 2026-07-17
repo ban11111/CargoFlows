@@ -111,6 +111,9 @@ func migrateSchema(db *gorm.DB) error {
 		&models.AIExecution{},
 		&models.AIAuditEvent{},
 		&models.AIUsageLedger{},
+		&models.AITextResult{},
+		&models.SKUPlatformContent{},
+		&models.SKUPlatformContentRevision{},
 	)
 }
 

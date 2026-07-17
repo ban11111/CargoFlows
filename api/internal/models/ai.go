@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 type AITemplateStatus string
 
@@ -248,4 +252,100 @@ type AIUsageLedger struct {
 	Currency          string    `gorm:"size:8;not null" json:"currency"`
 	OpenAIRequestID   string    `gorm:"size:255;index" json:"openai_request_id"`
 	CreatedAt         time.Time `gorm:"index" json:"created_at"`
+}
+
+type AITextResultState string
+
+const (
+	AITextResultCandidate AITextResultState = "candidate"
+	AITextResultApproved  AITextResultState = "approved"
+	AITextResultRejected  AITextResultState = "rejected"
+)
+
+type AITextResult struct {
+	ID                   uint              `gorm:"primaryKey" json:"-"`
+	PublicID             string            `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
+	AIExecutionID        uint              `gorm:"uniqueIndex:idx_ai_text_execution_candidate,priority:1;not null" json:"-"`
+	CandidateIndex       int               `gorm:"uniqueIndex:idx_ai_text_execution_candidate,priority:2;check:chk_ai_text_candidate_index,candidate_index > 0;not null" json:"candidate_index"`
+	Kind                 AIContentSlotKind `gorm:"size:32;index;not null" json:"kind"`
+	RawStructuredJSON    []byte            `gorm:"type:json;not null" json:"-"`
+	ValidationJSON       []byte            `gorm:"type:json;not null" json:"-"`
+	EditedStructuredJSON []byte            `gorm:"type:json" json:"-"`
+	State                AITextResultState `gorm:"size:32;index;not null;default:candidate;check:chk_ai_text_result_lifecycle,(state = 'candidate' AND approved_by_id IS NULL AND approved_at IS NULL AND rejected_by_id IS NULL AND rejected_at IS NULL AND applied_by_id IS NULL AND applied_at IS NULL) OR (state = 'approved' AND approved_by_id IS NOT NULL AND approved_at IS NOT NULL AND rejected_by_id IS NULL AND rejected_at IS NULL AND ((applied_by_id IS NULL AND applied_at IS NULL) OR (applied_by_id IS NOT NULL AND applied_at IS NOT NULL))) OR (state = 'rejected' AND rejected_by_id IS NOT NULL AND rejected_at IS NOT NULL AND approved_by_id IS NULL AND approved_at IS NULL AND applied_by_id IS NULL AND applied_at IS NULL)" json:"state"`
+	EditedByID           *uint             `gorm:"index" json:"-"`
+	EditedAt             *time.Time        `json:"edited_at"`
+	ApprovedByID         *uint             `gorm:"index" json:"-"`
+	ApprovedAt           *time.Time        `json:"approved_at"`
+	RejectedByID         *uint             `gorm:"index" json:"-"`
+	RejectedAt           *time.Time        `json:"rejected_at"`
+	AppliedByID          *uint             `gorm:"index" json:"-"`
+	AppliedAt            *time.Time        `json:"applied_at"`
+	CreatedAt            time.Time         `json:"created_at"`
+	UpdatedAt            time.Time         `json:"updated_at"`
+}
+
+func (result *AITextResult) BeforeCreate(*gorm.DB) error {
+	if len(result.RawStructuredJSON) == 0 {
+		result.RawStructuredJSON = []byte(`{}`)
+	}
+	if len(result.ValidationJSON) == 0 {
+		result.ValidationJSON = []byte(`[]`)
+	}
+	if result.State == "" {
+		result.State = AITextResultCandidate
+	}
+	return nil
+}
+
+type SKUPlatformContent struct {
+	ID                   uint      `gorm:"primaryKey" json:"-"`
+	PublicID             string    `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
+	SKUID                uint      `gorm:"uniqueIndex:idx_sku_platform_content,priority:1;not null" json:"-"`
+	Platform             string    `gorm:"size:80;uniqueIndex:idx_sku_platform_content,priority:2;not null" json:"platform"`
+	Locale               string    `gorm:"size:32;uniqueIndex:idx_sku_platform_content,priority:3;not null" json:"locale"`
+	Title                string    `gorm:"size:500;not null" json:"title"`
+	ShortDescription     string    `gorm:"type:text;not null" json:"short_description"`
+	LongDescription      string    `gorm:"type:longtext;not null" json:"long_description"`
+	SellingPointsJSON    []byte    `gorm:"type:json;not null" json:"-"`
+	SearchKeywordsJSON   []byte    `gorm:"type:json;not null" json:"-"`
+	SourceAITextResultID *uint     `gorm:"index" json:"-"`
+	Revision             int       `gorm:"not null;default:1;check:chk_sku_platform_content_revision,revision > 0" json:"revision"`
+	UpdatedByID          uint      `gorm:"index;not null" json:"-"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
+}
+
+func (content *SKUPlatformContent) BeforeCreate(*gorm.DB) error {
+	if len(content.SellingPointsJSON) == 0 {
+		content.SellingPointsJSON = []byte(`[]`)
+	}
+	if len(content.SearchKeywordsJSON) == 0 {
+		content.SearchKeywordsJSON = []byte(`[]`)
+	}
+	if content.Revision == 0 {
+		content.Revision = 1
+	}
+	return nil
+}
+
+type SKUPlatformContentRevision struct {
+	ID                   uint      `gorm:"primaryKey" json:"-"`
+	PublicID             string    `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
+	SKUPlatformContentID uint      `gorm:"uniqueIndex:idx_platform_content_revision,priority:1;not null" json:"-"`
+	Revision             int       `gorm:"uniqueIndex:idx_platform_content_revision,priority:2;check:chk_platform_content_history_revision,revision > 0;not null" json:"revision"`
+	BeforeJSON           []byte    `gorm:"type:json;not null" json:"-"`
+	AfterJSON            []byte    `gorm:"type:json;not null" json:"-"`
+	SourceAITextResultID *uint     `gorm:"index" json:"-"`
+	ActorID              uint      `gorm:"index;not null" json:"-"`
+	CreatedAt            time.Time `json:"created_at"`
+}
+
+func (revision *SKUPlatformContentRevision) BeforeCreate(*gorm.DB) error {
+	if len(revision.BeforeJSON) == 0 {
+		revision.BeforeJSON = []byte(`{}`)
+	}
+	if len(revision.AfterJSON) == 0 {
+		revision.AfterJSON = []byte(`{}`)
+	}
+	return nil
 }
