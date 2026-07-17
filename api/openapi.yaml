@@ -465,7 +465,7 @@ components:
     PreconditionRequired: { description: X-SOP-Version-Updated-At is required for draft aggregate mutations, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
     ValidationFailed: { description: SOP aggregate validation failed, content: { application/json: { schema: { $ref: '#/components/schemas/ValidationResponse' } } } }
     InternalServerError: { description: Unexpected database or server error, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
-    ServiceUnavailable: { description: Object storage unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+    ServiceUnavailable: { description: Required service or server dependency unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
   schemas:
     OpenAISetting:
       type: object
@@ -487,7 +487,6 @@ components:
     AIContentSlotMutation:
       type: object
       additionalProperties: false
-      required: [slot_key, kind, name_zh, name_en, description_zh, description_en, sequence, optional, default_selected, prompt_fragment, constraints, generation_config, layout_config]
       properties:
         slot_key: { type: string, maxLength: 80 }
         kind: { type: string, enum: [image, title, seo_description] }
@@ -499,13 +498,12 @@ components:
         optional: { type: boolean }
         default_selected: { type: boolean }
         prompt_fragment: { type: string }
-        constraints: { type: object, additionalProperties: true }
-        generation_config: { type: object, additionalProperties: true }
-        layout_config: { type: object, additionalProperties: true }
+        constraints: {}
+        generation_config: {}
+        layout_config: {}
     AIContentTemplateMutationRequest:
       type: object
       additionalProperties: false
-      required: [name_zh, name_en, target_platform, default_locale, prompt_compiler_version, platform_prompt, slots]
       properties:
         name_zh: { type: string, maxLength: 180 }
         name_en: { type: string, maxLength: 180 }
@@ -536,9 +534,9 @@ components:
         optional: { type: boolean }
         default_selected: { type: boolean }
         prompt_fragment: { type: string }
-        constraints: { type: object, additionalProperties: true }
-        generation_config: { type: object, additionalProperties: true }
-        layout_config: { type: object, additionalProperties: true }
+        constraints: {}
+        generation_config: {}
+        layout_config: {}
     AIContentTemplateVersion:
       type: object
       additionalProperties: false

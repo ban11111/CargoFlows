@@ -37,6 +37,9 @@ func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
 }
 
 func NewRouterWithAIDependencies(cfg config.Config, db *gorm.DB, deps AIDependencies) *gin.Engine {
+	if _, err := validateSecretsMasterKey(cfg); err != nil {
+		panic("configure AI services: " + err.Error())
+	}
 	return newRouter(cfg, db, deps)
 }
 
@@ -130,15 +133,12 @@ func registerAIRoutes(protected *gin.RouterGroup, server *Server) {
 
 func newAIDependencies(cfg config.Config, db *gorm.DB) (AIDependencies, error) {
 	deps := AIDependencies{Templates: ai.NewTemplateService(db)}
-	if strings.TrimSpace(cfg.SecretsMasterKey) == "" {
-		if cfg.AppEnv == "production" {
-			return AIDependencies{}, fmt.Errorf("CARGOFLOW_SECRETS_MASTER_KEY is required in production")
-		}
-		return deps, nil
-	}
-	key, err := base64.StdEncoding.DecodeString(cfg.SecretsMasterKey)
+	key, err := validateSecretsMasterKey(cfg)
 	if err != nil {
-		return AIDependencies{}, fmt.Errorf("decode CARGOFLOW_SECRETS_MASTER_KEY: %w", err)
+		return AIDependencies{}, err
+	}
+	if len(key) == 0 {
+		return deps, nil
 	}
 	box, err := secrets.NewAESGCM(key)
 	if err != nil {
@@ -146,6 +146,24 @@ func newAIDependencies(cfg config.Config, db *gorm.DB) (AIDependencies, error) {
 	}
 	deps.ProviderSettings = ai.NewProviderSettingsService(db, box, ai.NewHTTPProviderVerifier(cfg.OpenAIBaseURL, nil))
 	return deps, nil
+}
+
+func validateSecretsMasterKey(cfg config.Config) ([]byte, error) {
+	encoded := strings.TrimSpace(cfg.SecretsMasterKey)
+	if encoded == "" {
+		if cfg.AppEnv == "production" {
+			return nil, fmt.Errorf("CARGOFLOW_SECRETS_MASTER_KEY is required in production")
+		}
+		return nil, nil
+	}
+	key, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("decode CARGOFLOW_SECRETS_MASTER_KEY: %w", err)
+	}
+	if len(key) != 32 {
+		return nil, fmt.Errorf("CARGOFLOW_SECRETS_MASTER_KEY must decode to 32 bytes")
+	}
+	return key, nil
 }
 
 func requireRoles(roles ...models.Role) gin.HandlerFunc {

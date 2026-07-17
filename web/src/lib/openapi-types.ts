@@ -503,35 +503,29 @@ export interface components {
             api_key: string;
         };
         AIContentSlotMutation: {
-            slot_key: string;
+            slot_key?: string;
             /** @enum {string} */
-            kind: "image" | "title" | "seo_description";
-            name_zh: string;
-            name_en: string;
-            description_zh: string;
-            description_en: string;
-            sequence: number;
-            optional: boolean;
-            default_selected: boolean;
-            prompt_fragment: string;
-            constraints: {
-                [key: string]: unknown;
-            };
-            generation_config: {
-                [key: string]: unknown;
-            };
-            layout_config: {
-                [key: string]: unknown;
-            };
+            kind?: "image" | "title" | "seo_description";
+            name_zh?: string;
+            name_en?: string;
+            description_zh?: string;
+            description_en?: string;
+            sequence?: number;
+            optional?: boolean;
+            default_selected?: boolean;
+            prompt_fragment?: string;
+            constraints?: unknown;
+            generation_config?: unknown;
+            layout_config?: unknown;
         };
         AIContentTemplateMutationRequest: {
-            name_zh: string;
-            name_en: string;
-            target_platform: string;
-            default_locale: string;
-            prompt_compiler_version: string;
-            platform_prompt: string;
-            slots: components["schemas"]["AIContentSlotMutation"][];
+            name_zh?: string;
+            name_en?: string;
+            target_platform?: string;
+            default_locale?: string;
+            prompt_compiler_version?: string;
+            platform_prompt?: string;
+            slots?: components["schemas"]["AIContentSlotMutation"][];
         };
         CopyAIContentTemplateVersionRequest: {
             /** Format: uuid */
@@ -551,15 +545,9 @@ export interface components {
             optional: boolean;
             default_selected: boolean;
             prompt_fragment: string;
-            constraints: {
-                [key: string]: unknown;
-            };
-            generation_config: {
-                [key: string]: unknown;
-            };
-            layout_config: {
-                [key: string]: unknown;
-            };
+            constraints: unknown;
+            generation_config: unknown;
+            layout_config: unknown;
         };
         AIContentTemplateVersion: {
             /** Format: uuid */
@@ -939,7 +927,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description Object storage unavailable */
+        /** @description Required service or server dependency unavailable */
         ServiceUnavailable: {
             headers: {
                 [name: string]: unknown;

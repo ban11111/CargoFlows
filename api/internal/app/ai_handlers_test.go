@@ -3,20 +3,29 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"cargoflow/api/internal/ai"
 	"cargoflow/api/internal/config"
+	"cargoflow/api/internal/database"
 	"cargoflow/api/internal/models"
 	"cargoflow/api/internal/secrets"
+	"github.com/gin-gonic/gin"
 	"github.com/goccy/go-yaml"
 	"github.com/golang-jwt/jwt/v5"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 type handlerVerifier struct {
@@ -137,6 +146,11 @@ func TestAIContentTemplateAdminLifecycleUsesPublicDTOs(t *testing.T) {
 	}
 	assertNoAIInternalFields(t, created.Body.Bytes())
 	versionID := aggregate.Versions[0].PublicID
+	updated := aiRequest(t, server, adminToken, http.MethodPatch, "/api/v1/ai-content-template-versions/"+versionID, createBody)
+	if updated.Code != http.StatusOK {
+		t.Fatalf("draft PATCH status/body = %d %s", updated.Code, updated.Body.String())
+	}
+	assertNoAIInternalFields(t, updated.Body.Bytes())
 
 	for _, path := range []string{"/api/v1/ai-content-templates?include_all=true", "/api/v1/ai-content-templates/" + aggregate.PublicID} {
 		response := aiRequest(t, server, adminToken, http.MethodGet, path, "")
@@ -154,6 +168,7 @@ func TestAIContentTemplateAdminLifecycleUsesPublicDTOs(t *testing.T) {
 	if published.Code != http.StatusOK || !strings.Contains(published.Body.String(), `"status":"published"`) {
 		t.Fatalf("publish status/body = %d %s", published.Code, published.Body.String())
 	}
+	assertNoAIInternalFields(t, published.Body.Bytes())
 
 	immutable := aiRequest(t, server, adminToken, http.MethodPatch, "/api/v1/ai-content-template-versions/"+versionID, createBody)
 	if immutable.Code != http.StatusConflict {
@@ -170,11 +185,137 @@ func TestAIContentTemplateAdminLifecycleUsesPublicDTOs(t *testing.T) {
 	if archived.Code != http.StatusOK || !strings.Contains(archived.Body.String(), `"status":"archived"`) {
 		t.Fatalf("archive status/body = %d %s", archived.Code, archived.Body.String())
 	}
+	assertNoAIInternalFields(t, archived.Body.Bytes())
 
 	forbidden := aiRequest(t, server, server.token(t, operator), http.MethodPost, "/api/v1/ai-content-templates", createBody)
 	if forbidden.Code != http.StatusForbidden {
 		t.Fatalf("operator create status/body = %d %s", forbidden.Code, forbidden.Body.String())
 	}
+}
+
+func TestAIContentTemplateDraftPreservesIncompleteAndArbitraryJSONUntilPublish(t *testing.T) {
+	db := newTestDB(t)
+	server, admin, _ := authenticatedAIRouter(t, db, &handlerVerifier{authenticated: true})
+	created := aiRequest(t, server, server.token(t, admin), http.MethodPost, "/api/v1/ai-content-templates", `{
+		"slots":[{"constraints":42,"generation_config":["draft"],"layout_config":null}]
+	}`)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create incomplete draft status/body = %d %s", created.Code, created.Body.String())
+	}
+	var document struct {
+		Versions []struct {
+			PublicID string `json:"public_id"`
+			Slots    []struct {
+				Constraints      any `json:"constraints"`
+				GenerationConfig any `json:"generation_config"`
+				LayoutConfig     any `json:"layout_config"`
+			} `json:"slots"`
+		} `json:"versions"`
+	}
+	if err := json.NewDecoder(created.Body).Decode(&document); err != nil {
+		t.Fatal(err)
+	}
+	if len(document.Versions) != 1 || len(document.Versions[0].Slots) != 1 || document.Versions[0].Slots[0].Constraints != float64(42) {
+		t.Fatalf("scalar configuration was not preserved: %#v", document)
+	}
+	if values, ok := document.Versions[0].Slots[0].GenerationConfig.([]any); !ok || len(values) != 1 || values[0] != "draft" {
+		t.Fatalf("array configuration was not preserved: %#v", document.Versions[0].Slots[0].GenerationConfig)
+	}
+	if document.Versions[0].Slots[0].LayoutConfig != nil {
+		t.Fatalf("null configuration was not preserved: %#v", document.Versions[0].Slots[0].LayoutConfig)
+	}
+	publish := aiRequest(t, server, server.token(t, admin), http.MethodPost, "/api/v1/ai-content-template-versions/"+document.Versions[0].PublicID+"/publish", "")
+	if publish.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("publish incomplete draft status/body = %d %s", publish.Code, publish.Body.String())
+	}
+	for _, code := range []string{"constraints_object_required", "generation_config_object_required", "layout_config_object_required"} {
+		if !strings.Contains(publish.Body.String(), code) {
+			t.Errorf("publish response missing %s: %s", code, publish.Body.String())
+		}
+	}
+}
+
+func TestAIRouterConstructorsValidateProductionMasterKey(t *testing.T) {
+	db := newTestDB(t)
+	base := config.Config{AppEnv: "production", JWTSecret: "test", MinIOEndpoint: "127.0.0.1:9000", MinIOPublicEndpoint: "127.0.0.1:9000", MinIOAccessKey: "test", MinIOSecretKey: "test", MinIOBucket: "test"}
+	constructors := map[string]func(config.Config){
+		"default": func(cfg config.Config) { NewRouter(cfg, db) },
+		"injected": func(cfg config.Config) {
+			NewRouterWithAIDependencies(cfg, db, AIDependencies{Templates: ai.NewTemplateService(db)})
+		},
+	}
+	for name, construct := range constructors {
+		for _, tc := range []struct {
+			name string
+			key  string
+		}{{name: "missing"}, {name: "invalid_base64", key: "%%%"}, {name: "wrong_length", key: base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 31))}} {
+			t.Run(name+"/"+tc.name, func(t *testing.T) {
+				cfg := base
+				cfg.SecretsMasterKey = tc.key
+				assertPanicsContaining(t, "CARGOFLOW_SECRETS_MASTER_KEY", func() { construct(cfg) })
+			})
+		}
+	}
+
+	nonProduction := base
+	nonProduction.AppEnv = "test"
+	if router := NewRouterWithAIDependencies(nonProduction, db, AIDependencies{Templates: ai.NewTemplateService(db)}); router == nil {
+		t.Fatal("non-production injected router is nil")
+	}
+}
+
+func TestOpenAISettingHTTPFlowNeverLogsCredentialOrEncryptedMaterial(t *testing.T) {
+	var logs bytes.Buffer
+	gormLogger := logger.New(log.New(&logs, "", 0), logger.Config{
+		SlowThreshold:        time.Second,
+		LogLevel:             logger.Info,
+		ParameterizedQueries: true,
+	})
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{Logger: gormLogger})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	previousWriter, previousErrorWriter := gin.DefaultWriter, gin.DefaultErrorWriter
+	gin.DefaultWriter, gin.DefaultErrorWriter = &logs, &logs
+	t.Cleanup(func() { gin.DefaultWriter, gin.DefaultErrorWriter = previousWriter, previousErrorWriter })
+
+	server, admin, _ := authenticatedAIRouter(t, db, &handlerVerifier{authenticated: true})
+	const apiKey = "sk-proj-http-log-secret-ABCD"
+	response := aiRequest(t, server, server.token(t, admin), http.MethodPut, "/api/v1/settings/openai", `{"api_key":"`+apiKey+`"}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("PUT status/body = %d %s", response.Code, response.Body.String())
+	}
+	var row models.OpenAIProviderSetting
+	if err := db.First(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	for label, value := range map[string]string{
+		"plaintext":         apiKey,
+		"ciphertext base64": base64.StdEncoding.EncodeToString(row.EncryptedAPIKey),
+		"ciphertext hex":    hex.EncodeToString(row.EncryptedAPIKey),
+		"ciphertext bytes":  fmt.Sprint(row.EncryptedAPIKey),
+		"nonce base64":      base64.StdEncoding.EncodeToString(row.EncryptionNonce),
+		"nonce hex":         hex.EncodeToString(row.EncryptionNonce),
+		"nonce bytes":       fmt.Sprint(row.EncryptionNonce),
+	} {
+		if value != "" && strings.Contains(logs.String(), value) {
+			t.Errorf("logs contain %s: %s", label, logs.String())
+		}
+	}
+}
+
+func assertPanicsContaining(t *testing.T, expected string, fn func()) {
+	t.Helper()
+	defer func() {
+		value := recover()
+		if value == nil || !strings.Contains(fmt.Sprint(value), expected) {
+			t.Fatalf("panic = %v, want text containing %q", value, expected)
+		}
+	}()
+	fn()
 }
 
 func TestAIContentTemplatePublishReturnsStructuredValidationIssues(t *testing.T) {
@@ -260,6 +401,25 @@ func TestAIOpenAPIHasExactAdminPathsAndNeverExposesCredentialMaterial(t *testing
 				t.Errorf("OpenAISetting exposes %s", forbidden)
 			}
 		}
+	}
+	for _, name := range []string{"AIContentTemplateMutationRequest", "AIContentSlotMutation"} {
+		schema := schemas[name].(map[string]any)
+		if required, exists := schema["required"]; exists {
+			t.Errorf("%s incorrectly requires invalid-draft fields: %#v", name, required)
+		}
+	}
+	for _, name := range []string{"AIContentSlotMutation", "AIContentSlot"} {
+		properties := schemas[name].(map[string]any)["properties"].(map[string]any)
+		for _, field := range []string{"constraints", "generation_config", "layout_config"} {
+			if schema := properties[field].(map[string]any); len(schema) != 0 {
+				t.Errorf("%s.%s must accept any valid draft JSON, got %#v", name, field, schema)
+			}
+		}
+	}
+	responses := document["components"].(map[string]any)["responses"].(map[string]any)
+	serviceUnavailable := responses["ServiceUnavailable"].(map[string]any)
+	if description := serviceUnavailable["description"].(string); strings.Contains(strings.ToLower(description), "object storage") {
+		t.Errorf("shared ServiceUnavailable description is storage-specific: %q", description)
 	}
 }
 
