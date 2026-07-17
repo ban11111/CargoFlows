@@ -402,6 +402,7 @@ func TestAssetReviewHierarchyReturnsLocalizedViewName(t *testing.T) {
 		Data []struct {
 			SKUs []struct {
 				Assets []struct {
+					SOPViewKey  string `json:"sop_view_key"`
 					SOPViewName struct {
 						ZHCN string `json:"zh-CN"`
 						EN   string `json:"en"`
@@ -416,6 +417,9 @@ func TestAssetReviewHierarchyReturnsLocalizedViewName(t *testing.T) {
 	name := body.Data[0].SKUs[0].Assets[0].SOPViewName
 	if name.ZHCN != "背面" || name.EN != "Back" {
 		t.Fatalf("unexpected localized name: %#v", name)
+	}
+	if body.Data[0].SKUs[0].Assets[0].SOPViewKey != "reference_front" {
+		t.Fatalf("unexpected SOP view key: %s", response.Body.String())
 	}
 
 	response = httptest.NewRecorder()

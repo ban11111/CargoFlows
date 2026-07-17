@@ -1082,6 +1082,8 @@ export interface components {
             review_status: "pending" | "approved" | "rejected";
             /** Format: date-time */
             captured_at: string;
+            /** @description Stable SOP preset key used to satisfy AI slot required_views. */
+            sop_view_key: string;
             sop_view_name: components["schemas"]["LocalizedText"];
             photo_session_code: string;
         };

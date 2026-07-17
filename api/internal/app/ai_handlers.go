@@ -115,6 +115,10 @@ func (s *Server) listAIContentTemplates(c *gin.Context) {
 		respondAIBadRequest(c, errors.New("include_all must be a boolean"))
 		return
 	}
+	if includeAll && currentUser(c).Role != models.RoleAdmin {
+		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": "insufficient permissions"})
+		return
+	}
 	values, err := s.ai.Templates.List(c, includeAll)
 	if err != nil {
 		respondAIError(c, err)

@@ -1068,13 +1068,14 @@ components:
         assets: { type: array, items: { $ref: '#/components/schemas/AssetReviewHierarchyAsset' } }
     AssetReviewHierarchyAsset:
       type: object
-      required: [id, original_url, thumbnail_url, review_status, captured_at, sop_view_name, photo_session_code]
+      required: [id, original_url, thumbnail_url, review_status, captured_at, sop_view_key, sop_view_name, photo_session_code]
       properties:
         id: { type: integer, minimum: 1 }
         original_url: { type: string }
         thumbnail_url: { type: string }
         review_status: { type: string, enum: [pending, approved, rejected] }
         captured_at: { type: string, format: date-time }
+        sop_view_key: { type: string, description: Stable SOP preset key used to satisfy AI slot required_views. }
         sop_view_name: { $ref: '#/components/schemas/LocalizedText' }
         photo_session_code: { type: string }
     AssetReviewCategory:

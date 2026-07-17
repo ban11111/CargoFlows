@@ -178,6 +178,16 @@ func TestAIContentTemplateAdminLifecycleUsesPublicDTOs(t *testing.T) {
 	}
 	assertNoAIInternalFields(t, published.Body.Bytes())
 
+	operatorToken := server.token(t, operator)
+	operatorList := aiRequest(t, server, operatorToken, http.MethodGet, "/api/v1/ai-content-templates", "")
+	if operatorList.Code != http.StatusOK || !strings.Contains(operatorList.Body.String(), versionID) {
+		t.Fatalf("operator published list status/body = %d %s", operatorList.Code, operatorList.Body.String())
+	}
+	operatorAll := aiRequest(t, server, operatorToken, http.MethodGet, "/api/v1/ai-content-templates?include_all=true", "")
+	if operatorAll.Code != http.StatusForbidden {
+		t.Fatalf("operator include_all status/body = %d %s", operatorAll.Code, operatorAll.Body.String())
+	}
+
 	immutable := aiRequest(t, server, adminToken, http.MethodPatch, "/api/v1/ai-content-template-versions/"+versionID, createBody)
 	if immutable.Code != http.StatusConflict {
 		t.Fatalf("published PATCH status/body = %d %s", immutable.Code, immutable.Body.String())
