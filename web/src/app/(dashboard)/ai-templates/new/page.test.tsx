@@ -29,12 +29,18 @@ describe("NewAITemplatePage", () => {
   it("creates a typed draft, requires server validation, and then publishes", async () => {
     const version = { public_id: "version-1", version_number: 1, status: "draft", default_locale: "zh-CN", prompt_compiler_version: "v1", platform_prompt: "platform", published_at: null, archived_at: null, created_at: "2026-07-17T00:00:00Z", updated_at: "2026-07-17T00:00:00Z", slots: [] };
     let publishCount = 0;
+    let validateCount = 0;
+    let resolveFirstValidation: (response: Response) => void = () => undefined;
+    const firstValidation = new Promise<Response>((resolve) => { resolveFirstValidation = resolve; });
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {
-      if (String(_input).includes("/validate")) return Promise.resolve(new Response(JSON.stringify({ code: "template_valid", issues: [] }), { status: 200 }));
+      if (String(_input).includes("/validate")) {
+        validateCount += 1;
+        return validateCount === 1 ? firstValidation : Promise.resolve(new Response(JSON.stringify({ code: "template_valid", issues: [] }), { status: 200 }));
+      }
       if (String(_input).includes("/publish")) {
         publishCount += 1;
         return publishCount === 1
-          ? Promise.resolve(new Response(JSON.stringify({ code: "template_validation_failed", issues: [{ code: "slot_key_duplicate", path: "slots[1].slot_key", message: "Slot key must be unique within a version." }] }), { status: 422 }))
+          ? Promise.resolve(new Response(JSON.stringify({ code: "template_validation_failed", issues: [{ code: "slot_key_duplicate", path: "slots[1].slot_key", message: "Slot key must be unique within a version." }, { code: "prompt_secret_forbidden", path: "platform_prompt", message: "Prompt content appears to contain a secret." }, { code: "template_variable_unknown", path: "slots[0].prompt_fragment", message: "Template variable is not supported." }] }), { status: 422 }))
           : Promise.resolve(new Response(JSON.stringify({ ...version, status: "published", published_at: "2026-07-17T01:00:00Z" }), { status: 200 }));
       }
       if (init?.method === "PATCH") return Promise.resolve(new Response(JSON.stringify(version), { status: 200 }));
@@ -58,6 +64,11 @@ describe("NewAITemplatePage", () => {
 
     fireEvent.change(screen.getByLabelText("英文名称"), { target: { value: "Updated Lazada PDP" } });
     fireEvent.click(screen.getByRole("button", { name: "运行发布校验" }));
+    fireEvent.change(screen.getByLabelText("英文名称"), { target: { value: "Edited while validating" } });
+    resolveFirstValidation(new Response(JSON.stringify({ code: "template_valid", issues: [] }), { status: 200 }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "运行发布校验" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "发布版本" })).toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "运行发布校验" }));
     expect(await screen.findByText("校验通过，可以发布。")).toBeInTheDocument();
     const patchCall = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH");
     expect(JSON.parse(String(patchCall?.[1]?.body))).toMatchObject({ name_en: "Updated Lazada PDP" });
@@ -70,9 +81,13 @@ describe("NewAITemplatePage", () => {
     fireEvent.click(screen.getByRole("button", { name: "发布版本" }));
     expect(await screen.findByText("slots[1].slot_key")).toBeInTheDocument();
     expect(screen.getByText(/槽位键在当前版本中必须唯一/)).toBeInTheDocument();
+    expect(screen.getByText(/提示内容疑似包含密钥/)).toBeInTheDocument();
+    expect(screen.getByText(/不支持的模板变量/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "发布版本" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "语言" }));
     expect(screen.getByText(/Slot key must be unique within this version/)).toBeInTheDocument();
+    expect(screen.getByText(/Prompt content appears to contain a secret/)).toBeInTheDocument();
+    expect(screen.getByText(/unsupported template variable/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Language" }));
 
     fireEvent.click(screen.getByRole("button", { name: "运行发布校验" }));
