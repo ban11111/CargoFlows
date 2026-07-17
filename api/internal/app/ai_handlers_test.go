@@ -23,6 +23,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/goccy/go-yaml"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -336,6 +337,100 @@ func TestAIContentTemplatePublishReturnsStructuredValidationIssues(t *testing.T)
 	response := aiRequest(t, server, server.token(t, admin), http.MethodPost, "/api/v1/ai-content-template-versions/"+value.Versions[0].PublicID+"/publish", "")
 	if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), `"code":"template_validation_failed"`) || !strings.Contains(response.Body.String(), `"issues"`) {
 		t.Fatalf("publish status/body = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestAIJobEndpointsUseTypedArraysUUIDsAndSafeDTOs(t *testing.T) {
+	db := newTestDB(t)
+	server, _, operator := authenticatedAIRouter(t, db, &handlerVerifier{authenticated: true})
+	category := models.Category{Name: "AI Jobs", NameEN: "AI Jobs"}
+	if err := db.Create(&category).Error; err != nil {
+		t.Fatal(err)
+	}
+	product := models.Product{CategoryID: category.ID, Name: "Bottle", Brand: "CargoFlow", Category: category.Name, Description: "A bottle"}
+	if err := db.Create(&product).Error; err != nil {
+		t.Fatal(err)
+	}
+	sku := models.SKU{ProductID: product.ID, Code: "BOTTLE-ONE", Color: "Blue", Size: "500ml", Stock: 42, LowStockThreshold: 3, Status: "active"}
+	if err := db.Create(&sku).Error; err != nil {
+		t.Fatal(err)
+	}
+	captureSOP := models.CaptureSOP{PublicID: uuid.NewString(), CategoryID: category.ID, CreatedByID: operator.ID}
+	if err := db.Create(&captureSOP).Error; err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	sopVersion := models.SOPVersion{PublicID: uuid.NewString(), CaptureSOPID: captureSOP.ID, VersionNumber: 1, SchemaVersion: "1.0", NameZH: "瓶子", NameEN: "Bottle", DescriptionZH: "拍摄", DescriptionEN: "Capture", Status: models.SOPVersionPublished, CoordinateSystem: "pcs_object_v1", PublishedAt: &now}
+	if err := db.Create(&sopVersion).Error; err != nil {
+		t.Fatal(err)
+	}
+	view := models.SOPView{PublicID: uuid.NewString(), SOPVersionID: sopVersion.ID, Sequence: 1, Role: models.SOPViewReferenceFront, ViewKind: models.SOPViewStandard, PresetKey: "reference_front", NameZH: "正面", NameEN: "Front", InstructionZH: "拍摄", InstructionEN: "Capture", Required: true, CameraPositionZ: 1, ImageUpX: 1, Composition: models.Composition{FrameOccupancy: .8, AspectRatio: "1:1"}}
+	if err := db.Create(&view).Error; err != nil {
+		t.Fatal(err)
+	}
+	template := models.AIContentTemplate{PublicID: uuid.NewString(), NameZH: "Lazada", NameEN: "Lazada", TargetPlatform: "lazada", Status: models.AIContentTemplateActive, CreatedByID: operator.ID}
+	if err := db.Create(&template).Error; err != nil {
+		t.Fatal(err)
+	}
+	version := models.AIContentTemplateVersion{PublicID: uuid.NewString(), AIContentTemplateID: template.ID, VersionNumber: 1, Status: models.AITemplatePublished, DefaultLocale: "zh-CN", PromptCompilerVersion: "v1", PlatformPrompt: "Lazada", CreatedByID: operator.ID, PublishedByID: &operator.ID, PublishedAt: &now}
+	if err := db.Create(&version).Error; err != nil {
+		t.Fatal(err)
+	}
+	slot := models.AIContentSlot{PublicID: uuid.NewString(), AIContentTemplateVersionID: version.ID, SlotKey: "title", Kind: models.AIContentSlotTitle, NameZH: "标题", NameEN: "Title", Sequence: 1, Optional: true, PromptFragment: "title", ConstraintsJSON: []byte(`{}`), GenerationConfigJSON: []byte(`{}`), LayoutConfigJSON: []byte(`{}`)}
+	if err := db.Create(&slot).Error; err != nil {
+		t.Fatal(err)
+	}
+	token := server.token(t, operator)
+	created := aiRequest(t, server, token, http.MethodPost, "/api/v1/ai-jobs", fmt.Sprintf(`{"sku_id":%d,"template_version_id":%q,"selected_slot_keys":["title"],"selected_asset_ids":[],"locale":"zh-CN"}`, sku.ID, version.PublicID))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("POST status/body = %d %s", created.Code, created.Body.String())
+	}
+	var job struct {
+		PublicID string `json:"public_id"`
+		Items    []struct {
+			PublicID string `json:"public_id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &job); err != nil {
+		t.Fatal(err)
+	}
+	if !isUUID(job.PublicID) || len(job.Items) != 1 || !isUUID(job.Items[0].PublicID) {
+		t.Fatalf("invalid public job DTO: %s", created.Body.String())
+	}
+	assertNoAIInternalFields(t, created.Body.Bytes())
+	for _, path := range []string{"/api/v1/ai-jobs", "/api/v1/ai-jobs/" + job.PublicID} {
+		response := aiRequest(t, server, token, http.MethodGet, path, "")
+		if response.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d %s", path, response.Code, response.Body.String())
+		}
+		assertNoAIInternalFields(t, response.Body.Bytes())
+	}
+	legacy := aiRequest(t, server, token, http.MethodPost, "/api/v1/ai-jobs", fmt.Sprintf(`{"sku_id":%d,"target_platform":"lazada","input_asset_ids":"1,2"}`, sku.ID))
+	if legacy.Code != http.StatusBadRequest {
+		t.Fatalf("legacy payload = %d %s", legacy.Code, legacy.Body.String())
+	}
+	missingArray := aiRequest(t, server, token, http.MethodPost, "/api/v1/ai-jobs", fmt.Sprintf(`{"sku_id":%d,"template_version_id":%q,"selected_slot_keys":["title"],"locale":"zh-CN"}`, sku.ID, version.PublicID))
+	if missingArray.Code != http.StatusBadRequest {
+		t.Fatalf("missing selected_asset_ids array = %d %s", missingArray.Code, missingArray.Body.String())
+	}
+	invalidUUID := aiRequest(t, server, token, http.MethodGet, "/api/v1/ai-jobs/not-a-uuid", "")
+	if invalidUUID.Code != http.StatusBadRequest {
+		t.Fatalf("invalid UUID = %d %s", invalidUUID.Code, invalidUUID.Body.String())
+	}
+	photographer := models.User{Name: "AI Photographer", Email: uuid.NewString() + "@example.test", PasswordHash: "unused", Role: models.RolePhotographer, Status: "active"}
+	if err := db.Create(&photographer).Error; err != nil {
+		t.Fatal(err)
+	}
+	photographerToken := server.token(t, photographer)
+	for _, request := range []struct{ method, path, body string }{
+		{http.MethodGet, "/api/v1/ai-jobs", ""},
+		{http.MethodGet, "/api/v1/ai-jobs/" + job.PublicID, ""},
+		{http.MethodPost, "/api/v1/ai-jobs", fmt.Sprintf(`{"sku_id":%d,"template_version_id":%q,"selected_slot_keys":["title"],"selected_asset_ids":[],"locale":"zh-CN"}`, sku.ID, version.PublicID)},
+	} {
+		response := aiRequest(t, server, photographerToken, request.method, request.path, request.body)
+		if response.Code != http.StatusForbidden {
+			t.Fatalf("photographer %s %s = %d %s", request.method, request.path, response.Code, response.Body.String())
+		}
 	}
 }
 

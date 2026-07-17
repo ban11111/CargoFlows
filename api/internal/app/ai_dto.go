@@ -12,6 +12,14 @@ type openAISettingRequest struct {
 	APIKey *string `json:"api_key"`
 }
 
+type createAIJobRequest struct {
+	SKUID                   uint     `json:"sku_id"`
+	TemplateVersionPublicID string   `json:"template_version_id"`
+	SelectedSlotKeys        []string `json:"selected_slot_keys"`
+	SelectedAssetIDs        *[]uint  `json:"selected_asset_ids"`
+	Locale                  string   `json:"locale"`
+}
+
 type openAISettingDTO struct {
 	Provider                  string     `json:"provider"`
 	Status                    string     `json:"status"`

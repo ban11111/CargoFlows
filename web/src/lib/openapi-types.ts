@@ -480,6 +480,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ai-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAIJobs"];
+        put?: never;
+        post: operations["createAIJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+            };
+            cookie?: never;
+        };
+        get: operations["getAIJob"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -581,6 +615,181 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
             versions: components["schemas"]["AIContentTemplateVersion"][];
+        };
+        CreateAIJobRequest: {
+            sku_id: number;
+            /** Format: uuid */
+            template_version_id: string;
+            selected_slot_keys: string[];
+            /** @description Duplicate IDs are accepted and normalized to one ordered reference. */
+            selected_asset_ids: number[];
+            locale: string;
+        };
+        AIJob: {
+            /** Format: uuid */
+            public_id: string;
+            sku_id: number;
+            /** Format: uuid */
+            template_version_id: string;
+            target_platform: string;
+            locale: string;
+            /** @enum {string} */
+            status: "queued" | "running" | "partial" | "completed" | "failed" | "cancelled";
+            /** @enum {string} */
+            snapshot_schema: "cargoflow_product_generation_v1";
+            input_snapshot: components["schemas"]["ProductSnapshotV1"];
+            /** Format: date-time */
+            started_at: string | null;
+            /** Format: date-time */
+            completed_at: string | null;
+            /** Format: date-time */
+            cancelled_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            items: components["schemas"]["AIJobItem"][];
+        };
+        AIJobItem: {
+            /** Format: uuid */
+            public_id: string;
+            slot_key: string;
+            /** @enum {string} */
+            kind: "image" | "title" | "seo_description";
+            /** @enum {string} */
+            status: "queued" | "running" | "completed" | "failed" | "cancelled";
+            slot_snapshot: components["schemas"]["AIJobSlotSnapshot"];
+            selected_input_asset_ids: number[];
+            attempt_count: number;
+            safe_error: string;
+            /** Format: date-time */
+            started_at: string | null;
+            /** Format: date-time */
+            completed_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        AIJobSlotSnapshot: {
+            /** Format: uuid */
+            public_id: string;
+            slot_key: string;
+            /** @enum {string} */
+            kind: "image" | "title" | "seo_description";
+            name: components["schemas"]["AISnapshotLocalizedText"];
+            description: components["schemas"]["AISnapshotLocalizedText"];
+            sequence: number;
+            optional: boolean;
+            default_selected: boolean;
+            prompt_fragment: string;
+            constraints: {
+                [key: string]: unknown;
+            };
+            generation_config: {
+                [key: string]: unknown;
+            };
+            layout_config: {
+                [key: string]: unknown;
+            };
+        };
+        AISnapshotLocalizedText: {
+            zh: string;
+            en: string;
+        };
+        AISnapshotVector: {
+            x: number;
+            y: number;
+            z: number;
+        };
+        AISnapshotCategory: {
+            name_zh: string;
+            name_en: string;
+        };
+        AISnapshotProduct: {
+            name: string;
+            brand: string;
+            description: string;
+            category: components["schemas"]["AISnapshotCategory"];
+        };
+        AISnapshotSKU: {
+            code: string;
+            color: string;
+            size: string;
+            platform_title: string;
+            selling_points: string;
+            tags: string[];
+        };
+        AISnapshotSOPView: {
+            /** Format: uuid */
+            public_id: string;
+            sequence: number;
+            /** @enum {string} */
+            role: "reference_front" | "capture";
+            /** @enum {string} */
+            view_kind: "standard" | "detail";
+            preset_key: string;
+            name: components["schemas"]["AISnapshotLocalizedText"];
+            instruction: components["schemas"]["AISnapshotLocalizedText"];
+            required: boolean;
+            camera_position_direction: components["schemas"]["AISnapshotVector"];
+            image_up_direction: components["schemas"]["AISnapshotVector"];
+            target: components["schemas"]["AISnapshotVector"];
+            composition: components["schemas"]["Composition"];
+        };
+        AISnapshotSOP: {
+            /** Format: uuid */
+            public_id: string;
+            /** Format: uuid */
+            version_public_id: string;
+            version_number: number;
+            schema_version: string;
+            name: components["schemas"]["AISnapshotLocalizedText"];
+            description: components["schemas"]["AISnapshotLocalizedText"];
+            /** @enum {string} */
+            coordinate_system: "pcs_object_v1";
+            views: components["schemas"]["AISnapshotSOPView"][];
+        };
+        AISnapshotAssetView: {
+            /** Format: uuid */
+            public_id: string;
+            preset_key: string;
+            name: components["schemas"]["AISnapshotLocalizedText"];
+            /** @enum {string} */
+            role: "reference_front" | "capture";
+            /** @enum {string} */
+            view_kind: "standard" | "detail";
+        };
+        AISnapshotAsset: {
+            id: number;
+            object_key: string;
+            /** Format: uri */
+            original_url: string;
+            thumbnail_url: string;
+            /** Format: date-time */
+            captured_at: string;
+            view: components["schemas"]["AISnapshotAssetView"];
+        };
+        AISnapshotTemplate: {
+            /** Format: uuid */
+            template_public_id: string;
+            /** Format: uuid */
+            version_public_id: string;
+            version_number: number;
+            prompt_compiler_version: string;
+            platform_prompt: string;
+            selected_slots: components["schemas"]["AIJobSlotSnapshot"][];
+        };
+        ProductSnapshotV1: {
+            /** @enum {string} */
+            schema: "cargoflow_product_generation_v1";
+            locale: string;
+            target_platform: string;
+            product: components["schemas"]["AISnapshotProduct"];
+            sku: components["schemas"]["AISnapshotSKU"];
+            sop: components["schemas"]["AISnapshotSOP"];
+            template: components["schemas"]["AISnapshotTemplate"];
+            selected_assets: components["schemas"]["AISnapshotAsset"][];
         };
         AITemplateValidationIssue: {
             code: string;
@@ -944,6 +1153,7 @@ export interface components {
         ImageID: string;
         AIContentTemplateID: string;
         AIContentTemplateVersionID: string;
+        AIJobID: string;
         /** @description Exact updated_at value from the latest SOPVersion response; stale revisions return 409. */
         SOPRevision: string;
     };
@@ -1986,6 +2196,97 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listAIJobs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description AI jobs in newest-first order */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AIJob"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    createAIJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAIJobRequest"];
+            };
+        };
+        responses: {
+            /** @description Reproducible dry-run AI job */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIJob"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            /** @description Selected SKU */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    getAIJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description AI job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIJob"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalServerError"];
         };
     };

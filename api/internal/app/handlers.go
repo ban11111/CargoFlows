@@ -722,42 +722,6 @@ func (s *Server) reviewAsset(c *gin.Context) {
 	c.JSON(http.StatusOK, asset)
 }
 
-func (s *Server) listAIJobs(c *gin.Context) {
-	var jobs []models.AIJob
-	if err := s.db.Preload("SKU.Product").Order("created_at DESC").Find(&jobs).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"data": jobs})
-}
-
-type aiJobRequest struct {
-	SKUID          uint   `json:"sku_id" binding:"required"`
-	TargetPlatform string `json:"target_platform" binding:"required"`
-	InputAssetIDs  string `json:"input_asset_ids"`
-}
-
-func (s *Server) createAIJob(c *gin.Context) {
-	var req aiJobRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
-		return
-	}
-	user := currentUser(c)
-	job := models.AIJob{
-		SKUID:          req.SKUID,
-		TargetPlatform: req.TargetPlatform,
-		Status:         "pending",
-		InputAssetIDs:  req.InputAssetIDs,
-		CreatedByID:    user.ID,
-	}
-	if err := s.db.Create(&job).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
-		return
-	}
-	c.JSON(http.StatusCreated, job)
-}
-
 func (s *Server) listUsers(c *gin.Context) {
 	var users []models.User
 	if err := s.db.Order("created_at DESC").Find(&users).Error; err != nil {

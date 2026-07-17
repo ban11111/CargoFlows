@@ -58,6 +58,52 @@ func (s *Server) disableOpenAISetting(c *gin.Context) {
 	c.JSON(http.StatusOK, openAISettingDTOFromView(value))
 }
 
+func (s *Server) createAIJob(c *gin.Context) {
+	var req createAIJobRequest
+	if err := decodeJSONStrict(c, &req); err != nil {
+		respondAIBadRequest(c, err)
+		return
+	}
+	if req.SKUID == 0 || !isUUID(req.TemplateVersionPublicID) || len(req.SelectedSlotKeys) == 0 || req.SelectedAssetIDs == nil || strings.TrimSpace(req.Locale) == "" {
+		respondAIBadRequest(c, errors.New("sku_id, a UUID template_version_id, locale, selected_asset_ids array, and at least one selected_slot_key are required"))
+		return
+	}
+	value, err := s.ai.Jobs.Create(c, ai.CreateJobInput{
+		SKUID: req.SKUID, TemplateVersionPublicID: req.TemplateVersionPublicID,
+		SelectedSlotKeys: req.SelectedSlotKeys, SelectedAssetIDs: *req.SelectedAssetIDs,
+		Locale: req.Locale, CreatedByID: currentUser(c).ID,
+	})
+	if err != nil {
+		respondAIError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, value)
+}
+
+func (s *Server) listAIJobs(c *gin.Context) {
+	values, err := s.ai.Jobs.List(c)
+	if err != nil {
+		respondAIError(c, err)
+		return
+	}
+	if values == nil {
+		values = []ai.JobDocument{}
+	}
+	c.JSON(http.StatusOK, gin.H{"data": values})
+}
+
+func (s *Server) getAIJob(c *gin.Context) {
+	if !requireAIUUIDParam(c, "job_id") {
+		return
+	}
+	value, err := s.ai.Jobs.Get(c, c.Param("job_id"))
+	if err != nil {
+		respondAIError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, value)
+}
+
 func (s *Server) listAIContentTemplates(c *gin.Context) {
 	includeAll, err := strconv.ParseBool(defaultString(c.Query("include_all"), "false"))
 	if err != nil {
@@ -214,7 +260,15 @@ func respondAIError(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, gin.H{"code": "provider_not_configured", "message": err.Error()})
 	case errors.Is(err, ai.ErrTemplateNotFound), errors.Is(err, ai.ErrTemplateVersionNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
+	case errors.Is(err, ai.ErrJobNotFound), errors.Is(err, ai.ErrSKUNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
+	case errors.Is(err, ai.ErrSlotSelectionInvalid):
+		respondAIBadRequest(c, err)
+	case errors.Is(err, ai.ErrAssetNotEligible), errors.Is(err, ai.ErrPublishedSOPNotFound):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "job_input_not_eligible", "message": err.Error()})
 	case errors.Is(err, ai.ErrTemplateVersionImmutable), errors.Is(err, ai.ErrTemplateDraftExists), errors.Is(err, ai.ErrTemplateSourceNotPublished):
+		c.JSON(http.StatusConflict, gin.H{"code": "lifecycle_conflict", "message": err.Error()})
+	case errors.Is(err, ai.ErrTemplateVersionNotPublished):
 		c.JSON(http.StatusConflict, gin.H{"code": "lifecycle_conflict", "message": err.Error()})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "unexpected server error"})

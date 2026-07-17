@@ -26,6 +26,7 @@ type Server struct {
 type AIDependencies struct {
 	ProviderSettings *ai.ProviderSettingsService
 	Templates        *ai.TemplateService
+	Jobs             *ai.JobService
 }
 
 func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
@@ -54,6 +55,9 @@ func newRouter(cfg config.Config, db *gorm.DB, deps AIDependencies) *gin.Engine 
 	}
 	if deps.Templates == nil {
 		deps.Templates = ai.NewTemplateService(db)
+	}
+	if deps.Jobs == nil {
+		deps.Jobs = ai.NewJobService(db)
 	}
 	server := &Server{cfg: cfg, db: db, storage: storage, ai: deps}
 	router := gin.New()
@@ -110,12 +114,15 @@ func registerExistingRoutes(protected *gin.RouterGroup, server *Server) {
 	protected.GET("/assets/review", server.listAssetsForReview)
 	protected.GET("/assets/review/hierarchy", server.listAssetReviewHierarchy)
 	protected.PATCH("/assets/:id/review", server.reviewAsset)
-	protected.GET("/ai-jobs", server.listAIJobs)
-	protected.POST("/ai-jobs", server.createAIJob)
 	protected.GET("/users", server.listUsers)
 }
 
 func registerAIRoutes(protected *gin.RouterGroup, server *Server) {
+	aiJobs := protected.Group("")
+	aiJobs.Use(requireRoles(models.RoleAdmin, models.RoleOperator))
+	aiJobs.GET("/ai-jobs", server.listAIJobs)
+	aiJobs.POST("/ai-jobs", server.createAIJob)
+	aiJobs.GET("/ai-jobs/:job_id", server.getAIJob)
 	aiAdmin := protected.Group("")
 	aiAdmin.Use(requireRoles(models.RoleAdmin))
 	aiAdmin.GET("/settings/openai", server.getOpenAISetting)
@@ -132,7 +139,7 @@ func registerAIRoutes(protected *gin.RouterGroup, server *Server) {
 }
 
 func newAIDependencies(cfg config.Config, db *gorm.DB) (AIDependencies, error) {
-	deps := AIDependencies{Templates: ai.NewTemplateService(db)}
+	deps := AIDependencies{Templates: ai.NewTemplateService(db), Jobs: ai.NewJobService(db)}
 	key, err := validateSecretsMasterKey(cfg)
 	if err != nil {
 		return AIDependencies{}, err

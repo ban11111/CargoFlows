@@ -148,17 +148,14 @@ type AIJob struct {
 	Status                     AIJobStatus `gorm:"size:32;index;not null;default:queued" json:"status"`
 	SnapshotSchema             string      `gorm:"size:64;not null" json:"snapshot_schema"`
 	InputSnapshotJSON          []byte      `gorm:"type:json;not null" json:"input_snapshot"`
-	// Deprecated: Task 6 removes this compatibility field with the legacy handlers.
-	// It is intentionally neither persisted nor serialized.
-	InputAssetIDs string      `gorm:"-" json:"-"`
-	CreatedByID   uint        `gorm:"index;not null" json:"-"`
-	StartedAt     *time.Time  `json:"started_at"`
-	CompletedAt   *time.Time  `json:"completed_at"`
-	CancelledAt   *time.Time  `json:"cancelled_at"`
-	CreatedAt     time.Time   `json:"created_at"`
-	UpdatedAt     time.Time   `json:"updated_at"`
-	Items         []AIJobItem `json:"items,omitempty"`
-	SKU           SKU         `json:"sku,omitempty"`
+	CreatedByID                uint        `gorm:"index;not null" json:"-"`
+	StartedAt                  *time.Time  `json:"started_at"`
+	CompletedAt                *time.Time  `json:"completed_at"`
+	CancelledAt                *time.Time  `json:"cancelled_at"`
+	CreatedAt                  time.Time   `json:"created_at"`
+	UpdatedAt                  time.Time   `json:"updated_at"`
+	Items                      []AIJobItem `json:"items,omitempty"`
+	SKU                        SKU         `json:"sku,omitempty"`
 }
 
 type AIJobItem struct {
