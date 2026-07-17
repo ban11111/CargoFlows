@@ -2504,7 +2504,7 @@ export interface operations {
                     "application/json": components["schemas"]["AIJob"];
                 };
             };
-            /** @description Reproducible dry-run AI job */
+            /** @description Reproducible AI content job */
             201: {
                 headers: {
                     [name: string]: unknown;

@@ -56,7 +56,7 @@ describe("NewAIJobPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "下一步" }));
 
     expect(screen.getByText("商品数据和所选图片将发送给 OpenAI")).toBeInTheDocument();
-    expect(screen.getByText("Dry-run：本阶段不会向 OpenAI 发送商品内容或图片")).toBeInTheDocument();
+    expect(screen.getByText("真实任务：标题和搜索描述会发送给 OpenAI")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "创建任务" }));
 
     await waitFor(() => expect(push).toHaveBeenCalledWith("/ai-jobs/job-created"));

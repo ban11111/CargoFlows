@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -36,5 +36,70 @@ describe("AIJobDetailPage", () => {
     expect(screen.queryByText(/PRIVATE USER PREFERENCE/)).not.toBeInTheDocument();
     expect(screen.queryByText(/signed\.invalid/)).not.toBeInTheDocument();
     expect(screen.queryByText(/private\/key/)).not.toBeInTheDocument();
+  });
+
+  it("edits, approves, previews, and explicitly applies a text candidate", async () => {
+    const titleItem = { ...job.items[0], public_id: "item-title", slot_key: "title", kind: "title", slot_snapshot: { ...job.items[0].slot_snapshot, public_id: "slot-title", slot_key: "title", kind: "title", name: { zh: "商品标题", en: "Product title" } } };
+    const textJob = { ...job, items: [titleItem] };
+    const result = { public_id: "result-1", job_item_id: "item-title", candidate_index: 1, kind: "title", raw_structured: { title: "CargoFlow 透明手机壳", keywords: ["透明"], source_fields: ["product.brand"] }, validation: [], state: "candidate", edited_at: null, approved_at: null, rejected_at: null, applied_at: null, effective: false, created_at: job.created_at, updated_at: job.updated_at };
+    const resultPath = "/api/proxy/ai-jobs/job-1/items/item-title/text-results/result-1";
+    const editedStructured = { title: "CargoFlow 超薄透明手机壳", keywords: ["透明", "防摔"], source_fields: ["product.brand"] };
+    const requests: Array<{ path: string; method: string; body?: unknown }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
+      requests.push({ path, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (path.endsWith("/ai-jobs/job-1")) return new Response(JSON.stringify(textJob), { status: 200 });
+      if (path.endsWith("/ai-jobs/job-1/text-results")) return new Response(JSON.stringify({ data: [result] }), { status: 200 });
+      if (path.endsWith(`${resultPath}/application-preview`)) return new Response(JSON.stringify({ before: {}, after: { title: "CargoFlow 超薄透明手机壳", revision: 1 } }), { status: 200 });
+      if (path.endsWith(`${resultPath}/approve`)) return new Response(JSON.stringify({ ...result, edited_structured: editedStructured, state: "approved", effective: true }), { status: 200 });
+      if (path.endsWith(`${resultPath}/apply`)) return new Response(JSON.stringify({ content: { public_id: "content-1", sku_id: 11, platform: "lazada", locale: "zh-CN", title: "CargoFlow 超薄透明手机壳", short_description: "", long_description: "", selling_points: [], search_keywords: [], revision: 1, updated_at: job.updated_at }, replayed: false }), { status: 200 });
+      if (path.endsWith(resultPath) && method === "PATCH") return new Response(JSON.stringify({ ...result, edited_structured: (JSON.parse(String(init?.body)) as { structured: unknown }).structured }), { status: 200 });
+      return new Response("not found", { status: 404 });
+    });
+    render(<AIJobDetailPage />, { wrapper: Providers });
+
+    const title = await screen.findByDisplayValue("CargoFlow 透明手机壳");
+    fireEvent.change(title, { target: { value: "CargoFlow 超薄透明手机壳" } });
+    fireEvent.change(screen.getByLabelText("关键词（逗号分隔）"), { target: { value: "透明,防摔" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存编辑" }));
+    await waitFor(() => expect(requests.some((request) => request.path.endsWith(resultPath) && request.method === "PATCH" && (request.body as { structured: { title: string } }).structured.title === "CargoFlow 超薄透明手机壳")).toBe(true));
+    await waitFor(() => expect(screen.getByRole("button", { name: "批准候选" })).toBeEnabled());
+
+    fireEvent.click(screen.getByRole("button", { name: "批准候选" }));
+    const previewButton = await screen.findByRole("button", { name: "预览应用" });
+    fireEvent.change(title, { target: { value: "尚未保存的新标题" } });
+    expect(previewButton).toBeDisabled();
+    fireEvent.change(title, { target: { value: "CargoFlow 超薄透明手机壳" } });
+    expect(previewButton).toBeEnabled();
+    fireEvent.click(previewButton);
+    expect((await screen.findAllByText("应用后 · Revision 1")).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "应用到正式内容" }));
+    await waitFor(() => expect(requests.some((request) => request.path.endsWith(`${resultPath}/approve`) && request.method === "POST")).toBe(true));
+    expect(requests.some((request) => request.path.endsWith(`${resultPath}/application-preview`) && request.method === "GET")).toBe(true);
+    await waitFor(() => expect(requests.some((request) => request.path.endsWith(`${resultPath}/apply`) && request.method === "POST")).toBe(true));
+  });
+
+  it("keeps commas inside SEO selling points and splits them only by line", async () => {
+    const seoItem = { ...job.items[0], public_id: "item-seo", slot_key: "seo", kind: "seo_description", slot_snapshot: { ...job.items[0].slot_snapshot, public_id: "slot-seo", slot_key: "seo", kind: "seo_description", name: { zh: "搜索描述", en: "Search description" } } };
+    const seoResult = { public_id: "result-seo", job_item_id: "item-seo", candidate_index: 1, kind: "seo_description", raw_structured: { short_description: "透明保护壳", selling_points: ["轻薄，易握"], long_description: "适合日常使用的透明保护壳。", search_keywords: ["透明壳"], source_fields: ["product.name"] }, validation: [], state: "candidate", edited_at: null, approved_at: null, rejected_at: null, applied_at: null, effective: false, created_at: job.created_at, updated_at: job.updated_at };
+    const patchPath = "/api/proxy/ai-jobs/job-1/items/item-seo/text-results/result-seo";
+    let patchBody: { structured?: { selling_points?: string[] } } | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path.endsWith("/ai-jobs/job-1")) return new Response(JSON.stringify({ ...job, items: [seoItem] }), { status: 200 });
+      if (path.endsWith("/ai-jobs/job-1/text-results")) return new Response(JSON.stringify({ data: [seoResult] }), { status: 200 });
+      if (path.endsWith(patchPath) && init?.method === "PATCH") {
+        patchBody = JSON.parse(String(init.body)) as typeof patchBody;
+        return new Response(JSON.stringify({ ...seoResult, edited_structured: patchBody?.structured }), { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    });
+    render(<AIJobDetailPage />, { wrapper: Providers });
+
+    const sellingPoints = await screen.findByLabelText("卖点（每行一条）");
+    fireEvent.change(sellingPoints, { target: { value: "轻薄，易握\n防摔,耐用" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存编辑" }));
+    await waitFor(() => expect(patchBody?.structured?.selling_points).toEqual(["轻薄，易握", "防摔,耐用"]));
   });
 });

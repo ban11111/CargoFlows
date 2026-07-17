@@ -452,7 +452,7 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/CreateAIJobRequest' } } }
       responses:
         '200': { description: Idempotent replay of the existing AI job, content: { application/json: { schema: { $ref: '#/components/schemas/AIJob' } } } }
-        '201': { description: Reproducible dry-run AI job, content: { application/json: { schema: { $ref: '#/components/schemas/AIJob' } } } }
+        '201': { description: Reproducible AI content job, content: { application/json: { schema: { $ref: '#/components/schemas/AIJob' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
