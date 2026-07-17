@@ -391,6 +391,7 @@ func ValidateTemplateVersion(version models.AIContentTemplateVersion, slots []mo
 		}
 		if slot.Kind == models.AIContentSlotImage {
 			issues = append(issues, validateImageSize(generation, path+".generation_config.size")...)
+			issues = append(issues, validateRequiredViews(constraints, path+".constraints.required_views")...)
 		}
 		for _, config := range []map[string]any{generation, layout} {
 			if config != nil {
@@ -399,6 +400,27 @@ func ValidateTemplateVersion(version models.AIContentTemplateVersion, slots []mo
 		}
 	}
 	return issues
+}
+
+func validateRequiredViews(config map[string]any, path string) []ValidationIssue {
+	if config == nil {
+		return nil
+	}
+	value, exists := config["required_views"]
+	if !exists {
+		return nil
+	}
+	items, ok := value.([]any)
+	if !ok {
+		return []ValidationIssue{{Code: "required_views_invalid", Path: path, Message: "Required views must be an array of non-empty strings."}}
+	}
+	for _, item := range items {
+		text, ok := item.(string)
+		if !ok || strings.TrimSpace(text) == "" {
+			return []ValidationIssue{{Code: "required_views_invalid", Path: path, Message: "Required views must be an array of non-empty strings."}}
+		}
+	}
+	return nil
 }
 
 func newTemplateVersion(templateID uint, versionNumber int, actorID uint, input UpdateTemplateVersionInput) models.AIContentTemplateVersion {

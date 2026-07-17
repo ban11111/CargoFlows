@@ -74,10 +74,17 @@ func (s *ginTestServer) token(t *testing.T, user models.User) string {
 }
 
 func aiRequest(t *testing.T, server *ginTestServer, token, method, path, body string) *httptest.ResponseRecorder {
+	return aiRequestWithIdempotency(t, server, token, method, path, body, uuid.NewString())
+}
+
+func aiRequestWithIdempotency(t *testing.T, server *ginTestServer, token, method, path, body, key string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
+	if key != "" {
+		req.Header.Set("Idempotency-Key", key)
+	}
 	response := httptest.NewRecorder()
 	server.handler.ServeHTTP(response, req)
 	return response
@@ -381,7 +388,8 @@ func TestAIJobEndpointsUseTypedArraysUUIDsAndSafeDTOs(t *testing.T) {
 		t.Fatal(err)
 	}
 	token := server.token(t, operator)
-	created := aiRequest(t, server, token, http.MethodPost, "/api/v1/ai-jobs", fmt.Sprintf(`{"sku_id":%d,"template_version_id":%q,"selected_slot_keys":["title"],"selected_asset_ids":[],"locale":"zh-CN"}`, sku.ID, version.PublicID))
+	createBody := fmt.Sprintf(`{"sku_id":%d,"template_version_id":%q,"selected_slot_keys":["title"],"selected_asset_ids":[],"locale":"zh-CN"}`, sku.ID, version.PublicID)
+	created := aiRequestWithIdempotency(t, server, token, http.MethodPost, "/api/v1/ai-jobs", createBody, "http-job-idem-0001")
 	if created.Code != http.StatusCreated {
 		t.Fatalf("POST status/body = %d %s", created.Code, created.Body.String())
 	}
@@ -396,6 +404,24 @@ func TestAIJobEndpointsUseTypedArraysUUIDsAndSafeDTOs(t *testing.T) {
 	}
 	if !isUUID(job.PublicID) || len(job.Items) != 1 || !isUUID(job.Items[0].PublicID) {
 		t.Fatalf("invalid public job DTO: %s", created.Body.String())
+	}
+	replayed := aiRequestWithIdempotency(t, server, token, http.MethodPost, "/api/v1/ai-jobs", createBody, "http-job-idem-0001")
+	if replayed.Code != http.StatusOK || !strings.Contains(replayed.Body.String(), job.PublicID) {
+		t.Fatalf("replay = %d %s", replayed.Code, replayed.Body.String())
+	}
+	conflictBody := strings.Replace(createBody, `"locale":"zh-CN"`, `"locale":"en"`, 1)
+	conflict := aiRequestWithIdempotency(t, server, token, http.MethodPost, "/api/v1/ai-jobs", conflictBody, "http-job-idem-0001")
+	if conflict.Code != http.StatusConflict {
+		t.Fatalf("idempotency conflict = %d %s", conflict.Code, conflict.Body.String())
+	}
+	missingKey := aiRequestWithIdempotency(t, server, token, http.MethodPost, "/api/v1/ai-jobs", createBody, "")
+	if missingKey.Code != http.StatusBadRequest {
+		t.Fatalf("missing idempotency key = %d %s", missingKey.Code, missingKey.Body.String())
+	}
+	longLocaleBody := strings.Replace(createBody, `"locale":"zh-CN"`, `"locale":"`+strings.Repeat("x", 33)+`"`, 1)
+	longLocale := aiRequestWithIdempotency(t, server, token, http.MethodPost, "/api/v1/ai-jobs", longLocaleBody, "http-job-locale-0001")
+	if longLocale.Code != http.StatusBadRequest {
+		t.Fatalf("long locale = %d %s", longLocale.Code, longLocale.Body.String())
 	}
 	assertNoAIInternalFields(t, created.Body.Bytes())
 	for _, path := range []string{"/api/v1/ai-jobs", "/api/v1/ai-jobs/" + job.PublicID} {
@@ -520,7 +546,7 @@ func TestAIOpenAPIHasExactAdminPathsAndNeverExposesCredentialMaterial(t *testing
 
 func assertNoAIInternalFields(t *testing.T, body []byte) {
 	t.Helper()
-	for _, field := range [][]byte{[]byte(`"id"`), []byte("created_by_id"), []byte("published_by_id"), []byte("ai_content_template_id"), []byte("draft_guard"), []byte("constraints_json")} {
+	for _, field := range [][]byte{[]byte(`"id"`), []byte("created_by_id"), []byte("published_by_id"), []byte("ai_content_template_id"), []byte("draft_guard"), []byte("constraints_json"), []byte("idempotency_key"), []byte("request_sha256")} {
 		if bytes.Contains(body, field) {
 			t.Fatalf("response contains internal field %s: %s", field, body)
 		}

@@ -112,6 +112,21 @@ func TestPublishReturnsAllValidationIssuesAndLeavesDraft(t *testing.T) {
 	}
 }
 
+func TestPublishRejectsMalformedImageRequiredViews(t *testing.T) {
+	service := NewTemplateService(templateTestDB(t))
+	input := validTemplateInput()
+	input.Version.Slots[0].Constraints = json.RawMessage(`{"required_views":null}`)
+	created, err := service.Create(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issues, err := service.Publish(t.Context(), created.Version.PublicID, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertIssueCodes(t, issues, "required_views_invalid")
+}
+
 func TestUpdateDraftPersistsDuplicateKeysAndPublishReturnsAllIssues(t *testing.T) {
 	service := NewTemplateService(templateTestDB(t))
 	created, err := service.Create(t.Context(), validTemplateInput())

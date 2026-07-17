@@ -13,7 +13,7 @@ func TestAIModelsDoNotSerializeInternalRelationshipIDs(t *testing.T) {
 		AIContentTemplate{CreatedByID: values[0]},
 		AIContentTemplateVersion{AIContentTemplateID: values[1], CreatedByID: values[2], PublishedByID: &values[3]},
 		AIContentSlot{AIContentTemplateVersionID: values[4]},
-		AIJob{SKUID: values[5], AIContentTemplateVersionID: values[6], CreatedByID: values[7]},
+		AIJob{SKUID: values[5], AIContentTemplateVersionID: values[6], CreatedByID: values[7], IdempotencyKey: func() *string { v := "secret-idempotency"; return &v }(), RequestSHA256: "secret-hash"},
 		AIJobItem{AIJobID: values[8], AIContentSlotID: values[9], CurrentCandidateID: &values[10], EffectiveApprovedResultID: &values[11]},
 		AIExecution{AIJobItemID: values[12], ParentExecutionID: &values[13]},
 		AIAuditEvent{ActorID: &values[14], AIJobID: &values[8], AIJobItemID: &values[9], AIExecutionID: &values[15]},
@@ -29,6 +29,7 @@ func TestAIModelsDoNotSerializeInternalRelationshipIDs(t *testing.T) {
 		"created_by_id", "published_by_id", "sku_id", "template_version_id",
 		"content_slot_id", "current_candidate_id", "effective_approved_result_id",
 		"job_id", "job_item_id", "parent_execution_id", "actor_id", "execution_id",
+		"idempotency_key", "request_sha256",
 	} {
 		if strings.Contains(text, `"`+key+`"`) {
 			t.Fatalf("serialized internal relationship key %q: %s", key, text)

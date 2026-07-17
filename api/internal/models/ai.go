@@ -148,7 +148,9 @@ type AIJob struct {
 	Status                     AIJobStatus `gorm:"size:32;index;not null;default:queued" json:"status"`
 	SnapshotSchema             string      `gorm:"size:64;not null" json:"snapshot_schema"`
 	InputSnapshotJSON          []byte      `gorm:"type:json;not null" json:"input_snapshot"`
-	CreatedByID                uint        `gorm:"index;not null" json:"-"`
+	CreatedByID                uint        `gorm:"index;uniqueIndex:idx_ai_job_actor_idempotency,priority:1;not null" json:"-"`
+	IdempotencyKey             *string     `gorm:"size:128;uniqueIndex:idx_ai_job_actor_idempotency,priority:2" json:"-"`
+	RequestSHA256              string      `gorm:"size:64;not null;default:''" json:"-"`
 	StartedAt                  *time.Time  `json:"started_at"`
 	CompletedAt                *time.Time  `json:"completed_at"`
 	CancelledAt                *time.Time  `json:"cancelled_at"`

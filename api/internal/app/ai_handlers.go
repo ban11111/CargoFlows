@@ -72,12 +72,17 @@ func (s *Server) createAIJob(c *gin.Context) {
 		SKUID: req.SKUID, TemplateVersionPublicID: req.TemplateVersionPublicID,
 		SelectedSlotKeys: req.SelectedSlotKeys, SelectedAssetIDs: *req.SelectedAssetIDs,
 		Locale: req.Locale, CreatedByID: currentUser(c).ID,
+		IdempotencyKey: c.GetHeader("Idempotency-Key"), UserPreference: req.UserPreference, GenerationOverrides: req.GenerationOverrides,
 	})
 	if err != nil {
 		respondAIError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, value)
+	status := http.StatusCreated
+	if value.Replayed {
+		status = http.StatusOK
+	}
+	c.JSON(status, value)
 }
 
 func (s *Server) listAIJobs(c *gin.Context) {
@@ -264,6 +269,10 @@ func respondAIError(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
 	case errors.Is(err, ai.ErrSlotSelectionInvalid):
 		respondAIBadRequest(c, err)
+	case errors.Is(err, ai.ErrIdempotencyKeyInvalid), errors.Is(err, ai.ErrLocaleInvalid), errors.Is(err, ai.ErrUserPreferenceInvalid), errors.Is(err, ai.ErrGenerationOverrideInvalid), errors.Is(err, ai.ErrPublishedTemplateConfigInvalid):
+		respondAIBadRequest(c, err)
+	case errors.Is(err, ai.ErrIdempotencyConflict):
+		c.JSON(http.StatusConflict, gin.H{"code": "idempotency_conflict", "message": err.Error()})
 	case errors.Is(err, ai.ErrAssetNotEligible), errors.Is(err, ai.ErrPublishedSOPNotFound):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "job_input_not_eligible", "message": err.Error()})
 	case errors.Is(err, ai.ErrTemplateVersionImmutable), errors.Is(err, ai.ErrTemplateDraftExists), errors.Is(err, ai.ErrTemplateSourceNotPublished):

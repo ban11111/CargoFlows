@@ -624,6 +624,18 @@ export interface components {
             /** @description Duplicate IDs are accepted and normalized to one ordered reference. */
             selected_asset_ids: number[];
             locale: string;
+            /** @description Optional L4 user instruction stored immutably in the job snapshot. */
+            user_preference?: string;
+            /** @description Per-selected-slot overrides; each supplied value must appear in the published slot's matching allowed_* array. */
+            generation_overrides?: {
+                [key: string]: components["schemas"]["AIJobGenerationOverride"];
+            };
+        };
+        AIJobGenerationOverride: {
+            candidate_count?: number;
+            size?: string;
+            quality?: string;
+            style?: string;
         };
         AIJob: {
             /** Format: uuid */
@@ -759,6 +771,11 @@ export interface components {
             role: "reference_front" | "capture";
             /** @enum {string} */
             view_kind: "standard" | "detail";
+            instruction: components["schemas"]["AISnapshotLocalizedText"];
+            camera_position_direction: components["schemas"]["AISnapshotVector"];
+            image_up_direction: components["schemas"]["AISnapshotVector"];
+            target: components["schemas"]["AISnapshotVector"];
+            composition: components["schemas"]["Composition"];
         };
         AISnapshotAsset: {
             id: number;
@@ -790,6 +807,10 @@ export interface components {
             sop: components["schemas"]["AISnapshotSOP"];
             template: components["schemas"]["AISnapshotTemplate"];
             selected_assets: components["schemas"]["AISnapshotAsset"][];
+            user_preference: string;
+            generation_overrides: {
+                [key: string]: components["schemas"]["AIJobGenerationOverride"];
+            };
         };
         AITemplateValidationIssue: {
             code: string;
@@ -1154,6 +1175,8 @@ export interface components {
         AIContentTemplateID: string;
         AIContentTemplateVersionID: string;
         AIJobID: string;
+        /** @description Actor-scoped create key. Reusing it with the same normalized request returns the original job; different input returns 409. */
+        IdempotencyKey: string;
         /** @description Exact updated_at value from the latest SOPVersion response; stale revisions return 409. */
         SOPRevision: string;
     };
@@ -2227,7 +2250,10 @@ export interface operations {
     createAIJob: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description Actor-scoped create key. Reusing it with the same normalized request returns the original job; different input returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
@@ -2237,6 +2263,15 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Idempotent replay of the existing AI job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIJob"];
+                };
+            };
             /** @description Reproducible dry-run AI job */
             201: {
                 headers: {

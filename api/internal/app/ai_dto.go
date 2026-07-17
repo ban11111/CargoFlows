@@ -13,11 +13,13 @@ type openAISettingRequest struct {
 }
 
 type createAIJobRequest struct {
-	SKUID                   uint     `json:"sku_id"`
-	TemplateVersionPublicID string   `json:"template_version_id"`
-	SelectedSlotKeys        []string `json:"selected_slot_keys"`
-	SelectedAssetIDs        *[]uint  `json:"selected_asset_ids"`
-	Locale                  string   `json:"locale"`
+	SKUID                   uint                             `json:"sku_id"`
+	TemplateVersionPublicID string                           `json:"template_version_id"`
+	SelectedSlotKeys        []string                         `json:"selected_slot_keys"`
+	SelectedAssetIDs        *[]uint                          `json:"selected_asset_ids"`
+	Locale                  string                           `json:"locale"`
+	UserPreference          string                           `json:"user_preference"`
+	GenerationOverrides     map[string]ai.GenerationOverride `json:"generation_overrides"`
 }
 
 type openAISettingDTO struct {

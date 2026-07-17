@@ -446,10 +446,12 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
     post:
       operationId: createAIJob
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/CreateAIJobRequest' } } }
       responses:
+        '200': { description: Idempotent replay of the existing AI job, content: { application/json: { schema: { $ref: '#/components/schemas/AIJob' } } } }
         '201': { description: Reproducible dry-run AI job, content: { application/json: { schema: { $ref: '#/components/schemas/AIJob' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -480,6 +482,7 @@ components:
     AIContentTemplateID: { in: path, name: template_id, required: true, schema: { type: string, format: uuid } }
     AIContentTemplateVersionID: { in: path, name: version_id, required: true, schema: { type: string, format: uuid } }
     AIJobID: { in: path, name: job_id, required: true, schema: { type: string, format: uuid } }
+    IdempotencyKey: { in: header, name: Idempotency-Key, required: true, description: "Actor-scoped create key. Reusing it with the same normalized request returns the original job; different input returns 409.", schema: { type: string, minLength: 8, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$' } }
     SOPRevision:
       in: header
       name: X-SOP-Version-Updated-At
@@ -609,7 +612,21 @@ components:
         template_version_id: { type: string, format: uuid }
         selected_slot_keys: { type: array, minItems: 1, uniqueItems: true, items: { type: string, minLength: 1, maxLength: 80 } }
         selected_asset_ids: { type: array, items: { type: integer, minimum: 1 }, description: Duplicate IDs are accepted and normalized to one ordered reference. }
-        locale: { type: string, minLength: 1, maxLength: 32 }
+        locale: { type: string, minLength: 2, maxLength: 32, pattern: '^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$' }
+        user_preference: { type: string, maxLength: 1000, description: Optional L4 user instruction stored immutably in the job snapshot. }
+        generation_overrides:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/AIJobGenerationOverride' }
+          description: Per-selected-slot overrides; each supplied value must appear in the published slot's matching allowed_* array.
+    AIJobGenerationOverride:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        candidate_count: { type: integer, minimum: 1 }
+        size: { type: string }
+        quality: { type: string }
+        style: { type: string }
     AIJob:
       type: object
       additionalProperties: false
@@ -731,13 +748,18 @@ components:
     AISnapshotAssetView:
       type: object
       additionalProperties: false
-      required: [public_id, preset_key, name, role, view_kind]
+      required: [public_id, preset_key, name, role, view_kind, instruction, camera_position_direction, image_up_direction, target, composition]
       properties:
         public_id: { type: string, format: uuid }
         preset_key: { type: string }
         name: { $ref: '#/components/schemas/AISnapshotLocalizedText' }
         role: { type: string, enum: [reference_front, capture] }
         view_kind: { type: string, enum: [standard, detail] }
+        instruction: { $ref: '#/components/schemas/AISnapshotLocalizedText' }
+        camera_position_direction: { $ref: '#/components/schemas/AISnapshotVector' }
+        image_up_direction: { $ref: '#/components/schemas/AISnapshotVector' }
+        target: { $ref: '#/components/schemas/AISnapshotVector' }
+        composition: { $ref: '#/components/schemas/Composition' }
     AISnapshotAsset:
       type: object
       additionalProperties: false
@@ -763,7 +785,7 @@ components:
     ProductSnapshotV1:
       type: object
       additionalProperties: false
-      required: [schema, locale, target_platform, product, sku, sop, template, selected_assets]
+      required: [schema, locale, target_platform, product, sku, sop, template, selected_assets, user_preference, generation_overrides]
       properties:
         schema: { type: string, enum: [cargoflow_product_generation_v1] }
         locale: { type: string }
@@ -773,6 +795,8 @@ components:
         sop: { $ref: '#/components/schemas/AISnapshotSOP' }
         template: { $ref: '#/components/schemas/AISnapshotTemplate' }
         selected_assets: { type: array, items: { $ref: '#/components/schemas/AISnapshotAsset' } }
+        user_preference: { type: string, maxLength: 1000 }
+        generation_overrides: { type: object, additionalProperties: { $ref: '#/components/schemas/AIJobGenerationOverride' } }
     AITemplateValidationIssue:
       type: object
       additionalProperties: false

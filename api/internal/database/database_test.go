@@ -116,11 +116,40 @@ func TestMigrateCreatesAIFoundationTables(t *testing.T) {
 	if db.Migrator().HasColumn(&models.AIJob{}, "input_asset_ids") {
 		t.Fatal("legacy input_asset_ids compatibility field must not be persisted")
 	}
+	for _, column := range []string{"idempotency_key", "request_sha256"} {
+		if !db.Migrator().HasColumn(&models.AIJob{}, column) {
+			t.Fatalf("missing AI job column %q", column)
+		}
+	}
+	if !db.Migrator().HasIndex(&models.AIJob{}, "idx_ai_job_actor_idempotency") {
+		t.Fatal("missing actor-scoped AI job idempotency index")
+	}
 	if !db.Migrator().HasColumn(&models.AIContentTemplateVersion{}, "draft_guard") {
 		t.Fatal("missing AI template version draft guard")
 	}
 	if !db.Migrator().HasIndex(&models.AIContentTemplateVersion{}, "idx_ai_template_draft_guard") {
 		t.Fatal("missing unique AI template draft guard index")
+	}
+}
+
+func TestMigrateAIJobIdempotencyIndexIsActorScopedAndLegacySafe(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	key := "job-database-idem"
+	newJob := func(public string, actor uint, key *string) models.AIJob {
+		return models.AIJob{PublicID: public, SKUID: 1, AIContentTemplateVersionID: 1, TargetPlatform: "lazada", Locale: "zh-CN", Status: models.AIJobQueued, SnapshotSchema: "v1", InputSnapshotJSON: []byte(`{}`), CreatedByID: actor, IdempotencyKey: key, RequestSHA256: strings.Repeat("a", 64)}
+	}
+	if err := db.Create(&[]models.AIJob{newJob("job-legacy-1", 1, nil), newJob("job-legacy-2", 1, nil)}).Error; err != nil {
+		t.Fatalf("multiple legacy null keys: %v", err)
+	}
+	if err := db.Create(&[]models.AIJob{newJob("job-key-1", 1, &key), newJob("job-key-2", 2, &key)}).Error; err != nil {
+		t.Fatalf("same key different actors: %v", err)
+	}
+	duplicate := newJob("job-key-duplicate", 1, &key)
+	if err := db.Create(&duplicate).Error; err == nil {
+		t.Fatal("same actor/key must be unique")
 	}
 }
 
