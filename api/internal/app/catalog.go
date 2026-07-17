@@ -183,7 +183,7 @@ type assetReviewHierarchyCategory struct {
 
 func (s *Server) listAssetReviewHierarchy(c *gin.Context) {
 	var assets []models.Asset
-	query := s.db.Preload("SKU.Product.CatalogCategory").Preload("SKU.Tags").Preload("SOPView").Preload("PhotoSession").Order("captured_at DESC")
+	query := scopeAssetsForUser(s.db.Model(&models.Asset{}), currentUser(c)).Preload("SKU.Product.CatalogCategory").Preload("SKU.Tags").Preload("SOPView").Preload("PhotoSession").Order("assets.captured_at DESC")
 	if status := c.Query("status"); status != "" {
 		query = query.Where("review_status = ?", status)
 	}

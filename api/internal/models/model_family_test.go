@@ -126,3 +126,28 @@ func TestVariantIdentityModelsDoNotSerializeInternalIDsOrPublishedActor(t *testi
 		}
 	}
 }
+
+func TestVariantIdentityJSONFieldsSerializeAsJSONValues(t *testing.T) {
+	values := []struct {
+		name  string
+		value any
+		want  []string
+	}{
+		{name: "family", value: models.ModelFamily{CommonStructureJSON: []byte(`{"body":"shared"}`), VariationDimensionsJSON: []byte(`["color"]`)}, want: []string{`"common_structure":{"body":"shared"}`, `"variation_dimensions":["color"]`}},
+		{name: "manifest version", value: models.VariantIdentityManifestVersion{IdentityJSON: []byte(`{"color":"blue"}`)}, want: []string{`"identity":{"color":"blue"}`}},
+		{name: "difference region", value: models.VariantDifferenceRegion{ShapeJSON: []byte(`{"kind":"rectangle"}`), ForbiddenInheritanceJSON: []byte(`["ports"]`), RequiredViewKeysJSON: []byte(`["right_ports"]`)}, want: []string{`"shape":{"kind":"rectangle"}`, `"forbidden_inheritance":["ports"]`, `"required_view_keys":["right_ports"]`}},
+	}
+	for _, test := range values {
+		t.Run(test.name, func(t *testing.T) {
+			encoded, err := json.Marshal(test.value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range test.want {
+				if !strings.Contains(string(encoded), want) {
+					t.Fatalf("serialized JSON = %s, want fragment %s", encoded, want)
+				}
+			}
+		})
+	}
+}

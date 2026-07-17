@@ -321,6 +321,21 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '500': { $ref: '#/components/responses/InternalServerError' }
+  /sop-reference-images/{image_id}/media:
+    parameters: [ { $ref: '#/components/parameters/ImageID' } ]
+    get:
+      operationId: getSOPReferenceImageMedia
+      responses:
+        '200':
+          description: Authenticated SOP reference bytes. Draft references are limited to SOP managers; published references are available to authenticated users.
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /assets/upload-url:
     post:
       operationId: createAssetUploadURL
@@ -365,6 +380,7 @@ paths:
             image/webp: { schema: { type: string, format: binary } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /assets/{asset_id}/review:
@@ -378,6 +394,7 @@ paths:
         '200': { description: Asset reviewed, content: { application/json: { schema: { $ref: '#/components/schemas/ReviewedAsset' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /assets/review:
@@ -388,6 +405,7 @@ paths:
       responses:
         '200': { description: Review assets, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/AssetReviewItem' } } } } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /assets/review/hierarchy:
     get:
@@ -397,6 +415,7 @@ paths:
       responses:
         '200': { description: Review assets grouped by category and SKU, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/AssetReviewCategory' } } } } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /settings/openai:
     get:

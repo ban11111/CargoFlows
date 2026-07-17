@@ -52,8 +52,22 @@ func TestGeneratedBucketPrivateMinIOIntegration(t *testing.T) {
 
 	sourceKey := "assets/source.png"
 	source := minioPutPNG(t)
-	if _, err := store.internal.PutObject(t.Context(), cfg.MinIOBucket, sourceKey, bytes.NewReader(source), int64(len(source)), minio.PutObjectOptions{ContentType: "image/png"}); err != nil {
+	uploadURL, _, err := store.createUploadURL(t.Context(), sourceKey)
+	if err != nil {
 		t.Fatal(err)
+	}
+	uploadRequest, err := http.NewRequestWithContext(t.Context(), http.MethodPut, uploadURL, bytes.NewReader(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadRequest.Header.Set("Content-Type", "image/png")
+	uploadResponse, err := http.DefaultClient.Do(uploadRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploadResponse.Body.Close()
+	if uploadResponse.StatusCode < 200 || uploadResponse.StatusCode >= 300 {
+		t.Fatalf("presigned source PUT status = %d, want 2xx", uploadResponse.StatusCode)
 	}
 	defer func() {
 		_ = store.internal.RemoveObject(t.Context(), cfg.MinIOBucket, sourceKey, minio.RemoveObjectOptions{})
@@ -61,6 +75,18 @@ func TestGeneratedBucketPrivateMinIOIntegration(t *testing.T) {
 	storage := ai.NewImageStorage(store)
 	if _, err := storage.ReadSource(t.Context(), sourceKey); err != nil {
 		t.Fatalf("authenticated worker source read failed: %v", err)
+	}
+	sourcePolicy, err := store.internal.GetBucketPolicy(t.Context(), cfg.MinIOBucket)
+	if err != nil || sourcePolicy != "" {
+		t.Fatalf("private source bucket policy = %q, %v", sourcePolicy, err)
+	}
+	sourceResponse, err := http.Get("http://" + endpoint + "/" + cfg.MinIOBucket + "/" + sourceKey) // #nosec G107 -- disposable loopback MinIO endpoint provided by the test harness.
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sourceResponse.Body.Close()
+	if sourceResponse.StatusCode != http.StatusForbidden {
+		t.Fatalf("anonymous source object GET status = %d, want %d", sourceResponse.StatusCode, http.StatusForbidden)
 	}
 	stored, err := storage.StoreGenerated(t.Context(), ai.GeneratedImageStoreRequest{JobPublicID: "job", ItemPublicID: "item", TurnPublicID: "turn", CandidateIndex: 1, Bytes: source})
 	if err != nil {

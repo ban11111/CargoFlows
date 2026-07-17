@@ -5,8 +5,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"cargoflow/api/internal/ai"
@@ -16,24 +18,21 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
-const publicReadPolicy = `{
-  "Version":"2012-10-17",
-  "Statement":[{
-    "Effect":"Allow",
-    "Principal":{"AWS":["*"]},
-    "Action":["s3:GetObject"],
-    "Resource":["arn:aws:s3:::%s/*"]
-  }]
-}`
-
+const sourceBucketPolicy = ""
 const generatedBucketPolicy = ""
 
+type sourceBucketInitialization struct {
+	mu    sync.Mutex
+	ready bool
+}
+
 type objectStore struct {
-	internal  *minio.Client
-	public    *minio.Client
-	bucket    string
-	aiBucket  string
-	publicURL *url.URL
+	internal   *minio.Client
+	public     *minio.Client
+	bucket     string
+	aiBucket   string
+	publicURL  *url.URL
+	sourceInit *sourceBucketInitialization
 }
 
 type assetStorage interface {
@@ -64,7 +63,7 @@ func newObjectStore(cfg config.Config) (*objectStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &objectStore{internal: internal, public: public, bucket: cfg.MinIOBucket, aiBucket: cfg.MinIOAIBucket, publicURL: publicURL}, nil
+	return &objectStore{internal: internal, public: public, bucket: cfg.MinIOBucket, aiBucket: cfg.MinIOAIBucket, publicURL: publicURL, sourceInit: &sourceBucketInitialization{}}, nil
 }
 
 func NewImageObjectStore(cfg config.Config) (ai.ImageObjectStore, error) {
@@ -90,6 +89,9 @@ func (s *objectStore) assetURL(objectKey string) string {
 }
 
 func (s *objectStore) objectExists(ctx context.Context, objectKey string) (bool, error) {
+	if err := s.ensureBucket(ctx); err != nil {
+		return false, err
+	}
 	_, err := s.internal.StatObject(ctx, s.bucket, objectKey, minio.StatObjectOptions{})
 	if err == nil {
 		return true, nil
@@ -102,19 +104,34 @@ func (s *objectStore) objectExists(ctx context.Context, objectKey string) (bool,
 }
 
 func (s *objectStore) ensureBucket(ctx context.Context) error {
+	s.sourceInit.mu.Lock()
+	defer s.sourceInit.mu.Unlock()
+	if s.sourceInit.ready {
+		return nil
+	}
 	exists, err := s.internal.BucketExists(ctx, s.bucket)
 	if err != nil {
 		return err
 	}
 	if !exists {
 		if err := s.internal.MakeBucket(ctx, s.bucket, minio.MakeBucketOptions{Region: "us-east-1"}); err != nil {
-			return err
+			response := minio.ToErrorResponse(err)
+			if response.Code != "BucketAlreadyOwnedByYou" && response.Code != "BucketAlreadyExists" && response.StatusCode != http.StatusConflict {
+				return err
+			}
 		}
 	}
-	return s.internal.SetBucketPolicy(ctx, s.bucket, fmt.Sprintf(publicReadPolicy, s.bucket))
+	if err := s.internal.SetBucketPolicy(ctx, s.bucket, sourceBucketPolicy); err != nil {
+		return err
+	}
+	s.sourceInit.ready = true
+	return nil
 }
 
 func (s *objectStore) ReadSource(ctx context.Context, objectKey string) (ai.ImageInput, error) {
+	if err := s.ensureBucket(ctx); err != nil {
+		return ai.ImageInput{}, err
+	}
 	object, err := s.internal.GetObject(ctx, s.bucket, objectKey, minio.GetObjectOptions{})
 	if err != nil {
 		return ai.ImageInput{}, err

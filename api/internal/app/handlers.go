@@ -357,12 +357,12 @@ func inventoryAdjustmentDTOFromModel(value models.InventoryAdjustment, skuPublic
 
 func requireSKUPublicID(c *gin.Context) (string, bool) {
 	value := c.Param("sku_id")
-	parsed, err := uuid.Parse(value)
-	if err != nil || parsed == uuid.Nil {
+	canonical, ok := canonicalUUID(value)
+	if !ok {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": "sku_id must be a UUID"})
 		return "", false
 	}
-	return parsed.String(), true
+	return canonical, true
 }
 
 type createPhotoSessionRequest struct {
@@ -804,7 +804,7 @@ func respondCaptureError(c *gin.Context, err error) {
 
 func (s *Server) listAssetsForReview(c *gin.Context) {
 	var assets []models.Asset
-	query := s.db.Preload("SKU.Product.CatalogCategory").Preload("SKU.Tags").Preload("SOPView").Preload("PhotoSession").Order("created_at DESC")
+	query := scopeAssetsForUser(s.db.Model(&models.Asset{}), currentUser(c)).Preload("SKU.Product.CatalogCategory").Preload("SKU.Tags").Preload("SOPView").Preload("PhotoSession").Order("assets.created_at DESC")
 	if status := c.Query("status"); status != "" {
 		query = query.Where("review_status = ?", status)
 	}
@@ -835,29 +835,49 @@ type assetReviewItem struct {
 }
 
 type reviewAssetRequest struct {
-	Status string `json:"status" binding:"required"`
+	Status string `json:"status"`
 	Reason string `json:"reason"`
 }
 
 func (s *Server) reviewAsset(c *gin.Context) {
+	if !isSOPManager(currentUser(c)) {
+		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": "insufficient permissions"})
+		return
+	}
 	var req reviewAssetRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := decodeJSONStrict(c, &req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 		return
 	}
+	if req.Status != "approved" && req.Status != "rejected" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": "status must be approved or rejected"})
+		return
+	}
 	user := currentUser(c)
-	var asset models.Asset
 	assetPublicID := c.Param("asset_id")
-	if !isUUID(assetPublicID) || s.db.Where("public_id = ?", assetPublicID).First(&asset).Error != nil {
+	if !isUUID(assetPublicID) {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": "asset_id must be a UUID"})
+		return
+	}
+	var asset models.Asset
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("public_id = ?", assetPublicID).First(&asset).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&asset).Update("review_status", req.Status).Error; err != nil {
+			return err
+		}
+		asset.ReviewStatus = req.Status
+		return tx.Create(&models.AssetReview{AssetID: asset.ID, ReviewerID: user.ID, Status: req.Status, Reason: req.Reason}).Error
+	})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"message": "asset not found"})
 		return
 	}
-	asset.ReviewStatus = req.Status
-	if err := s.db.Save(&asset).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "internal server error"})
 		return
 	}
-	_ = s.db.Create(&models.AssetReview{AssetID: asset.ID, ReviewerID: user.ID, Status: req.Status, Reason: req.Reason}).Error
 	c.JSON(http.StatusOK, gin.H{"public_id": asset.PublicID, "review_status": asset.ReviewStatus})
 }
 
@@ -867,7 +887,8 @@ func (s *Server) assetMedia(c *gin.Context) {
 		return
 	}
 	var asset models.Asset
-	if err := s.db.Where("public_id = ?", c.Param("asset_id")).First(&asset).Error; err != nil {
+	query := scopeAssetsForUser(s.db.Model(&models.Asset{}), currentUser(c))
+	if err := query.Where("assets.public_id = ?", c.Param("asset_id")).First(&asset).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"message": "asset not found"})
 		return
 	}
@@ -880,6 +901,13 @@ func (s *Server) assetMedia(c *gin.Context) {
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.Header("Content-Disposition", "inline")
 	c.Data(http.StatusOK, asset.MIMEType, source.Bytes)
+}
+
+func scopeAssetsForUser(query *gorm.DB, user models.User) *gorm.DB {
+	if user.Role != models.RolePhotographer {
+		return query
+	}
+	return query.Joins("JOIN photo_sessions ON photo_sessions.id = assets.photo_session_id").Where("photo_sessions.photographer_id = ?", user.ID)
 }
 
 func (s *Server) listUsers(c *gin.Context) {

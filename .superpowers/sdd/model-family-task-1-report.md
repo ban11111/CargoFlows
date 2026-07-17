@@ -119,3 +119,38 @@ git diff --check
 ```
 
 Result: all Go packages passed; Web passed 13 files / 77 tests; lint, TypeScript, vet, and whitespace verification passed.
+
+## Security re-review remediation
+
+The six follow-up findings were reproduced with regression tests and fixed in this commit:
+
+- The source-image bucket is private. Its legacy anonymous policy is cleared once per object-store process, not rewritten on every upload. A real MinIO test proves presigned PUT and authenticated worker reads still work while anonymous direct GET returns 403 for both source and generated objects.
+- Asset review routes now have explicit role gates. Admin/operator users are reviewers; photographers see and read only assets from their own photo sessions; viewers cannot enter review/media routes; only admin/operator users can approve or reject. Cross-photographer A/B route tests cover list, hierarchy, media, and review behavior.
+- Asset review JSON is strict, status is limited to `approved` or `rejected`, and status plus audit insertion commit in one checked transaction. An injected audit-write failure proves the asset status rolls back.
+- UUID handler validation rejects nil, uppercase, and compact/unhyphenated forms. The canonical lowercase hyphenated representation is required across the shared SOP, SKU, asset, photo-session, and AI handler validators.
+- Named database checks bind `active_guard` to membership removal state and `draft_guard` to manifest lifecycle state, preventing arbitrary guard values from bypassing partial uniqueness.
+- Model-family JSON columns exposed by model serialization use `json.RawMessage`, so JSON values are emitted as objects/arrays instead of base64 strings.
+
+Because the source bucket is now private, SOP reference thumbnails also use an authenticated media endpoint. Draft reference media is limited to SOP managers; published reference media is available to authenticated users. Web image consumers normalize `/api/v1/.../media` paths through the cookie-authenticated same-origin proxy.
+
+Security RED evidence:
+
+```sh
+cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test ./internal/app ./internal/database ./internal/models -run 'TestAssetReviewRoutesEnforceRoleAndOwnership|TestReviewAssetUsesStrictValidatedTransactionalInput|TestHTTPRouteParamsRejectNonCanonicalAndNilUUIDs|TestGeneratedBucketUsesSeparatePrivateDefault|TestModelFamilyAndVariantIdentityConstraints|TestVariantIdentityJSONFieldsSerializeAsJSONValues' -count=1
+```
+
+Result before implementation: the source policy was public; photographer A received photographer B's assets; viewer/photographer review operations were accepted; unknown review fields/statuses and audit failures were accepted; noncanonical/nil UUIDs passed; arbitrary guard values inserted; and JSON fields serialized as base64.
+
+Final verification:
+
+```sh
+cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test ./... -count=1
+cd api && GOCACHE=/private/tmp/cargoflow-go-cache go vet ./...
+cd api && GOCACHE=/private/tmp/cargoflow-go-cache MINIO_INTEGRATION_ENDPOINT=127.0.0.1:9000 MINIO_INTEGRATION_ACCESS_KEY=cargoflow MINIO_INTEGRATION_SECRET_KEY=cargoflow123 go test ./internal/app -run TestGeneratedBucketPrivateMinIOIntegration -count=1 -v
+cd web && pnpm test
+cd web && pnpm run lint
+cd web && pnpm run typecheck
+git diff --check
+```
+
+Result: all Go packages and vet passed; the real MinIO privacy/presigned-upload test passed; Web passed 14 files / 79 tests; lint, TypeScript, and whitespace validation passed.

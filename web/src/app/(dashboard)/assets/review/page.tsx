@@ -7,7 +7,7 @@ import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { apiRequest } from "@/lib/api";
+import { apiRequest, authenticatedMediaURL } from "@/lib/api";
 import { categoryLabel } from "@/lib/category-label";
 import { useLanguage } from "@/lib/i18n";
 import { formatDateTime } from "@/lib/utils";
@@ -182,7 +182,7 @@ export default function AssetReviewPage() {
               <div className="aspect-[4/5] bg-muted">
                 {/* MinIO image URLs are local development assets and bypass Next Image optimization. */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img alt={`${selected.sku.code} ${viewName(selected.asset)}`} className="h-full w-full object-contain" src={`/api/proxy${selected.asset.media_url}`} />
+                <img alt={`${selected.sku.code} ${viewName(selected.asset)}`} className="h-full w-full object-contain" src={authenticatedMediaURL(selected.asset.media_url)} />
               </div>
               <div className="space-y-4 p-4">
                 <div className="flex items-center justify-between gap-3">

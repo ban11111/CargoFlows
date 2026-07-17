@@ -182,6 +182,37 @@ func (s *Server) getSOPVersion(c *gin.Context) {
 	s.respondVersionModel(c, http.StatusOK, *version)
 }
 
+func (s *Server) sopReferenceMedia(c *gin.Context) {
+	if !requireUUIDParam(c, "image_id") {
+		return
+	}
+	var image models.SOPViewReferenceImage
+	query := s.db.Model(&models.SOPViewReferenceImage{}).
+		Joins("JOIN sop_views ON sop_views.id = sop_view_reference_images.sop_view_id").
+		Joins("JOIN sop_versions ON sop_versions.id = sop_views.sop_version_id")
+	if !isSOPManager(currentUser(c)) {
+		query = query.Where("sop_versions.status = ?", models.SOPVersionPublished)
+	}
+	if err := query.Where("sop_view_reference_images.public_id = ?", c.Param("image_id")).First(&image).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "reference image not found"})
+		return
+	}
+	source, err := s.storage.ReadSource(c.Request.Context(), image.ObjectKey)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "object_storage_unavailable", "message": "read reference image failed"})
+		return
+	}
+	mimeType := http.DetectContentType(source.Bytes)
+	if !strings.HasPrefix(mimeType, "image/") {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "object_storage_unavailable", "message": "reference image content is invalid"})
+		return
+	}
+	c.Header("Cache-Control", "private, no-store")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("Content-Disposition", "inline")
+	c.Data(http.StatusOK, mimeType, source.Bytes)
+}
+
 func (s *Server) updateSOPVersion(c *gin.Context) {
 	if !requireUUIDParam(c, "version_id") {
 		return
@@ -621,7 +652,17 @@ func errOr(err error, message string) error {
 	}
 	return errors.New(message)
 }
-func isUUID(value string) bool { _, err := uuid.Parse(value); return err == nil }
+func canonicalUUID(value string) (string, bool) {
+	parsed, err := uuid.Parse(value)
+	if err != nil || parsed == uuid.Nil || parsed.String() != value {
+		return "", false
+	}
+	return parsed.String(), true
+}
+func isUUID(value string) bool {
+	_, ok := canonicalUUID(value)
+	return ok
+}
 func allUUIDs(values []string) bool {
 	for _, value := range values {
 		if !isUUID(value) {

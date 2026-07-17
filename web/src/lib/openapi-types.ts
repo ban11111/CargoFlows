@@ -346,6 +346,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sop-reference-images/{image_id}/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                image_id: components["parameters"]["ImageID"];
+            };
+            cookie?: never;
+        };
+        get: operations["getSOPReferenceImageMedia"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/assets/upload-url": {
         parameters: {
             query?: never;
@@ -2376,6 +2394,34 @@ export interface operations {
             500: components["responses"]["InternalServerError"];
         };
     };
+    getSOPReferenceImageMedia: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                image_id: components["parameters"]["ImageID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authenticated SOP reference bytes. Draft references are limited to SOP managers; published references are available to authenticated users. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                    "image/png": string;
+                    "image/webp": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     createAssetUploadURL: {
         parameters: {
             query?: never;
@@ -2471,6 +2517,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
         };
@@ -2501,6 +2548,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalServerError"];
         };
@@ -2528,6 +2576,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             500: components["responses"]["InternalServerError"];
         };
     };
@@ -2554,6 +2603,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             500: components["responses"]["InternalServerError"];
         };
     };

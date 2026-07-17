@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -67,8 +68,8 @@ type ModelFamily struct {
 	NameZH                  string              `gorm:"size:180;not null" json:"name_zh"`
 	NameEN                  string              `gorm:"size:180;not null" json:"name_en"`
 	ModelCode               string              `gorm:"size:120;uniqueIndex;not null" json:"model_code"`
-	CommonStructureJSON     []byte              `gorm:"type:json;not null" json:"common_structure"`
-	VariationDimensionsJSON []byte              `gorm:"type:json;not null" json:"variation_dimensions"`
+	CommonStructureJSON     json.RawMessage     `gorm:"type:json;not null" json:"common_structure"`
+	VariationDimensionsJSON json.RawMessage     `gorm:"type:json;not null" json:"variation_dimensions"`
 	Status                  ModelFamilyStatus   `gorm:"size:32;index;not null;default:active" json:"status"`
 	CreatedByID             uint                `gorm:"index;not null" json:"-"`
 	CreatedAt               time.Time           `json:"created_at"`
@@ -97,7 +98,7 @@ type ModelFamilyMember struct {
 	PublicID      string     `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
 	ModelFamilyID uint       `gorm:"index;not null" json:"-"`
 	SKUID         uint       `gorm:"uniqueIndex:idx_active_family_member,priority:1;index;not null" json:"-"`
-	ActiveGuard   *string    `gorm:"size:16;uniqueIndex:idx_active_family_member,priority:2" json:"-"`
+	ActiveGuard   *string    `gorm:"size:16;uniqueIndex:idx_active_family_member,priority:2;check:chk_model_family_member_active_guard,(removed_at IS NULL AND active_guard = 'active') OR (removed_at IS NOT NULL AND active_guard IS NULL)" json:"-"`
 	AddedByID     uint       `gorm:"index;not null" json:"-"`
 	RemovedByID   *uint      `gorm:"index" json:"-"`
 	RemovedAt     *time.Time `json:"removed_at"`
@@ -136,8 +137,8 @@ type VariantIdentityManifestVersion struct {
 	VariantIdentityManifestID uint                      `gorm:"uniqueIndex:idx_variant_manifest_version,priority:1;uniqueIndex:idx_variant_manifest_draft,priority:1;not null" json:"-"`
 	VersionNumber             int                       `gorm:"uniqueIndex:idx_variant_manifest_version,priority:2;check:chk_variant_manifest_version,version_number > 0;not null" json:"version_number"`
 	Status                    VariantManifestStatus     `gorm:"size:32;index;not null;default:draft" json:"status"`
-	DraftGuard                *string                   `gorm:"size:16;uniqueIndex:idx_variant_manifest_draft,priority:2" json:"-"`
-	IdentityJSON              []byte                    `gorm:"type:json;not null" json:"identity"`
+	DraftGuard                *string                   `gorm:"size:16;uniqueIndex:idx_variant_manifest_draft,priority:2;check:chk_variant_manifest_draft_guard,(status = 'draft' AND draft_guard = 'draft') OR (status <> 'draft' AND draft_guard IS NULL)" json:"-"`
+	IdentityJSON              json.RawMessage           `gorm:"type:json;not null" json:"identity"`
 	CreatedByID               uint                      `gorm:"index;not null" json:"-"`
 	PublishedByID             *uint                     `gorm:"index" json:"-"`
 	PublishedAt               *time.Time                `json:"published_at"`
@@ -171,9 +172,9 @@ type VariantDifferenceRegion struct {
 	Strictness                       DifferenceRegionStrictness             `gorm:"size:32;index;not null" json:"strictness"`
 	DescriptionZH                    string                                 `gorm:"type:text" json:"description_zh"`
 	DescriptionEN                    string                                 `gorm:"type:text" json:"description_en"`
-	ShapeJSON                        []byte                                 `gorm:"type:json;not null" json:"shape"`
-	ForbiddenInheritanceJSON         []byte                                 `gorm:"type:json;not null" json:"forbidden_inheritance"`
-	RequiredViewKeysJSON             []byte                                 `gorm:"type:json;not null" json:"required_view_keys"`
+	ShapeJSON                        json.RawMessage                        `gorm:"type:json;not null" json:"shape"`
+	ForbiddenInheritanceJSON         json.RawMessage                        `gorm:"type:json;not null" json:"forbidden_inheritance"`
+	RequiredViewKeysJSON             json.RawMessage                        `gorm:"type:json;not null" json:"required_view_keys"`
 	CreatedAt                        time.Time                              `json:"created_at"`
 	UpdatedAt                        time.Time                              `json:"updated_at"`
 	EvidenceAssets                   []VariantDifferenceRegionEvidenceAsset `json:"evidence_assets,omitempty"`

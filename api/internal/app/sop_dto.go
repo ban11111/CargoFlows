@@ -83,7 +83,7 @@ func versionDTOFromModel(version models.SOPVersion, sopPublicID string) sopVersi
 		sort.SliceStable(images, func(i, j int) bool { return images[i].SortOrder < images[j].SortOrder })
 		imageDTOs := make([]referenceImageDTO, 0, len(images))
 		for _, image := range images {
-			imageDTOs = append(imageDTOs, referenceImageDTO{PublicID: image.PublicID, ObjectKey: image.ObjectKey, ThumbnailURL: image.ThumbnailURL, SortOrder: image.SortOrder, Caption: localizedTextDTO{ZHCN: image.CaptionZH, EN: image.CaptionEN}, CreatedAt: image.CreatedAt})
+			imageDTOs = append(imageDTOs, referenceImageDTO{PublicID: image.PublicID, ObjectKey: image.ObjectKey, ThumbnailURL: "/api/v1/sop-reference-images/" + image.PublicID + "/media", SortOrder: image.SortOrder, Caption: localizedTextDTO{ZHCN: image.CaptionZH, EN: image.CaptionEN}, CreatedAt: image.CreatedAt})
 		}
 		viewDTOs = append(viewDTOs, sopViewDTO{
 			PublicID: view.PublicID, Sequence: view.Sequence, Role: view.Role, ViewKind: view.ViewKind, PresetKey: view.PresetKey,

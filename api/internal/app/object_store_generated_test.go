@@ -28,4 +28,7 @@ func TestGeneratedBucketUsesSeparatePrivateDefault(t *testing.T) {
 	if generatedBucketPolicy != "" {
 		t.Fatalf("generated bucket policy must remain private, got %q", generatedBucketPolicy)
 	}
+	if sourceBucketPolicy != "" {
+		t.Fatalf("source bucket policy must remain private, got %q", sourceBucketPolicy)
+	}
 }

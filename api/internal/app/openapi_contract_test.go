@@ -35,10 +35,11 @@ func TestCaptureSOPOpenAPIHasCompleteRuntimeErrorResponses(t *testing.T) {
 		"/photo-sessions":                                                        {"post": {"201", "400", "401", "404", "409", "500"}},
 		"/assets/upload-url":                                                     {"post": {"200", "400", "401", "403", "404", "409", "500", "503"}},
 		"/assets/complete":                                                       {"post": {"200", "201", "400", "401", "403", "404", "409", "500", "503"}},
-		"/assets/{asset_id}/media":                                               {"get": {"200", "400", "401", "404", "503"}},
-		"/assets/{asset_id}/review":                                              {"patch": {"200", "400", "401", "404", "500"}},
-		"/assets/review":                                                         {"get": {"200", "401", "500"}},
-		"/assets/review/hierarchy":                                               {"get": {"200", "401", "500"}},
+		"/sop-reference-images/{image_id}/media":                                 {"get": {"200", "400", "401", "404", "503"}},
+		"/assets/{asset_id}/media":                                               {"get": {"200", "400", "401", "403", "404", "503"}},
+		"/assets/{asset_id}/review":                                              {"patch": {"200", "400", "401", "403", "404", "500"}},
+		"/assets/review":                                                         {"get": {"200", "401", "403", "500"}},
+		"/assets/review/hierarchy":                                               {"get": {"200", "401", "403", "500"}},
 	}
 	for path, methods := range expected {
 		pathItem, ok := paths[path].(map[string]any)

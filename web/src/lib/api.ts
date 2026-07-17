@@ -7,6 +7,12 @@ export class ApiError extends Error {
   }
 }
 
+export function authenticatedMediaURL(value: string): string {
+  const apiPrefix = "/api/v1";
+  if (!value.startsWith(apiPrefix + "/")) return value;
+  return `/api/proxy${value.slice(apiPrefix.length)}`;
+}
+
 export async function apiRequest<TResponse>(
   path: string,
   options: RequestInit = {},

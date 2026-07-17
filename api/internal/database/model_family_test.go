@@ -51,6 +51,13 @@ func TestModelFamilyAndVariantIdentityConstraints(t *testing.T) {
 	if err := db.Create(&models.ModelFamilyMember{PublicID: "33333333-3333-4333-8333-333333333333", ModelFamilyID: 2, SKUID: first.SKUID, AddedByID: 2, RemovedAt: &removedAt}).Error; err != nil {
 		t.Fatalf("removed family membership should remain auditable: %v", err)
 	}
+	bypass := "bypass"
+	if err := db.Create(&models.ModelFamilyMember{PublicID: "31313131-3131-4313-8313-313131313131", ModelFamilyID: 3, SKUID: first.SKUID, ActiveGuard: &bypass, AddedByID: 3}).Error; err == nil {
+		t.Fatal("active family membership accepted a guard value that bypasses uniqueness")
+	}
+	if err := db.Create(&models.ModelFamilyMember{PublicID: "32323232-3232-4323-8323-323232323232", ModelFamilyID: 3, SKUID: 102, ActiveGuard: &bypass, AddedByID: 3, RemovedAt: &removedAt}).Error; err == nil {
+		t.Fatal("removed family membership retained a non-null active guard")
+	}
 
 	draft := "draft"
 	version := models.VariantIdentityManifestVersion{PublicID: "44444444-4444-4444-8444-444444444444", VariantIdentityManifestID: 1, VersionNumber: 1, Status: models.VariantManifestDraft, DraftGuard: &draft, IdentityJSON: []byte(`{}`), CreatedByID: 1}
@@ -62,6 +69,12 @@ func TestModelFamilyAndVariantIdentityConstraints(t *testing.T) {
 	}
 	if err := db.Create(&models.VariantIdentityManifestVersion{PublicID: "66666666-6666-4666-8666-666666666666", VariantIdentityManifestID: 2, VersionNumber: 0, Status: models.VariantManifestPublished, IdentityJSON: []byte(`{}`), CreatedByID: 1}).Error; err == nil {
 		t.Fatal("manifest version number must be positive")
+	}
+	if err := db.Create(&models.VariantIdentityManifestVersion{PublicID: "67676767-6767-4676-8676-676767676767", VariantIdentityManifestID: 2, VersionNumber: 1, Status: models.VariantManifestDraft, DraftGuard: &bypass, IdentityJSON: []byte(`{}`), CreatedByID: 1}).Error; err == nil {
+		t.Fatal("draft manifest accepted a guard value that bypasses uniqueness")
+	}
+	if err := db.Create(&models.VariantIdentityManifestVersion{PublicID: "68686868-6868-4686-8686-686868686868", VariantIdentityManifestID: 3, VersionNumber: 1, Status: models.VariantManifestPublished, DraftGuard: &bypass, IdentityJSON: []byte(`{}`), CreatedByID: 1}).Error; err == nil {
+		t.Fatal("published manifest retained a non-null draft guard")
 	}
 
 	region := models.VariantDifferenceRegion{PublicID: "77777777-7777-4777-8777-777777777777", VariantIdentityManifestVersionID: version.ID, Key: "right_ports", DifferenceKind: models.DifferenceKindPorts, Strictness: models.DifferenceRegionExact, ShapeJSON: []byte(`{}`), ForbiddenInheritanceJSON: []byte(`[]`), RequiredViewKeysJSON: []byte(`["right_ports"]`)}
