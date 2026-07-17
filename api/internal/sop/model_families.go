@@ -88,7 +88,7 @@ func (s *ModelFamilyService) Update(ctx context.Context, publicID string, input 
 			}
 			return err
 		}
-		if result.Status == models.ModelFamilyArchived && (input.Brand != nil || input.NameZH != nil || input.NameEN != nil || input.ModelCode != nil || input.CommonStructure != nil || input.VariationDimensions != nil || (input.Status != nil && *input.Status != models.ModelFamilyArchived)) {
+		if result.Status == models.ModelFamilyArchived {
 			return ErrModelFamilyArchived
 		}
 		updates := map[string]any{}

@@ -121,6 +121,20 @@ func TestModelFamilyServiceValidatesSchemaAndArchivedMutation(t *testing.T) {
 	if _, err := service.Update(t.Context(), family.PublicID, UpdateModelFamilyInput{Status: &archived, UpdatedByID: 1}); err != nil {
 		t.Fatal(err)
 	}
+	var auditsBefore int64
+	if err := db.Model(&models.AIAuditEvent{}).Count(&auditsBefore).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Update(t.Context(), family.PublicID, UpdateModelFamilyInput{Status: &archived, UpdatedByID: 1}); !errors.Is(err, ErrModelFamilyArchived) {
+		t.Fatalf("repeat archive error = %v", err)
+	}
+	var auditsAfter int64
+	if err := db.Model(&models.AIAuditEvent{}).Count(&auditsAfter).Error; err != nil {
+		t.Fatal(err)
+	}
+	if auditsAfter != auditsBefore {
+		t.Fatalf("repeat archive wrote audit: before=%d after=%d", auditsBefore, auditsAfter)
+	}
 	if _, err := service.AddMember(t.Context(), family.PublicID, sku.PublicID, 1); !errors.Is(err, ErrModelFamilyArchived) {
 		t.Fatalf("error = %v", err)
 	}
