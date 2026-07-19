@@ -2,8 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowRight, LockKeyhole } from "lucide-react";
-import type { Route } from "next";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { Button } from "@/components/ui/button";
@@ -14,7 +13,6 @@ import { type LoginInput, loginSchema } from "@/lib/schemas";
 
 export function LoginForm() {
   const { t } = useLanguage();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(null);
   const form = useForm<LoginInput>({
@@ -40,7 +38,11 @@ export function LoginForm() {
       return;
     }
 
-    router.push((searchParams.get("next") ?? "/skus") as Route);
+    // A full navigation ensures the httpOnly session cookie written by the
+    // login route is visible to the middleware before it evaluates the
+    // protected destination. This matters behind HTTPS reverse proxies such
+    // as a Cloudflare development tunnel.
+    window.location.assign(searchParams.get("next") ?? "/skus");
   }
 
   return (
