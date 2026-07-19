@@ -28,6 +28,7 @@ type AIDependencies struct {
 	Templates        *ai.TemplateService
 	Jobs             *ai.JobService
 	TextResults      *ai.TextResultService
+	ImageResults     *ai.ImageResultService
 }
 
 func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
@@ -62,6 +63,9 @@ func newRouter(cfg config.Config, db *gorm.DB, deps AIDependencies) *gin.Engine 
 	}
 	if deps.TextResults == nil {
 		deps.TextResults = ai.NewTextResultService(db)
+	}
+	if deps.ImageResults == nil {
+		deps.ImageResults = ai.NewImageResultService(db)
 	}
 	server := &Server{cfg: cfg, db: db, storage: storage, ai: deps}
 	router := gin.New()
@@ -149,6 +153,8 @@ func registerAIRoutes(protected *gin.RouterGroup, server *Server) {
 	aiJobs.POST("/ai-jobs", server.createAIJob)
 	aiJobs.GET("/ai-jobs/:job_id", server.getAIJob)
 	aiJobs.GET("/ai-jobs/:job_id/text-results", server.listAITextResults)
+	aiJobs.GET("/ai-jobs/:job_id/image-results", server.listAIImageResults)
+	aiJobs.GET("/ai-jobs/:job_id/image-results/:result_id/media", server.aiImageResultMedia)
 	aiJobs.PATCH("/ai-jobs/:job_id/items/:item_id/text-results/:result_id", server.editAITextResult)
 	aiJobs.POST("/ai-jobs/:job_id/items/:item_id/text-results/:result_id/approve", server.approveAITextResult)
 	aiJobs.POST("/ai-jobs/:job_id/items/:item_id/text-results/:result_id/reject", server.rejectAITextResult)
@@ -171,7 +177,7 @@ func registerAIRoutes(protected *gin.RouterGroup, server *Server) {
 }
 
 func newAIDependencies(cfg config.Config, db *gorm.DB) (AIDependencies, error) {
-	deps := AIDependencies{Templates: ai.NewTemplateService(db), Jobs: ai.NewJobService(db), TextResults: ai.NewTextResultService(db)}
+	deps := AIDependencies{Templates: ai.NewTemplateService(db), Jobs: ai.NewJobService(db), TextResults: ai.NewTextResultService(db), ImageResults: ai.NewImageResultService(db)}
 	key, err := validateSecretsMasterKey(cfg)
 	if err != nil {
 		return AIDependencies{}, err

@@ -726,6 +726,28 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
+  /ai-jobs/{job_id}/image-results:
+    parameters: [ { $ref: '#/components/parameters/AIJobID' } ]
+    get:
+      operationId: listAIImageResults
+      responses:
+        '200': { description: Safe AI image candidates, content: { application/json: { schema: { type: object, additionalProperties: false, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/AIImageResult' } } } } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /ai-jobs/{job_id}/image-results/{result_id}/media:
+    parameters: [ { $ref: '#/components/parameters/AIJobID' }, { $ref: '#/components/parameters/AIImageResultID' } ]
+    get:
+      operationId: getAIImageResultMedia
+      responses:
+        '200': { description: Private generated image bytes, content: { image/png: { schema: { type: string, format: binary } }, image/jpeg: { schema: { type: string, format: binary } }, image/webp: { schema: { type: string, format: binary } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Generated-image storage unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
   /ai-jobs/{job_id}/items/{item_id}/text-results/{result_id}:
     parameters: [ { $ref: '#/components/parameters/AIJobID' }, { $ref: '#/components/parameters/AIJobItemID' }, { $ref: '#/components/parameters/AITextResultID' } ]
     patch:
@@ -817,6 +839,7 @@ components:
     AIJobID: { in: path, name: job_id, required: true, schema: { type: string, format: uuid } }
     AIJobItemID: { in: path, name: item_id, required: true, schema: { type: string, format: uuid } }
     AITextResultID: { in: path, name: result_id, required: true, schema: { type: string, format: uuid } }
+    AIImageResultID: { in: path, name: result_id, required: true, schema: { type: string, format: uuid } }
     SKUID: { in: path, name: sku_id, required: true, schema: { type: string, format: uuid } }
     AssetID: { in: path, name: asset_id, required: true, schema: { type: string, format: uuid } }
     IdempotencyKey: { in: header, name: Idempotency-Key, required: true, description: "Actor-scoped create key. Reusing it with the same normalized request returns the original job; different input returns 409.", schema: { type: string, minLength: 8, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$' } }
@@ -1099,6 +1122,20 @@ components:
         effective: { type: boolean }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    AIImageResult:
+      type: object
+      additionalProperties: false
+      required: [public_id, job_item_id, candidate_index, mime_type, width, height, byte_count, media_url, created_at]
+      properties:
+        public_id: { type: string, format: uuid }
+        job_item_id: { type: string, format: uuid }
+        candidate_index: { type: integer, minimum: 1 }
+        mime_type: { type: string }
+        width: { type: integer, minimum: 1 }
+        height: { type: integer, minimum: 1 }
+        byte_count: { type: integer, minimum: 1 }
+        media_url: { type: string, description: Authenticated private-media endpoint. }
+        created_at: { type: string, format: date-time }
     EditAITextResultRequest:
       type: object
       additionalProperties: false

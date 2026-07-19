@@ -126,6 +126,55 @@ func (s *Server) listAITextResults(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": values})
 }
 
+func (s *Server) listAIImageResults(c *gin.Context) {
+	if !requireAIUUIDParam(c, "job_id") {
+		return
+	}
+	values, err := s.ai.ImageResults.List(c.Request.Context(), c.Param("job_id"))
+	if err != nil {
+		respondAIError(c, err)
+		return
+	}
+	if values == nil {
+		values = []ai.ImageResultDocument{}
+	}
+	for index := range values {
+		values[index].MediaURL = "/api/v1/ai-jobs/" + c.Param("job_id") + "/image-results/" + values[index].PublicID + "/media"
+	}
+	c.JSON(http.StatusOK, gin.H{"data": values})
+}
+
+func (s *Server) aiImageResultMedia(c *gin.Context) {
+	if !requireAIUUIDParam(c, "job_id") || !requireAIUUIDParam(c, "result_id") {
+		return
+	}
+	result, err := s.ai.ImageResults.GetForJob(c.Request.Context(), c.Param("job_id"), c.Param("result_id"))
+	if errors.Is(err, ai.ErrImageResultNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "image result not found"})
+		return
+	}
+	if err != nil {
+		respondAIError(c, err)
+		return
+	}
+	reader, ok := s.storage.(interface {
+		ReadGenerated(context.Context, string) (ai.ImageInput, error)
+	})
+	if !ok {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "object_storage_unavailable", "message": "generated image storage is unavailable"})
+		return
+	}
+	source, err := reader.ReadGenerated(c.Request.Context(), result.ObjectKey)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "object_storage_unavailable", "message": "read generated image failed"})
+		return
+	}
+	c.Header("Cache-Control", "private, no-store")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("Content-Disposition", "inline")
+	c.Data(http.StatusOK, result.MIMEType, source.Bytes)
+}
+
 func (s *Server) editAITextResult(c *gin.Context) {
 	if !requireAITextResultParams(c) {
 		return

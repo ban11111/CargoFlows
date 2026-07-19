@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 
 import { TextResultWorkbench } from "@/components/ai/text-result-workbench";
+import { ImageResultGallery } from "@/components/ai/image-result-gallery";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -52,6 +53,8 @@ export default function AIJobDetailPage() {
     <Card><CardHeader><div className="flex items-center justify-between gap-3"><CardTitle>{t("aiJobProgress")}</CardTitle><span className="text-sm tabular-nums text-muted-foreground">{completed}/{job.items.length}</span></div></CardHeader><CardContent><div aria-label={`${progress}%`} aria-valuemax={100} aria-valuemin={0} aria-valuenow={progress} className="h-2 overflow-hidden rounded-full bg-muted" role="progressbar"><div className="h-full bg-primary transition-[width] motion-reduce:transition-none" style={{ width: `${progress}%` }} /></div><p aria-live="polite" className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">{active ? <><RefreshCw className="h-4 w-4 animate-spin motion-reduce:animate-none" />{t("activePolling")}</> : <><CheckCircle2 className="h-4 w-4 text-success" />{t("pollingStopped")}</>}</p></CardContent></Card>
 
     <TextResultWorkbench job={job} language={language} />
+
+    <ImageResultGallery jobID={job.public_id} language={language} />
 
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
       <section className="space-y-3" aria-labelledby="items-title"><div className="flex items-center gap-2"><Box className="h-4 w-4 text-primary" /><h2 className="font-semibold" id="items-title">{t("selectedItems")}</h2></div>{job.items.map((item) => <article className="rounded-lg border border-border bg-card p-4" key={item.public_id}><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-medium">{item.slot_snapshot.name[zh ? "zh" : "en"]}</h3><p className="mt-1 text-xs text-muted-foreground">{item.slot_key} · {item.kind}</p></div><Badge variant={statusVariant(item.status)}>{labels[item.status]}</Badge></div><dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3"><div><dt className="text-muted-foreground">{t("approvedAssets")}</dt><dd className="mt-1 font-medium tabular-nums">{item.selected_input_asset_ids.length}</dd></div><div><dt className="text-muted-foreground">{t("attemptCount")}</dt><dd className="mt-1 font-medium tabular-nums">{item.attempt_count}</dd></div><div><dt className="text-muted-foreground">{t("createdAt")}</dt><dd className="mt-1 font-medium">{formatDateTime(item.created_at)}</dd></div></dl>{item.safe_error ? <div className="mt-4 rounded-md border border-danger/30 bg-danger/5 px-3 py-2 text-sm text-danger" role="alert"><span className="font-medium">{t("safeError")}：</span>{item.safe_error}</div> : null}</article>)}</section>

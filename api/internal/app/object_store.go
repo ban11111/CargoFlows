@@ -149,6 +149,25 @@ func (s *objectStore) ReadSource(ctx context.Context, objectKey string) (ai.Imag
 	return ai.ImageInput{Bytes: value}, nil
 }
 
+func (s *objectStore) ReadGenerated(ctx context.Context, objectKey string) (ai.ImageInput, error) {
+	if err := s.ensureGeneratedBucket(ctx); err != nil {
+		return ai.ImageInput{}, err
+	}
+	object, err := s.internal.GetObject(ctx, s.aiBucket, objectKey, minio.GetObjectOptions{})
+	if err != nil {
+		return ai.ImageInput{}, err
+	}
+	defer object.Close()
+	value, err := io.ReadAll(io.LimitReader(object, 50<<20+1))
+	if err != nil {
+		return ai.ImageInput{}, err
+	}
+	if len(value) > 50<<20 {
+		return ai.ImageInput{}, fmt.Errorf("generated image exceeds byte limit")
+	}
+	return ai.ImageInput{Bytes: value}, nil
+}
+
 func (s *objectStore) promoteSource(ctx context.Context, temporaryKey, finalKey, mimeType string, value []byte) error {
 	if temporaryKey == finalKey || len(value) == 0 {
 		return fmt.Errorf("invalid source object promotion")

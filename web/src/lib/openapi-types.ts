@@ -817,6 +817,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ai-jobs/{job_id}/image-results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+            };
+            cookie?: never;
+        };
+        get: operations["listAIImageResults"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-jobs/{job_id}/image-results/{result_id}/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+                result_id: components["parameters"]["AIImageResultID"];
+            };
+            cookie?: never;
+        };
+        get: operations["getAIImageResultMedia"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ai-jobs/{job_id}/items/{item_id}/text-results/{result_id}": {
         parameters: {
             query?: never;
@@ -1217,6 +1254,21 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        AIImageResult: {
+            /** Format: uuid */
+            public_id: string;
+            /** Format: uuid */
+            job_item_id: string;
+            candidate_index: number;
+            mime_type: string;
+            width: number;
+            height: number;
+            byte_count: number;
+            /** @description Authenticated private-media endpoint. */
+            media_url: string;
+            /** Format: date-time */
+            created_at: string;
         };
         EditAITextResultRequest: {
             structured: {
@@ -1960,6 +2012,7 @@ export interface components {
         AIJobID: string;
         AIJobItemID: string;
         AITextResultID: string;
+        AIImageResultID: string;
         SKUID: string;
         AssetID: string;
         /** @description Actor-scoped create key. Reusing it with the same normalized request returns the original job; different input returns 409. */
@@ -3713,6 +3766,73 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalServerError"];
+        };
+    };
+    listAIImageResults: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Safe AI image candidates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AIImageResult"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    getAIImageResultMedia: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+                result_id: components["parameters"]["AIImageResultID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Private generated image bytes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                    "image/jpeg": string;
+                    "image/webp": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Generated-image storage unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     editAITextResult: {
