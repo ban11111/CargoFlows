@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 export type Language = "zh" | "en";
 
@@ -582,13 +582,18 @@ interface LanguageContextValue {
 const LanguageContext = createContext<LanguageContextValue | null>(null);
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [language, setLanguageState] = useState<Language>(() => {
-    if (typeof window === "undefined") {
-      return "zh";
-    }
+  // Keep the server and the first client render identical. Reading localStorage
+  // during initialization can otherwise change server-rendered Chinese text to
+  // English before hydration, preventing React from attaching form handlers.
+  const [language, setLanguageState] = useState<Language>("zh");
+
+  useEffect(() => {
     const saved = window.localStorage.getItem(storageKey);
-    return saved === "zh" || saved === "en" ? saved : "zh";
-  });
+    if (saved === "zh" || saved === "en") {
+      const frame = window.requestAnimationFrame(() => setLanguageState(saved));
+      return () => window.cancelAnimationFrame(frame);
+    }
+  }, []);
 
   const value = useMemo<LanguageContextValue>(() => {
     return {

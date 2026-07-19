@@ -14,6 +14,7 @@ import { type LoginInput, loginSchema } from "@/lib/schemas";
 export function LoginForm() {
   const { t } = useLanguage();
   const searchParams = useSearchParams();
+  const nextPath = searchParams.get("next") ?? "/skus";
   const [error, setError] = useState<string | null>(null);
   const form = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
@@ -42,7 +43,7 @@ export function LoginForm() {
     // login route is visible to the middleware before it evaluates the
     // protected destination. This matters behind HTTPS reverse proxies such
     // as a Cloudflare development tunnel.
-    window.location.assign(searchParams.get("next") ?? "/skus");
+    window.location.assign(nextPath);
   }
 
   return (
@@ -50,7 +51,7 @@ export function LoginForm() {
       <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
         <LockKeyhole className="h-5 w-5" />
       </div>
-      <form className="space-y-4" onSubmit={form.handleSubmit(onSubmit)}>
+      <form action={`/api/auth/login?next=${encodeURIComponent(nextPath)}`} className="space-y-4" method="post" onSubmit={form.handleSubmit(onSubmit)}>
         <div className="space-y-2">
           <Label htmlFor="email">{t("email")}</Label>
           <Input id="email" type="email" autoComplete="email" {...form.register("email")} />

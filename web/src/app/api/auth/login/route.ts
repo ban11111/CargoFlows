@@ -3,8 +3,24 @@ import { NextResponse, type NextRequest } from "next/server";
 
 const API_BASE_URL = process.env.API_BASE_URL ?? "http://localhost:8080";
 
+function browserOrigin(request: NextRequest): URL {
+  const candidate = request.headers.get("origin") ?? request.headers.get("referer");
+  if (candidate) {
+    try {
+      return new URL(candidate);
+    } catch {
+      // Fall back to Next's request URL for non-browser clients.
+    }
+  }
+  return request.nextUrl;
+}
+
 export async function POST(request: NextRequest) {
-  const payload = await request.json();
+  const contentType = request.headers.get("content-type") ?? "";
+  const formSubmission = contentType.includes("application/x-www-form-urlencoded");
+  const payload = formSubmission
+    ? Object.fromEntries((await request.formData()).entries())
+    : await request.json();
 
   const upstream = await fetch(`${API_BASE_URL}/api/v1/auth/login`, {
     method: "POST",
@@ -27,17 +43,25 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ message: "Login response did not include a token." }, { status: 502 });
   }
 
-  const cookieStore = await cookies();
-  cookieStore.set("cargo_flow_token", token, {
+  const cookie = {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: 60 * 60 * 24 * 7,
-  });
+  } as const;
+
+  if (formSubmission) {
+    const target = new URL(request.nextUrl.searchParams.get("next") ?? "/skus", browserOrigin(request));
+    const response = NextResponse.redirect(target, 303);
+    response.cookies.set("cargo_flow_token", token, cookie);
+    return response;
+  }
+
+  const cookieStore = await cookies();
+  cookieStore.set("cargo_flow_token", token, cookie);
 
   return NextResponse.json({
     user: body.user ?? null,
   });
 }
-
