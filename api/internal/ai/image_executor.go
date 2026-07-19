@@ -156,7 +156,7 @@ func (e *ImageExecutor) prepare(ctx context.Context, leased LeasedItem) (prepare
 			return invalidExecutionInput("image item requires selected assets")
 		}
 		var assets []models.Asset
-		if err := tx.Where("public_id IN ? AND sku_id = ? AND review_status = ?", ids, job.SKUID, "approved").Find(&assets).Error; err != nil || len(assets) != len(ids) {
+		if err := tx.Where("public_id IN ? AND sk_uid = ? AND review_status = ?", ids, job.SKUID, "approved").Find(&assets).Error; err != nil || len(assets) != len(ids) {
 			return invalidExecutionInput("selected source asset is unavailable")
 		}
 		byID := make(map[string]models.Asset, len(assets))
@@ -240,6 +240,13 @@ func (e *ImageExecutor) persistResult(ctx context.Context, p preparedImageExecut
 		now := e.clock.Now()
 		if err := tx.Model(&execution).Updates(map[string]any{"status": models.AIExecutionCompleted, "open_ai_response_id": response.ResponseID, "open_ai_request_id": response.RequestID, "model": response.Model, "input_text_tokens": response.Usage.InputTextTokens, "input_image_tokens": response.Usage.InputImageTokens, "output_text_tokens": response.Usage.OutputTextTokens, "output_image_tokens": response.Usage.OutputImageTokens, "total_tokens": response.Usage.TotalTokens, "completed_at": now, "safe_error": ""}).Error; err != nil {
 			return err
+		}
+		// A successfully persisted image proves that the credential can use the
+		// configured image tool; keep the settings UI as an operational signal.
+		if execution.OpenAIProviderSettingID != nil {
+			if err := tx.Model(&models.OpenAIProviderSetting{}).Where("id = ?", *execution.OpenAIProviderSettingID).Update("image_capability_verified_at", now).Error; err != nil {
+				return err
+			}
 		}
 		if err := tx.Create(&models.AIUsageLedger{AIExecutionID: execution.ID, Model: response.Model, InputTextTokens: response.Usage.InputTextTokens, InputImageTokens: response.Usage.InputImageTokens, OutputTextTokens: response.Usage.OutputTextTokens, OutputImageTokens: response.Usage.OutputImageTokens, TotalTokens: response.Usage.TotalTokens, Currency: "USD", OpenAIRequestID: response.RequestID}).Error; err != nil {
 			return err
