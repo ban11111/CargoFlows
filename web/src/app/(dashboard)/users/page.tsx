@@ -47,8 +47,9 @@ export default function UsersPage() {
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
         <div>
-          <h1 className="text-2xl font-semibold">{t("usersAndRoles")}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{t("usersDesc")}</p>
+          <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">CargoFlow · Access</p>
+          <h1 className="text-3xl font-bold tracking-tight text-navy sm:text-4xl">{t("usersAndRoles")}</h1>
+          <p className="mt-2 text-sm text-muted-foreground">{t("usersDesc")}</p>
         </div>
         <Button>
           <UserPlus className="h-4 w-4" />

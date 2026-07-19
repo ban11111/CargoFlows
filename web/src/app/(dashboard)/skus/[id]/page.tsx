@@ -94,7 +94,7 @@ export default function SkuDetailPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-2"><Button asChild aria-label={language === "zh" ? "返回 SKU 列表" : "Back to SKUs"} size="icon" variant="ghost"><Link href="/skus"><ArrowLeft className="h-4 w-4" /></Link></Button><div><h1 className="text-2xl font-semibold">{sku.product.name}</h1><p className="mt-1 text-sm text-muted-foreground">{sku.code}</p></div></div>
+        <div className="flex items-start gap-3"><Button asChild aria-label={language === "zh" ? "返回 SKU 列表" : "Back to SKUs"} size="icon" variant="secondary"><Link href="/skus"><ArrowLeft className="h-4 w-4" /></Link></Button><div><p className="mb-1 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">CargoFlow · SKU detail</p><h1 className="text-3xl font-bold tracking-tight text-navy sm:text-4xl">{sku.product.name}</h1><p className="mt-1 font-mono text-xs text-muted-foreground">{sku.code}</p></div></div>
         <div className="flex flex-wrap gap-2"><Button onClick={() => setEditing((current) => !current)} variant="secondary"><Pencil className="h-4 w-4" />{language === "zh" ? "编辑资料" : "Edit details"}</Button><Button disabled={remove.isPending} onClick={() => { if (window.confirm(language === "zh" ? "删除这个 SKU？已有业务记录时系统会拒绝删除。" : "Delete this SKU? The system will refuse if it has business history.")) remove.mutate(); }} variant="danger"><Trash2 className="h-4 w-4" />{language === "zh" ? "删除 SKU" : "Delete SKU"}</Button></div>
       </div>
 
@@ -103,7 +103,7 @@ export default function SkuDetailPage() {
       {editing ? <section className="rounded-lg border border-primary/30 bg-card p-5"><h2 className="mb-4 text-sm font-semibold">{language === "zh" ? "编辑 SKU 资料" : "Edit SKU details"}</h2><SKUForm busy={update.isPending} initial={skuFormValue(sku)} mode="edit" onCancel={() => setEditing(false)} onSubmit={(value) => update.mutate(value)} />{update.isError ? <p className="mt-4 text-sm text-danger" role="alert">{language === "zh" ? "保存失败，请检查填写内容。" : "Save failed. Check the entered values."}</p> : null}</section> : null}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
-        <section className="rounded-lg border border-border bg-card p-5">
+        <section className="rounded-xl border border-border bg-card p-5 shadow-[var(--shadow-sm)]">
           <h2 className="text-sm font-semibold">{t("productInfo")}</h2>
           <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
             <Field label={t("category")} value={categoryLabel(sku.product.category_record ?? { name: sku.product.category }, language)} />
@@ -115,7 +115,7 @@ export default function SkuDetailPage() {
           </dl>
         </section>
 
-        <section className="rounded-lg border border-border bg-card p-5">
+        <section className="rounded-xl border border-border bg-card p-5 shadow-[var(--shadow-sm)]">
           <div className="flex items-center gap-2">
             <Tag className="h-4 w-4 text-primary" />
             <h2 className="text-sm font-semibold">{t("skuTags")}</h2>

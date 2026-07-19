@@ -4,8 +4,11 @@ import { LanguageProvider } from "@/lib/i18n";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "CargoFlow Admin",
-  description: "SKU, inventory, SOP photo, and asset review management console.",
+  title: {
+    default: "CargoFlow · Operations Control",
+    template: "%s · CargoFlow",
+  },
+  description: "Catalog, inventory, capture SOP, asset review, and AI content operations in one flow.",
 };
 
 export default function RootLayout({

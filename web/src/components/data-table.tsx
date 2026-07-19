@@ -44,9 +44,9 @@ export function DataTable<TData>({
   });
 
   return (
-    <div className="space-y-3">
-      <div className="relative max-w-sm">
-        <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+    <div className="space-y-4">
+      <div className="relative max-w-md">
+        <Search className="pointer-events-none absolute left-3.5 top-3.5 h-4 w-4 text-muted-foreground" />
         <Input
           className="pl-9"
           placeholder={searchPlaceholder ?? t("search")}
@@ -54,7 +54,7 @@ export function DataTable<TData>({
           onChange={(event) => setGlobalFilter(event.target.value)}
         />
       </div>
-      <div className="overflow-hidden rounded-lg border border-border bg-card">
+      <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-[0_1px_2px_rgba(18,34,53,0.03)]">
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (

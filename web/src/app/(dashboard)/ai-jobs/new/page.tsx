@@ -135,10 +135,10 @@ export default function NewAIJobPage() {
     <div className="mx-auto max-w-5xl space-y-6">
       <div className="flex items-start gap-3">
         <Button asChild aria-label={t("backToAIJobs")} className="min-h-11 min-w-11" size="icon" variant="ghost"><Link href="/ai-jobs"><ArrowLeft className="h-4 w-4" /></Link></Button>
-        <div><h1 className="text-2xl font-semibold">{t("aiJobWizardTitle")}</h1><p className="mt-1 text-sm text-muted-foreground">{t("aiJobWizardDesc")}</p></div>
+        <div><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">CargoFlow · New route</p><h1 className="text-3xl font-bold tracking-tight text-navy sm:text-4xl">{t("aiJobWizardTitle")}</h1><p className="mt-2 text-sm text-muted-foreground">{t("aiJobWizardDesc")}</p></div>
       </div>
 
-      <nav aria-label={zh ? "任务创建进度" : "Job creation progress"} className="overflow-x-auto rounded-lg border border-border bg-card p-2">
+      <nav aria-label={zh ? "任务创建进度" : "Job creation progress"} className="overflow-x-auto rounded-xl border border-border bg-card p-2 shadow-[var(--shadow-sm)]">
         <ol className="grid min-w-[640px] grid-cols-5 gap-1">
           {steps.map((label, index) => { const number = index + 1; const complete = number < step; const current = number === step; return <li aria-current={current ? "step" : undefined} className={`flex min-h-14 items-center gap-2 rounded-md px-3 text-sm ${current ? "bg-primary text-primary-foreground" : complete ? "bg-primary/10 text-primary" : "text-muted-foreground"}`} key={label}><span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border ${current ? "border-white/50" : "border-current/30"}`}>{complete ? <Check className="h-4 w-4" /> : number}</span><span className="font-medium">{label}</span></li>; })}
         </ol>

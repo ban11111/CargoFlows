@@ -57,7 +57,7 @@ export default function SopTemplatesPage() {
 
   return <div className="space-y-5">
     <header className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-end sm:justify-between">
-      <div><h1 className="text-2xl font-semibold tracking-tight">{text.title}</h1><p className="mt-1 text-sm text-muted-foreground">{text.description}</p></div>
+      <div><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">CargoFlow · Capture standards</p><h1 className="text-3xl font-bold tracking-tight text-navy sm:text-4xl">{text.title}</h1><p className="mt-2 text-sm text-muted-foreground">{text.description}</p></div>
       <Button asChild className="min-h-11"><Link href="/sop-templates/new"><Plus className="h-4 w-4" />{text.create}</Link></Button>
     </header>
 

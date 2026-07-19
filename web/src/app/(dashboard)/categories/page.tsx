@@ -62,12 +62,13 @@ export default function CategoriesPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">{t("categoryManage")}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{t("categoryManageDesc")}</p>
+        <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">CargoFlow · Taxonomy</p>
+        <h1 className="text-3xl font-bold tracking-tight text-navy sm:text-4xl">{t("categoryManage")}</h1>
+        <p className="mt-2 text-sm text-muted-foreground">{t("categoryManageDesc")}</p>
       </div>
 
-      <form className="max-w-xl space-y-2" onSubmit={submitCategory}>
-        <div className="flex gap-2">
+      <form className="max-w-2xl space-y-2 rounded-xl border border-border bg-card p-4 shadow-[var(--shadow-sm)]" onSubmit={submitCategory}>
+        <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
         <Input
           aria-label={t("categoryNameZh")}
           onChange={(event) => setName(event.target.value)}
@@ -89,7 +90,8 @@ export default function CategoriesPage() {
       </form>
       {error ? <p className="text-sm text-danger">{error}</p> : null}
 
-      <div className="overflow-hidden rounded-lg border border-border bg-card">
+      <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-[var(--shadow-sm)]">
+        <div className="min-w-[620px]">
         <div className="grid grid-cols-[minmax(0,1fr)_90px_90px_104px] gap-3 border-b border-border px-4 py-3 text-xs font-medium text-muted-foreground">
           <span>{t("category")}</span>
           <span>{t("skuCount")}</span>
@@ -137,6 +139,7 @@ export default function CategoriesPage() {
             </div>
           </div>
         ))}
+        </div>
       </div>
     </div>
   );

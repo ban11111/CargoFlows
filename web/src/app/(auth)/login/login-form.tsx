@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowRight, LockKeyhole } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
@@ -48,26 +48,23 @@ export function LoginForm() {
 
   return (
     <div>
-      <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
-        <LockKeyhole className="h-5 w-5" />
-      </div>
       <form action={`/api/auth/login?next=${encodeURIComponent(nextPath)}`} className="space-y-4" method="post" onSubmit={form.handleSubmit(onSubmit)}>
         <div className="space-y-2">
           <Label htmlFor="email">{t("email")}</Label>
           <Input id="email" type="email" autoComplete="email" {...form.register("email")} />
           {form.formState.errors.email ? (
-            <p className="text-xs text-danger">{t("emailInvalid")}</p>
+            <p className="text-xs font-medium text-danger" role="alert">{t("emailInvalid")}</p>
           ) : null}
         </div>
         <div className="space-y-2">
           <Label htmlFor="password">{t("password")}</Label>
           <Input id="password" type="password" autoComplete="current-password" {...form.register("password")} />
           {form.formState.errors.password ? (
-            <p className="text-xs text-danger">{t("passwordInvalid")}</p>
+            <p className="text-xs font-medium text-danger" role="alert">{t("passwordInvalid")}</p>
           ) : null}
         </div>
-        {error ? <p className="text-sm text-danger">{error}</p> : null}
-        <Button className="w-full" disabled={form.formState.isSubmitting} type="submit">
+        {error ? <p className="rounded-lg border border-danger/25 bg-danger/5 p-3 text-sm font-medium text-danger" role="alert">{error}</p> : null}
+        <Button className="mt-2 w-full" disabled={form.formState.isSubmitting} type="submit">
           {form.formState.isSubmitting ? t("loggingIn") : t("login")}
           <ArrowRight className="h-4 w-4" />
         </Button>

@@ -85,7 +85,7 @@ export default function SkusPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div><h1 className="text-2xl font-semibold">{t("skuManage")}</h1><p className="mt-1 text-sm text-muted-foreground">{t("skuManageDesc")}</p></div>
+        <div><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">CargoFlow · Catalog</p><h1 className="text-3xl font-bold tracking-tight text-navy sm:text-4xl">{t("skuManage")}</h1><p className="mt-2 text-sm text-muted-foreground">{t("skuManageDesc")}</p></div>
         <Button asChild className="min-h-11"><Link href="/skus/new"><Plus className="h-4 w-4" />{t("newSku")}</Link></Button>
       </div>
       <div className="grid gap-3 md:grid-cols-3">
@@ -93,7 +93,7 @@ export default function SkusPage() {
         <Stat label={t("activeSku")} value={formatNumber(activeCount)} detail={t("activeSkuDesc")} />
         <Stat label={t("lowStock")} value={formatNumber(lowStockCount)} detail={t("lowStockDesc")} />
       </div>
-      <section className="rounded-lg border border-border bg-card p-4">
+      <section className="rounded-xl border border-border bg-card p-4 shadow-[var(--shadow-sm)] sm:p-5">
         <div className="flex flex-col gap-3 border-b border-border pb-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-2">
             <Box className="h-4 w-4 text-primary" />

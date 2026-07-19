@@ -105,19 +105,20 @@ export default function AssetReviewPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">{t("assetReview")}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{t("categoryHierarchyDesc")}</p>
+        <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">CargoFlow · Quality gate</p>
+        <h1 className="text-3xl font-bold tracking-tight text-navy sm:text-4xl">{t("assetReview")}</h1>
+        <p className="mt-2 text-sm text-muted-foreground">{t("categoryHierarchyDesc")}</p>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <section className="min-w-0 overflow-hidden rounded-lg border border-border bg-card">
+        <section className="min-w-0 overflow-hidden rounded-xl border border-border bg-card shadow-[var(--shadow-sm)]">
           <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
               <ImageUp className="h-4 w-4 text-primary" />
               <h2 className="text-sm font-semibold">{t("categoryHierarchy")}</h2>
             </div>
             <div className="relative w-full sm:max-w-xs">
-              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Search className="pointer-events-none absolute left-3.5 top-3.5 h-4 w-4 text-muted-foreground" />
               <Input className="pl-9" onChange={(event) => setQuery(event.target.value)} placeholder={t("searchAssets")} value={query} />
             </div>
           </div>
@@ -174,7 +175,7 @@ export default function AssetReviewPage() {
 
         <aside className="xl:sticky xl:top-20 xl:self-start">
           {selected ? (
-            <div className="overflow-hidden rounded-lg border border-border bg-card">
+            <div className="overflow-hidden rounded-xl border border-border bg-card shadow-[var(--shadow-md)]">
               <div className="border-b border-border p-4">
                 <p className="text-xs text-muted-foreground">{categoryLabel(selected.category, language)}</p>
                 <p className="mt-1 font-semibold">{selected.sku.code} · {viewName(selected.asset)}</p>
