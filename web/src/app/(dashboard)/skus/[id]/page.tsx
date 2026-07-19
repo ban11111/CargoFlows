@@ -1,9 +1,11 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Tag } from "lucide-react";
-import { useParams } from "next/navigation";
+import { ArrowLeft, Pencil, Tag, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
+import { SKUForm, type SKUFormValue } from "@/components/sku/sku-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,7 +39,9 @@ export default function SkuDetailPage() {
   const { language, t } = useLanguage();
   const queryClient = useQueryClient();
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const [tagDraft, setTagDraft] = useState<string>();
+  const [editing, setEditing] = useState(false);
   const skuQuery = useQuery({
     queryKey: ["skus", params.id],
     queryFn: () => apiRequest<SKUDetail>(`/skus/${params.id}`),
@@ -73,6 +77,8 @@ export default function SkuDetailPage() {
       ]);
     },
   });
+  const update = useMutation({ mutationFn: (value: SKUFormValue) => apiRequest<SKUDetail>(`/skus/${params.id}`, { method: "PATCH", body: JSON.stringify(value) }), onSuccess: async () => { setEditing(false); setTagDraft(undefined); await queryClient.invalidateQueries({ queryKey: ["skus"] }); } });
+  const remove = useMutation({ mutationFn: () => apiRequest<void>(`/skus/${params.id}`, { method: "DELETE" }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["skus"] }); router.push("/skus"); } });
 
   const sku = skuQuery.data;
   if (skuQuery.isLoading || !sku) {
@@ -87,10 +93,14 @@ export default function SkuDetailPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">{sku.product.name}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{sku.code}</p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-2"><Button asChild aria-label={language === "zh" ? "返回 SKU 列表" : "Back to SKUs"} size="icon" variant="ghost"><Link href="/skus"><ArrowLeft className="h-4 w-4" /></Link></Button><div><h1 className="text-2xl font-semibold">{sku.product.name}</h1><p className="mt-1 text-sm text-muted-foreground">{sku.code}</p></div></div>
+        <div className="flex flex-wrap gap-2"><Button onClick={() => setEditing((current) => !current)} variant="secondary"><Pencil className="h-4 w-4" />{language === "zh" ? "编辑资料" : "Edit details"}</Button><Button disabled={remove.isPending} onClick={() => { if (window.confirm(language === "zh" ? "删除这个 SKU？已有业务记录时系统会拒绝删除。" : "Delete this SKU? The system will refuse if it has business history.")) remove.mutate(); }} variant="danger"><Trash2 className="h-4 w-4" />{language === "zh" ? "删除 SKU" : "Delete SKU"}</Button></div>
       </div>
+
+      {remove.isError ? <p className="rounded-md border border-danger/30 bg-danger/5 p-3 text-sm text-danger" role="alert">{language === "zh" ? "无法删除：该 SKU 已有库存、素材、型号组、AI 任务或正式内容记录。请将状态改为停用。" : "Cannot delete: this SKU has inventory, media, model-family, AI-job, or published-content history. Disable it instead."}</p> : null}
+
+      {editing ? <section className="rounded-lg border border-primary/30 bg-card p-5"><h2 className="mb-4 text-sm font-semibold">{language === "zh" ? "编辑 SKU 资料" : "Edit SKU details"}</h2><SKUForm busy={update.isPending} initial={skuFormValue(sku)} mode="edit" onCancel={() => setEditing(false)} onSubmit={(value) => update.mutate(value)} />{update.isError ? <p className="mt-4 text-sm text-danger" role="alert">{language === "zh" ? "保存失败，请检查填写内容。" : "Save failed. Check the entered values."}</p> : null}</section> : null}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
         <section className="rounded-lg border border-border bg-card p-5">
@@ -135,6 +145,8 @@ export default function SkuDetailPage() {
     </div>
   );
 }
+
+function skuFormValue(sku: SKUDetail): SKUFormValue { return { category_id: sku.product.category_id, product_name: sku.product.name, brand: sku.product.brand, category: sku.product.category, code: sku.code, color: sku.color, size: sku.size, barcode: sku.barcode, stock: sku.stock, low_stock_threshold: sku.low_stock_threshold, platform_title: sku.platform_title, selling_points: sku.selling_points, status: sku.status, tags: sku.tags.map((tag) => tag.name) }; }
 
 function Field({ label, value }: { label: string; value: string }) {
   return (

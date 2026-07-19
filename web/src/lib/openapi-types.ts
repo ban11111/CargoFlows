@@ -32,7 +32,8 @@ export interface paths {
         get: operations["getSKU"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** @description Deletes an unreferenced SKU. SKU records with inventory, media, model-family, AI, or published-content history must be disabled instead. */
+        delete: operations["deleteSKU"];
         options?: never;
         head?: never;
         patch: operations["updateSKU"];
@@ -1091,7 +1092,7 @@ export interface components {
             platform_title?: string;
             selling_points?: string;
             /** @enum {string} */
-            status?: "active" | "inactive";
+            status?: "active" | "draft" | "disabled";
             tags?: string[];
         };
         SKUCategory: {
@@ -2111,6 +2112,39 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    deleteSKU: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sku_id: components["parameters"]["SKUID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SKU deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            /** @description SKU is referenced by business history */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             500: components["responses"]["InternalServerError"];
         };
     };

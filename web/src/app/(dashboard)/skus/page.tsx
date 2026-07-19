@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { AlertTriangle, Box, Tags } from "lucide-react";
+import { AlertTriangle, Box, Plus, Tags } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { DataTable } from "@/components/data-table";
@@ -84,9 +84,9 @@ export default function SkusPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">{t("skuManage")}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{t("skuManageDesc")}</p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div><h1 className="text-2xl font-semibold">{t("skuManage")}</h1><p className="mt-1 text-sm text-muted-foreground">{t("skuManageDesc")}</p></div>
+        <Button asChild className="min-h-11"><Link href="/skus/new"><Plus className="h-4 w-4" />{t("newSku")}</Link></Button>
       </div>
       <div className="grid gap-3 md:grid-cols-3">
         <Stat label={t("skuTotal")} value={formatNumber(skus.length)} detail={t("skuTotalDesc")} />

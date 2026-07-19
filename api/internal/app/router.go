@@ -91,6 +91,7 @@ func registerExistingRoutes(protected *gin.RouterGroup, server *Server) {
 	protected.POST("/skus", server.createSKU)
 	protected.GET("/skus/:sku_id", server.getSKU)
 	protected.PATCH("/skus/:sku_id", server.updateSKU)
+	protected.DELETE("/skus/:sku_id", server.deleteSKU)
 	protected.POST("/skus/:sku_id/inventory-adjustments", server.createInventoryAdjustment)
 	protected.GET("/skus/:sku_id/inventory-history", server.listInventoryHistory)
 	protected.GET("/skus/:sku_id/variant-identity", server.getSKUVariantIdentity)

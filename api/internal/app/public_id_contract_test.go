@@ -70,6 +70,29 @@ func TestSKURoutesUsePublicUUIDAndSafeDTOs(t *testing.T) {
 	if !strings.Contains(adjustment.Body.String(), `"sku_id":"`+sku.PublicID+`"`) {
 		t.Fatalf("inventory DTO missing public SKU UUID: %s", adjustment.Body.String())
 	}
+
+	inUse := performSKUHandlerRequest(t, server.deleteSKU, http.MethodDelete, "/skus/"+sku.PublicID, sku.PublicID, "")
+	if inUse.Code != http.StatusConflict || !strings.Contains(inUse.Body.String(), `"code":"sku_in_use"`) {
+		t.Fatalf("referenced SKU delete = %d %s", inUse.Code, inUse.Body.String())
+	}
+	deletableProduct := models.Product{CategoryID: category.ID, Name: "Disposable product", Category: category.Name}
+	if err := db.Create(&deletableProduct).Error; err != nil {
+		t.Fatal(err)
+	}
+	deletable := models.SKU{ProductID: deletableProduct.ID, Code: "DELETE-ME", Status: "draft"}
+	if err := db.Create(&deletable).Error; err != nil {
+		t.Fatal(err)
+	}
+	deleted := performSKUHandlerRequest(t, server.deleteSKU, http.MethodDelete, "/skus/"+deletable.PublicID, deletable.PublicID, "")
+	if deleted.Code != http.StatusNoContent {
+		t.Fatalf("unreferenced SKU delete = %d %s", deleted.Code, deleted.Body.String())
+	}
+	var skuCount, productCount int64
+	db.Model(&models.SKU{}).Where("id = ?", deletable.ID).Count(&skuCount)
+	db.Model(&models.Product{}).Where("id = ?", deletableProduct.ID).Count(&productCount)
+	if skuCount != 0 || productCount != 0 {
+		t.Fatalf("delete left SKU/product rows: sku=%d product=%d", skuCount, productCount)
+	}
 }
 
 func TestAssetMediaRequiresAuthenticationAndSetsSafeHeaders(t *testing.T) {

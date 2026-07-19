@@ -271,6 +271,62 @@ func (s *Server) updateSKU(c *gin.Context) {
 	c.JSON(http.StatusOK, skuDTOFromModel(sku))
 }
 
+func (s *Server) deleteSKU(c *gin.Context) {
+	publicID, ok := requireSKUPublicID(c)
+	if !ok {
+		return
+	}
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var sku models.SKU
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("public_id = ?", publicID).First(&sku).Error; err != nil {
+			return err
+		}
+		for _, reference := range []struct{ table, column string }{
+			{"inventory_adjustments", "sk_uid"}, {"photo_sessions", "sk_uid"}, {"assets", "sk_uid"},
+			{"model_family_members", "sk_uid"}, {"variant_identity_manifests", "sk_uid"}, {"ai_jobs", "sk_uid"},
+			{"sku_platform_contents", "sku_id"},
+		} {
+			var count int64
+			if err := tx.Table(reference.table).Where(reference.column+" = ?", sku.ID).Count(&count).Error; err != nil {
+				return err
+			}
+			if count != 0 {
+				return errSKUInUse
+			}
+		}
+		if err := tx.Model(&sku).Association("Tags").Clear(); err != nil {
+			return err
+		}
+		if err := tx.Delete(&sku).Error; err != nil {
+			return err
+		}
+		var siblingCount int64
+		if err := tx.Model(&models.SKU{}).Where("product_id = ?", sku.ProductID).Count(&siblingCount).Error; err != nil {
+			return err
+		}
+		if siblingCount == 0 {
+			return tx.Delete(&models.Product{}, sku.ProductID).Error
+		}
+		return nil
+	})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "sku not found"})
+		return
+	}
+	if errors.Is(err, errSKUInUse) {
+		c.JSON(http.StatusConflict, gin.H{"code": "sku_in_use", "message": "SKU has inventory, media, model-family, AI, or published-content history; disable it instead"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "delete sku failed"})
+		return
+	}
+	c.Status(http.StatusNoContent)
+	c.Writer.WriteHeaderNow()
+}
+
+var errSKUInUse = errors.New("SKU is referenced by business history")
+
 type inventoryAdjustmentRequest struct {
 	QuantityDelta int    `json:"quantity_delta" binding:"required"`
 	Reason        string `json:"reason" binding:"required"`
