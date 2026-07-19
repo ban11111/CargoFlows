@@ -20,6 +20,7 @@ coverage.out
 **/xcuserdata/
 *.xcuserstate
 DerivedData/
+ios/build/
 .build/
 *.dSYM
 *.dSYM.zip

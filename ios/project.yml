@@ -16,12 +16,27 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.cargoflow.app
         INFOPLIST_FILE: CargoFlow/Info.plist
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: XDUSZQ42JP
+        CARGOFLOW_API_BASE_URL: "https://dev.cargoflows.cc/api/proxy/"
     info:
       path: CargoFlow/Info.plist
       properties:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         NSCameraUsageDescription: CargoFlow needs camera access to capture required product views.
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+          - UIInterfaceOrientationPortraitUpsideDown
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        CargoFlowAPIBaseURL: $(CARGOFLOW_API_BASE_URL)
   CargoFlowTests:
     type: bundle.unit-test
     platform: iOS

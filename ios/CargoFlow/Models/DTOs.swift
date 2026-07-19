@@ -22,8 +22,8 @@ struct User: Identifiable, Decodable {
     let status: String
 }
 
-struct Product: Identifiable, Decodable {
-    let id: Int
+struct Product: Decodable {
+    let categoryID: Int
     let name: String
     let brand: String
     let category: String
@@ -31,7 +31,8 @@ struct Product: Identifiable, Decodable {
     let catalogCategory: CatalogCategory?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, brand, category, description
+        case name, brand, category, description
+        case categoryID = "category_id"
         case catalogCategory = "category_record"
     }
 
@@ -55,14 +56,14 @@ struct CatalogCategory: Identifiable, Decodable {
     }
 }
 
-struct SKUtag: Identifiable, Decodable {
-    let id: Int
+struct SKUTag: Identifiable, Decodable {
     let name: String
+    var id: String { name }
 }
 
 struct SKU: Identifiable, Decodable {
-    let id: Int
-    let productID: Int
+    let publicID: String
+    var id: String { publicID }
     let code: String
     let color: String
     let size: String
@@ -73,11 +74,10 @@ struct SKU: Identifiable, Decodable {
     let sellingPoints: String?
     let status: String
     let product: Product
-    let tags: [SKUtag]
+    let tags: [SKUTag]
 
     enum CodingKeys: String, CodingKey {
-        case id
-        case productID = "product_id"
+        case publicID = "public_id"
         case code, color, size, barcode, stock
         case lowStockThreshold = "low_stock_threshold"
         case platformTitle = "platform_title"
@@ -91,18 +91,19 @@ struct SKU: Identifiable, Decodable {
 }
 
 struct InventoryAdjustment: Identifiable, Decodable {
-    let id: Int
-    let skuID: Int
+    let skuID: String
     let quantityDelta: Int
     let reason: String
     let note: String?
+    let operatorName: String
     let createdAt: Date
+    var id: String { "\(skuID)-\(createdAt.timeIntervalSince1970)" }
 
     enum CodingKeys: String, CodingKey {
-        case id
         case skuID = "sku_id"
         case quantityDelta = "quantity_delta"
         case reason, note
+        case operatorName = "operator_name"
         case createdAt = "created_at"
     }
 }
@@ -306,7 +307,7 @@ struct CaptureSOPSummary: Identifiable, Decodable {
 }
 
 struct PhotoSessionRequest: Encodable {
-    let skuID: Int
+    let skuID: String
     let sopVersionID: String
 
     enum CodingKeys: String, CodingKey {
@@ -319,7 +320,7 @@ struct PhotoSession: Identifiable, Decodable {
     let publicID: String
     var id: String { publicID }
     let code: String
-    let skuID: Int
+    let skuID: String
     let sopVersionID: String
     let status: String
     let createdAt: Date
@@ -351,8 +352,6 @@ struct UploadURLRequest: Encodable {
 struct UploadURLResponse: Decodable {
     let method: String
     let uploadURL: String
-    let assetURL: String
-    let objectKey: String
     let completionToken: String
     let expiresIn: Int
     let headers: [String: String]
@@ -360,8 +359,6 @@ struct UploadURLResponse: Decodable {
     enum CodingKeys: String, CodingKey {
         case method
         case uploadURL = "upload_url"
-        case assetURL = "asset_url"
-        case objectKey = "object_key"
         case completionToken = "completion_token"
         case expiresIn = "expires_in"
         case headers
@@ -383,24 +380,20 @@ struct CompleteAssetRequest: Encodable {
 }
 
 struct AssetReceipt: Decodable {
-    let id: Int
-    let skuID: Int
+    let publicID: String
+    let skuID: String
     let photoSessionID: String
     let sopViewID: String
-    let objectKey: String
-    let originalURL: String
-    let thumbnailURL: String
+    let mediaURL: String
     let reviewStatus: String
     let capturedAt: Date
 
     enum CodingKeys: String, CodingKey {
-        case id
+        case publicID = "public_id"
         case skuID = "sku_id"
         case photoSessionID = "photo_session_id"
         case sopViewID = "sop_view_id"
-        case objectKey = "object_key"
-        case originalURL = "original_url"
-        case thumbnailURL = "thumbnail_url"
+        case mediaURL = "media_url"
         case reviewStatus = "review_status"
         case capturedAt = "captured_at"
     }

@@ -7,6 +7,39 @@ func requiredViewsComplete(views: [SOPView], capturedViewIDs: Set<String>) -> Bo
     views.filter(\.required).allSatisfy { capturedViewIDs.contains($0.id) }
 }
 
+func captureUploadJPEGData(
+    from image: UIImage,
+    maxPixelDimension: CGFloat = 4_096,
+    compressionQuality: CGFloat = 0.82
+) -> Data? {
+    guard maxPixelDimension > 0,
+          compressionQuality >= 0,
+          compressionQuality <= 1 else { return nil }
+
+    let sourcePixelSize = CGSize(
+        width: image.size.width * image.scale,
+        height: image.size.height * image.scale
+    )
+    let sourceMaxDimension = max(sourcePixelSize.width, sourcePixelSize.height)
+    guard sourceMaxDimension > 0 else { return nil }
+    guard sourceMaxDimension > maxPixelDimension else {
+        return image.jpegData(compressionQuality: compressionQuality)
+    }
+
+    let resizeScale = maxPixelDimension / sourceMaxDimension
+    let targetSize = CGSize(
+        width: max(1, floor(sourcePixelSize.width * resizeScale)),
+        height: max(1, floor(sourcePixelSize.height * resizeScale))
+    )
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = 1
+    format.opaque = true
+    let resizedImage = UIGraphicsImageRenderer(size: targetSize, format: format).image { _ in
+        image.draw(in: CGRect(origin: .zero, size: targetSize))
+    }
+    return resizedImage.jpegData(compressionQuality: compressionQuality)
+}
+
 struct SOPVersionCandidate: Identifiable {
     let id: String
     let sopID: String
@@ -571,7 +604,7 @@ struct SOPCaptureView: View {
     @MainActor
     private func upload(_ image: UIImage, for view: SOPView) async {
         guard captureState.version?.views.contains(where: { $0.id == view.id }) == true,
-              let imageData = image.jpegData(compressionQuality: 0.82) else {
+              let imageData = captureUploadJPEGData(from: image) else {
             operationFailure = .upload
             return
         }
@@ -595,7 +628,6 @@ struct SOPCaptureView: View {
             let fileName = "view-\(view.id)-\(UUID().uuidString).jpg"
             _ = try await APIClient.shared.uploadImage(
                 imageData,
-                skuID: sku.id,
                 sopViewID: view.id,
                 photoSessionID: session.id,
                 fileName: fileName

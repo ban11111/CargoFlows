@@ -1,11 +1,11 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
-const PUBLIC_PATHS = ["/login"];
+const PUBLIC_PREFIXES = ["/login", "/downloads/"];
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const isPublic = PUBLIC_PATHS.some((path) => pathname.startsWith(path));
+  const isPublic = pathname === "/" || PUBLIC_PREFIXES.some((path) => pathname.startsWith(path));
   const hasToken = Boolean(request.cookies.get("cargo_flow_token")?.value);
 
   if (!hasToken && !isPublic) {
@@ -27,4 +27,3 @@ export function proxy(request: NextRequest) {
 export const config = {
   matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
 };
-

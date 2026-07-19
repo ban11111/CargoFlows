@@ -28,11 +28,25 @@ final class APIClient {
     }()
 
     init(
-        baseURL: URL = URL(string: "http://127.0.0.1:8080/api/v1/")!,
+        baseURL: URL = APIClient.configuredBaseURL(),
         session: URLSession = .shared
     ) {
         self.baseURL = baseURL
         self.session = session
+    }
+
+    private static func configuredBaseURL(bundle: Bundle = .main) -> URL {
+        if let configuredValue = bundle.object(forInfoDictionaryKey: "CargoFlowAPIBaseURL") as? String {
+            let normalizedValue = configuredValue.hasSuffix("/") ? configuredValue : "\(configuredValue)/"
+            if let configuredURL = URL(string: normalizedValue),
+               let scheme = configuredURL.scheme,
+               ["http", "https"].contains(scheme),
+               configuredURL.host != nil {
+                return configuredURL
+            }
+        }
+
+        return URL(string: "http://127.0.0.1:8080/api/v1/")!
     }
 
     func login(email: String, password: String) async throws -> LoginResponse {
@@ -43,11 +57,11 @@ final class APIClient {
         try await request("skus")
     }
 
-    func getSKU(id: Int) async throws -> SKU {
+    func getSKU(id: String) async throws -> SKU {
         try await request("skus/\(id)")
     }
 
-    func adjustInventory(skuID: Int, quantityDelta: Int, reason: String, note: String?) async throws -> InventoryAdjustment {
+    func adjustInventory(skuID: String, quantityDelta: Int, reason: String, note: String?) async throws -> InventoryAdjustment {
         let body = InventoryAdjustmentRequest(quantityDelta: quantityDelta, reason: reason, note: note)
         return try await request("skus/\(skuID)/inventory-adjustments", method: "POST", body: body)
     }
@@ -60,18 +74,16 @@ final class APIClient {
         try await request("sop-versions/\(encodedPathSegment(id))")
     }
 
-    func createPhotoSession(skuID: Int, sopVersionID: String) async throws -> PhotoSession {
+    func createPhotoSession(skuID: String, sopVersionID: String) async throws -> PhotoSession {
         try await request("photo-sessions", method: "POST", body: PhotoSessionRequest(skuID: skuID, sopVersionID: sopVersionID))
     }
 
     func uploadImage(
         _ imageData: Data,
-        skuID: Int,
         sopViewID: String,
         photoSessionID: String,
         fileName: String
     ) async throws -> AssetReceipt {
-        _ = skuID
         let ticket: UploadURLResponse = try await request(
             "assets/upload-url",
             method: "POST",

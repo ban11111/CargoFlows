@@ -2,6 +2,17 @@ import XCTest
 @testable import CargoFlow
 
 final class SOPDTOTests: XCTestCase {
+    func testDecodesCurrentPublicSKUPayload() throws {
+        let data = Data(#"{"public_id":"11111111-1111-1111-1111-111111111111","code":"CF-001","color":"Navy","size":"M","barcode":"123","stock":8,"low_stock_threshold":3,"platform_title":"CargoFlow Case","selling_points":"Durable","status":"active","created_at":"2026-07-16T00:00:00Z","updated_at":"2026-07-16T00:00:00Z","product":{"category_id":42,"name":"Travel Case","brand":"CargoFlow","category":"Cases","description":"A case","category_record":{"id":42,"name":"箱包","name_en":"Cases","is_system":true,"created_at":"2026-07-16T00:00:00Z","updated_at":"2026-07-16T00:00:00Z"}},"tags":[{"name":"featured"}]}"#.utf8)
+
+        let sku = try JSONDecoder().decode(SKU.self, from: data)
+
+        XCTAssertEqual(sku.id, "11111111-1111-1111-1111-111111111111")
+        XCTAssertEqual(sku.product.categoryID, 42)
+        XCTAssertEqual(sku.tags.map(\.name), ["featured"])
+        XCTAssertEqual(sku.stock, 8)
+    }
+
     func testDecodesPackagingFrontAndLocalizesName() throws {
         let data = Data(#"{"public_id":"11111111-1111-1111-1111-111111111111","sequence":2,"role":"capture","view_kind":"standard","preset_key":"packaging_front","name":{"zh-CN":"包装正面","en":"Packaging Front"},"instruction":{"zh-CN":"拍摄包装","en":"Capture package"},"required":false,"pose":{"space":"object","camera_position_direction":[0,0,1],"image_up_direction":[1,0,0],"target":[0,0,0]},"composition":{"frame_occupancy":0.85,"aspect_ratio":"1:1","allow_rotation_correction":true,"allow_mirror":false},"reference_images":[]}"#.utf8)
 
@@ -46,8 +57,8 @@ final class SOPAPIClientTests: XCTestCase {
                 return Self.response(request, body: Self.versionJSON)
             case "/api/v1/photo-sessions":
                 XCTAssertEqual(request.httpMethod, "POST")
-                XCTAssertEqual(try Self.jsonBody(request), ["sku_id": 7, "sop_version_id": "version-id"])
-                return Self.response(request, status: 201, body: #"{"public_id":"session-id","code":"PS-1","sku_id":7,"sop_version_id":"version-id","status":"in_progress","created_at":"2026-07-16T00:00:00Z"}"#)
+                XCTAssertEqual(try Self.jsonBody(request), ["sku_id": "sku-id", "sop_version_id": "version-id"])
+                return Self.response(request, status: 201, body: #"{"public_id":"session-id","code":"PS-1","sku_id":"sku-id","sop_version_id":"version-id","status":"in_progress","created_at":"2026-07-16T00:00:00Z"}"#)
             default:
                 XCTFail("Unexpected request: \(request.url?.absoluteString ?? "nil")")
                 return Self.response(request, status: 404, body: "{}")
@@ -59,7 +70,7 @@ final class SOPAPIClientTests: XCTestCase {
         XCTAssertTrue(summaries.data.isEmpty)
         let version = try await client.getSOPVersion(id: "version/with space")
         XCTAssertEqual(version.id, "version-id")
-        let session = try await client.createPhotoSession(skuID: 7, sopVersionID: "version-id")
+        let session = try await client.createPhotoSession(skuID: "sku-id", sopVersionID: "version-id")
         XCTAssertEqual(session.id, "session-id")
     }
 
@@ -79,7 +90,7 @@ final class SOPAPIClientTests: XCTestCase {
                         "photo_session_id": "session-id",
                         "sop_view_id": "view-id",
                     ])
-                    return Self.response(request, body: #"{"method":"PUT","upload_url":"https://example.test/upload","asset_url":"https://cdn.test/capture.jpg","object_key":"capture.jpg","completion_token":"signed-ticket","expires_in":900,"headers":{"Content-Type":"image/jpeg"}}"#)
+                    return Self.response(request, body: #"{"method":"PUT","upload_url":"https://example.test/upload","completion_token":"signed-ticket","expires_in":900,"headers":{"Content-Type":"image/jpeg"}}"#)
                 case "/api/v1/assets/complete":
                     let body = try Self.jsonBody(request)
                     XCTAssertEqual(body["photo_session_id"] as? String, "session-id")
@@ -89,7 +100,7 @@ final class SOPAPIClientTests: XCTestCase {
                     XCTAssertNil(body["object_key"])
                     XCTAssertNil(body["original_url"])
                     XCTAssertNil(body["thumbnail_url"])
-                    return Self.response(request, status: 201, body: #"{"id":9,"sku_id":7,"photo_session_id":"session-id","sop_view_id":"view-id","object_key":"capture.jpg","original_url":"https://cdn.test/capture.jpg","thumbnail_url":"","review_status":"pending","captured_at":"2026-07-16T00:00:00Z"}"#)
+                    return Self.response(request, status: 201, body: #"{"public_id":"asset-id","sku_id":"sku-id","photo_session_id":"session-id","sop_view_id":"view-id","media_url":"/api/v1/assets/asset-id/media","review_status":"pending","captured_at":"2026-07-16T00:00:00Z"}"#)
                 default:
                     XCTFail("Unexpected request: \(request.url?.absoluteString ?? "nil")")
                     return Self.response(request, status: 404, body: "{}")
@@ -99,12 +110,11 @@ final class SOPAPIClientTests: XCTestCase {
 
         let receipt = try await makeClient().uploadImage(
             Data([1, 2, 3]),
-            skuID: 7,
             sopViewID: "view-id",
             photoSessionID: "session-id",
             fileName: "capture.jpg"
         )
-        XCTAssertEqual(receipt.id, 9)
+        XCTAssertEqual(receipt.publicID, "asset-id")
         XCTAssertEqual(receipt.photoSessionID, "session-id")
     }
 

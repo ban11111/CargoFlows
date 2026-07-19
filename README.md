@@ -164,6 +164,32 @@ xcodegen generate
 open CargoFlow.xcodeproj
 ```
 
+Build a downloadable iOS Simulator package:
+
+```bash
+./scripts/package-ios.sh simulator
+```
+
+The package is written to `web/public/downloads/` and served by the landing page download button.
+The iOS development build currently reaches the API through the active Cloudflare Web tunnel at
+`https://dev.cargoflows.cc/api/proxy/`. Update
+`CARGOFLOW_API_BASE_URL` in `ios/project.yml` when the quick-tunnel URL changes.
+
+The Web proxy also rewrites signed loopback MinIO upload tickets to
+`/api/storage/...`. This lets browsers and iPhones upload through the same Cloudflare hostname
+while keeping MinIO bound to localhost. Configure `MINIO_UPLOAD_BASE_URL` and
+`MINIO_SOURCE_BUCKET` on the Web service if the local object-store address or bucket changes.
+
+To export a signed development IPA, configure an Apple Developer signing identity and provisioning profile, then run:
+
+```bash
+./scripts/package-ios.sh archive
+```
+
+Automatic signing is persisted in `ios/project.yml`. Set
+`CARGOFLOW_DEVELOPMENT_TEAM=YOUR_TEAM_ID` only when overriding the configured team. The landing
+page serves the signed IPA first, with the Simulator zip as a fallback when no IPA is present.
+
 If XcodeGen is not installed, create a new iOS App project in Xcode and add files from `ios/CargoFlow/`.
 
 ## Product-Capture SOP Model

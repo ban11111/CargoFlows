@@ -4,6 +4,28 @@ import UIKit
 
 @MainActor
 final class SOPCaptureLogicTests: XCTestCase {
+    func testCaptureUploadJPEGDownsizesToConfiguredPixelLimit() throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let source = UIGraphicsImageRenderer(size: CGSize(width: 240, height: 180), format: format).image { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 240, height: 180))
+        }
+
+        let data = try XCTUnwrap(captureUploadJPEGData(from: source, maxPixelDimension: 120))
+        let decoded = try XCTUnwrap(UIImage(data: data))
+
+        XCTAssertEqual(Array(data.prefix(3)), [0xff, 0xd8, 0xff])
+        XCTAssertLessThanOrEqual(max(decoded.size.width * decoded.scale, decoded.size.height * decoded.scale), 120)
+        XCTAssertEqual(decoded.size.width / decoded.size.height, 4.0 / 3.0, accuracy: 0.01)
+    }
+
+    func testCaptureUploadJPEGRejectsInvalidOptions() {
+        XCTAssertNil(captureUploadJPEGData(from: UIImage(), maxPixelDimension: 0))
+        XCTAssertNil(captureUploadJPEGData(from: UIImage(), compressionQuality: 2))
+    }
+
     func testOptionalPackagingDoesNotBlockFinish() throws {
         let views = try [viewFixture(id: "reference", required: true), viewFixture(id: "packaging", required: false)]
 
@@ -309,6 +331,6 @@ final class SOPCaptureLogicTests: XCTestCase {
     }
 
     private func sessionFixture(versionID: String) -> PhotoSession {
-        PhotoSession(publicID: "session", code: "PS-1", skuID: 1, sopVersionID: versionID, status: "in_progress", createdAt: Date(timeIntervalSince1970: 0))
+        PhotoSession(publicID: "session", code: "PS-1", skuID: "sku", sopVersionID: versionID, status: "in_progress", createdAt: Date(timeIntervalSince1970: 0))
     }
 }

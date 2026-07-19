@@ -20,5 +20,6 @@ struct DashboardView: View {
                     Label(language.t("tab.settings"), systemImage: "gearshape")
                 }
         }
+        .tint(CargoTheme.accent)
     }
 }
