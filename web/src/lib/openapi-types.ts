@@ -705,7 +705,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete?: never;
+        delete: operations["deleteAIContentTemplateDraft"];
         options?: never;
         head?: never;
         patch: operations["updateAIContentTemplateVersion"];
@@ -3509,6 +3509,40 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    deleteAIContentTemplateDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: components["parameters"]["AIContentTemplateVersionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted unpublished draft; if it was the only version */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Published and archived versions are immutable; archive published versions instead. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             500: components["responses"]["InternalServerError"];
         };
     };

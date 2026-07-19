@@ -1,9 +1,10 @@
 "use client";
 
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { ArrowDown, ArrowLeft, ArrowUp, CheckCircle2, ImageIcon, LoaderCircle, Plus, Search, Send, Trash2, Type } from "lucide-react";
 import Link from "next/link";
-import { FormEvent, useState } from "react";
+import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,11 +20,19 @@ type Template = components["schemas"]["AIContentTemplate"];
 type Version = components["schemas"]["AIContentTemplateVersion"];
 type Validation = components["schemas"]["AITemplateValidationResponse"];
 type SlotKind = AITemplateSlotInput["kind"];
-type EditableSlot = AITemplateSlotInput & { client_id: string };
+type EditableSlot = AITemplateSlotInput & { client_id: string; source?: components["schemas"]["AIContentSlot"] };
 type ValidationRequest = { payload: components["schemas"]["AIContentTemplateMutationRequest"]; fingerprint: string };
 
 export default function NewAITemplatePage() {
+  return <Suspense fallback={<div className="h-72 animate-pulse rounded-lg bg-muted" />}><NewAITemplateEditor /></Suspense>;
+}
+
+function NewAITemplateEditor() {
   const { language } = useLanguage();
+  const searchParams = useSearchParams();
+  const templateID = searchParams?.get("template_id") ?? null;
+  const versionID = searchParams?.get("version_id") ?? null;
+  const loadedVersion = useRef("");
   const zh = language === "zh";
   const text = zh ? zhText : enText;
   const [nameZh, setNameZh] = useState("");
@@ -35,9 +44,23 @@ export default function NewAITemplatePage() {
   const [version, setVersion] = useState<Version | null>(null);
   const [validation, setValidation] = useState<Validation | null>(null);
   const [validatedFingerprint, setValidatedFingerprint] = useState("");
+  const existing = useQuery({ queryKey: ["ai-content-template", templateID], queryFn: () => apiRequest<Template>(`/ai-content-templates/${encodeURIComponent(templateID ?? "")}`), enabled: Boolean(templateID && versionID), retry: false });
   const errors = Object.fromEntries(Object.entries(errorCodes).map(([path, code]) => [path, localError(code, zh)]));
   const fingerprint = JSON.stringify(mutationPayload(nameZh, nameEn, platform, platformPrompt, slots));
   const currentValidation = validatedFingerprint === fingerprint ? validation : null;
+
+  useEffect(() => {
+    const loaded = existing.data?.versions.find((candidate) => candidate.public_id === versionID);
+    if (!loaded || loadedVersion.current === loaded.public_id) return;
+    loadedVersion.current = loaded.public_id;
+    setNameZh(existing.data?.name_zh ?? "");
+    setNameEn(existing.data?.name_en ?? "");
+    setPlatform(existing.data?.target_platform ?? "lazada");
+    setPlatformPrompt(loaded.platform_prompt);
+    setSlots(loaded.slots.map(editableSlotFromVersion));
+    setVersion(loaded);
+    setValidation(null);
+  }, [existing.data, versionID]);
 
   const create = useMutation({
     mutationFn: (payload: components["schemas"]["AIContentTemplateMutationRequest"]) => apiRequest<Template>("/ai-content-templates", { method: "POST", body: JSON.stringify(payload) }),
@@ -87,8 +110,22 @@ export default function NewAITemplatePage() {
   function updateSlot(index: number, patch: Partial<AITemplateSlotInput>) { setSlots((current) => current.map((slot, slotIndex) => slotIndex === index ? ({ ...slot, ...patch } as EditableSlot) : slot)); }
   function move(index: number, direction: -1 | 1) { const target = index + direction; if (target < 0 || target >= slots.length) return; setSlots((current) => { const next = [...current]; [next[index], next[target]] = [next[target], next[index]]; return next; }); setValidation(null); }
 
-  return <div className="mx-auto max-w-5xl space-y-6"><header><Button asChild className="mb-3 min-h-11" variant="ghost"><Link href="/ai-templates"><ArrowLeft className="h-4 w-4" />{text.back}</Link></Button><p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary">CargoFlow · AI</p><h1 className="mt-2 text-2xl font-semibold tracking-tight">{text.title}</h1><p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">{text.description}</p></header><form aria-busy={editorBusy} className="space-y-6" inert={editorBusy} onSubmit={submit}><Card><CardHeader><CardTitle>{text.basics}</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2"><Field error={errors.name_zh} id="template-name-zh" label={text.nameZh}><Input className="h-11" id="template-name-zh" maxLength={180} onChange={(event) => setNameZh(event.target.value)} value={nameZh} /></Field><Field error={errors.name_en} id="template-name-en" label={text.nameEn}><Input className="h-11" id="template-name-en" maxLength={180} onChange={(event) => setNameEn(event.target.value)} value={nameEn} /></Field><Field error={errors.target_platform} id="template-platform" label={text.platform}><Input className="h-11" id="template-platform" maxLength={80} onChange={(event) => setPlatform(event.target.value)} value={platform} /></Field><div className="space-y-1.5 md:col-span-2"><Label htmlFor="platform-prompt">{text.platformPrompt}</Label><Textarea id="platform-prompt" onChange={(event) => setPlatformPrompt(event.target.value)} placeholder={text.platformPromptPlaceholder} value={platformPrompt} />{errors.platform_prompt ? <p className="text-sm text-danger" role="alert">{errors.platform_prompt}</p> : null}</div></CardContent></Card><Card><CardHeader><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle>{text.slots}</CardTitle><p className="mt-1 text-sm text-muted-foreground">{text.slotsHelp}</p></div><div className="flex flex-wrap gap-2"><AddButton icon={Type} label={text.addTitle} onClick={() => addSlot("title")} /><AddButton icon={Search} label={text.addSeo} onClick={() => addSlot("seo_description")} /><AddButton icon={ImageIcon} label={text.addImage} onClick={() => addSlot("image")} /></div></div></CardHeader><CardContent className="space-y-4">{slots.length === 0 ? <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">{text.noSlots}</div> : null}{slots.map((slot, index) => <SlotEditor errors={errors} index={index} key={slot.client_id} onMove={move} onRemove={() => setSlots((current) => current.filter((_, itemIndex) => itemIndex !== index))} onUpdate={updateSlot} slot={slot} text={text} />)}{errors.slots ? <p className="text-sm text-danger" role="alert">{errors.slots}</p> : null}</CardContent></Card>{create.isError ? <p className="rounded-md border border-danger/30 bg-danger/5 p-3 text-sm text-danger" role="alert">{text.createError}</p> : null}<div className="flex justify-end"><Button className="min-h-11" disabled={create.isPending || Boolean(version)} type="submit">{create.isPending ? <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <Plus className="h-4 w-4" />}{version ? text.created : text.create}</Button></div></form>{version ? <Card><CardHeader><CardTitle>{text.publication}</CardTitle></CardHeader><CardContent className="space-y-4"><div className="flex flex-wrap items-center gap-3"><span className="rounded-full border border-warning/30 bg-warning/5 px-3 py-1 text-xs font-semibold text-warning">V{version.version_number} · {version.status}</span><Button className="min-h-11" disabled={validate.isPending || version.status !== "draft"} onClick={validateDraft} variant="secondary"><CheckCircle2 className="h-4 w-4" />{text.validate}</Button><Button className="min-h-11" disabled={publish.isPending || currentValidation?.code !== "template_valid" || version.status !== "draft"} onClick={() => publish.mutate()}><Send className="h-4 w-4" />{version.status === "published" ? text.published : text.publish}</Button></div>{currentValidation ? currentValidation.code === "template_valid" ? <p className="text-sm text-success" role="status">{text.valid}</p> : <IssueList issues={currentValidation.issues} title={text.validationIssues} /> : <p className="text-sm text-muted-foreground">{text.validateFirst}</p>}{validate.isError || publish.isError ? <p className="text-sm text-danger" role="alert">{text.actionError}</p> : null}</CardContent></Card> : null}</div>;
+  if (existing.isLoading) return <div className="h-72 animate-pulse rounded-lg bg-muted" />;
+  if (existing.isError) return <div className="rounded-lg border border-danger/30 bg-danger/5 p-5 text-sm text-danger" role="alert">{zh ? "无法载入模板草稿。" : "Could not load the template draft."}</div>;
+  return <div className="mx-auto max-w-5xl space-y-6"><header><Button asChild className="mb-3 min-h-11" variant="ghost"><Link href="/ai-templates"><ArrowLeft className="h-4 w-4" />{text.back}</Link></Button><p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary">CargoFlow · AI</p><h1 className="mt-2 text-2xl font-semibold tracking-tight">{versionID ? (zh ? "编辑 AI 内容模板" : "Edit AI content template") : text.title}</h1><p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">{text.description}</p></header><form aria-busy={editorBusy} className="space-y-6" inert={editorBusy} onSubmit={submit}><Card><CardHeader><CardTitle>{text.basics}</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2"><Field error={errors.name_zh} id="template-name-zh" label={text.nameZh}><Input className="h-11" id="template-name-zh" maxLength={180} onChange={(event) => setNameZh(event.target.value)} value={nameZh} /></Field><Field error={errors.name_en} id="template-name-en" label={text.nameEn}><Input className="h-11" id="template-name-en" maxLength={180} onChange={(event) => setNameEn(event.target.value)} value={nameEn} /></Field><Field error={errors.target_platform} id="template-platform" label={text.platform}><Input className="h-11" id="template-platform" maxLength={80} onChange={(event) => setPlatform(event.target.value)} value={platform} /></Field><div className="space-y-1.5 md:col-span-2"><Label htmlFor="platform-prompt">{text.platformPrompt}</Label><Textarea id="platform-prompt" onChange={(event) => setPlatformPrompt(event.target.value)} placeholder={text.platformPromptPlaceholder} value={platformPrompt} />{errors.platform_prompt ? <p className="text-sm text-danger" role="alert">{errors.platform_prompt}</p> : null}</div></CardContent></Card><Card><CardHeader><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><CardTitle>{text.slots}</CardTitle><p className="mt-1 text-sm text-muted-foreground">{text.slotsHelp}</p></div><div className="flex flex-wrap gap-2"><AddButton icon={Type} label={text.addTitle} onClick={() => addSlot("title")} /><AddButton icon={Search} label={text.addSeo} onClick={() => addSlot("seo_description")} /><AddButton icon={ImageIcon} label={text.addImage} onClick={() => addSlot("image")} /></div></div></CardHeader><CardContent className="space-y-4">{slots.length === 0 ? <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">{text.noSlots}</div> : null}{slots.map((slot, index) => <SlotEditor errors={errors} index={index} key={slot.client_id} onMove={move} onRemove={() => setSlots((current) => current.filter((_, itemIndex) => itemIndex !== index))} onUpdate={updateSlot} slot={slot} text={text} />)}{errors.slots ? <p className="text-sm text-danger" role="alert">{errors.slots}</p> : null}</CardContent></Card>{create.isError ? <p className="rounded-md border border-danger/30 bg-danger/5 p-3 text-sm text-danger" role="alert">{text.createError}</p> : null}{!version ? <div className="flex justify-end"><Button className="min-h-11" disabled={create.isPending} type="submit">{create.isPending ? <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <Plus className="h-4 w-4" />}{text.create}</Button></div> : null}</form>{version ? <Card><CardHeader><CardTitle>{text.publication}</CardTitle></CardHeader><CardContent className="space-y-4"><div className="flex flex-wrap items-center gap-3"><span className="rounded-full border border-warning/30 bg-warning/5 px-3 py-1 text-xs font-semibold text-warning">V{version.version_number} · {version.status}</span><Button className="min-h-11" disabled={validate.isPending || version.status !== "draft"} onClick={validateDraft} variant="secondary"><CheckCircle2 className="h-4 w-4" />{versionID ? (zh ? "保存并校验" : "Save and validate") : text.validate}</Button><Button className="min-h-11" disabled={publish.isPending || currentValidation?.code !== "template_valid" || version.status !== "draft"} onClick={() => publish.mutate()}><Send className="h-4 w-4" />{version.status === "published" ? text.published : text.publish}</Button></div>{currentValidation ? currentValidation.code === "template_valid" ? <p className="text-sm text-success" role="status">{text.valid}</p> : <IssueList issues={currentValidation.issues} title={text.validationIssues} /> : <p className="text-sm text-muted-foreground">{text.validateFirst}</p>}{validate.isError || publish.isError ? <p className="text-sm text-danger" role="alert">{text.actionError}</p> : null}</CardContent></Card> : null}</div>;
 }
+
+function editableSlotFromVersion(slot: components["schemas"]["AIContentSlot"]): EditableSlot {
+  const constraints = asObject(slot.constraints);
+  const generation = asObject(slot.generation_config);
+  if (slot.kind === "image") return { client_id: crypto.randomUUID(), source: slot, kind: slot.kind, slot_key: slot.slot_key, name_zh: slot.name_zh, name_en: slot.name_en, prompt_fragment: slot.prompt_fragment, size: stringValue(generation.size, "1024x1024") as "1024x1024", quality: stringValue(generation.quality, "high") as "high", candidate_count: numberValue(generation.candidate_count, 1) };
+  if (slot.kind === "title") return { client_id: crypto.randomUUID(), source: slot, kind: slot.kind, slot_key: slot.slot_key, name_zh: slot.name_zh, name_en: slot.name_en, prompt_fragment: slot.prompt_fragment, min_length: numberValue(constraints.min_length, 10), max_length: numberValue(constraints.max_length, 120) };
+  return { client_id: crypto.randomUUID(), source: slot, kind: slot.kind, slot_key: slot.slot_key, name_zh: slot.name_zh, name_en: slot.name_en, prompt_fragment: slot.prompt_fragment, max_length: numberValue(constraints.max_length, 800) };
+}
+
+function asObject(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? { ...(value as Record<string, unknown>) } : {}; }
+function stringValue(value: unknown, fallback: string) { return typeof value === "string" ? value : fallback; }
+function numberValue(value: unknown, fallback: number) { return typeof value === "number" && Number.isFinite(value) ? value : fallback; }
 
 function SlotEditor({ slot, index, onUpdate, onMove, onRemove, errors, text }: { slot: AITemplateSlotInput; index: number; onUpdate: (index: number, patch: Partial<AITemplateSlotInput>) => void; onMove: (index: number, direction: -1 | 1) => void; onRemove: () => void; errors: Record<string, string>; text: typeof zhText }) {
   const prefix = `slots.${index}`;
@@ -130,10 +167,12 @@ function parseValidationError(error: unknown): Validation | null {
 }
 
 function toMutationSlot(slot: AITemplateSlotInput, sequence: number): components["schemas"]["AIContentSlotMutation"] {
-  const base = { slot_key: slot.slot_key, kind: slot.kind, name_zh: slot.name_zh, name_en: slot.name_en, description_zh: "", description_en: "", sequence: sequence + 1, optional: true, default_selected: false, prompt_fragment: slot.prompt_fragment, layout_config: {} };
-  if (slot.kind === "image") return { ...base, constraints: {}, generation_config: { size: slot.size, quality: slot.quality, candidate_count: slot.candidate_count } };
-  if (slot.kind === "title") return { ...base, constraints: { min_length: slot.min_length, max_length: slot.max_length }, generation_config: {} };
-  return { ...base, constraints: { max_length: slot.max_length }, generation_config: {} };
+  const editable = slot as EditableSlot;
+  const source = editable.source;
+  const base = { slot_key: slot.slot_key, kind: slot.kind, name_zh: slot.name_zh, name_en: slot.name_en, description_zh: source?.description_zh ?? "", description_en: source?.description_en ?? "", sequence: sequence + 1, optional: source?.optional ?? true, default_selected: source?.default_selected ?? false, prompt_fragment: slot.prompt_fragment, layout_config: source?.layout_config ?? {} };
+  if (slot.kind === "image") return { ...base, constraints: source?.constraints ?? {}, generation_config: { ...asObject(source?.generation_config), size: slot.size, quality: slot.quality, candidate_count: slot.candidate_count } };
+  if (slot.kind === "title") return { ...base, constraints: { ...asObject(source?.constraints), min_length: slot.min_length, max_length: slot.max_length }, generation_config: source?.generation_config ?? {} };
+  return { ...base, constraints: { ...asObject(source?.constraints), max_length: slot.max_length }, generation_config: source?.generation_config ?? {} };
 }
 
 function localError(code: string, zh: boolean) { const map: Record<string, [string, string]> = { requiredNameZh: ["请输入中文名称", "Enter a Chinese name"], requiredNameEn: ["请输入英文名称", "Enter an English name"], requiredPlatform: ["请输入目标平台", "Enter a target platform"], requiredPlatformPrompt: ["请输入平台基础要求", "Enter the platform foundation"], requiredSlot: ["请至少添加一个输出槽位", "Add at least one output slot"], invalidSlotKey: ["槽位键仅可使用小写字母、数字和下划线", "Use lowercase letters, numbers, and underscores"], slotKeyTooLong: ["槽位键最多 80 个字符", "Slot key must be 80 characters or fewer"], platformTooLong: ["目标平台最多 80 个字符", "Target platform must be 80 characters or fewer"], nameTooLong: ["名称最多 180 个字符", "Name must be 180 characters or fewer"], duplicateSlotKey: ["槽位键不可重复", "Slot keys must be unique"], requiredPromptFragment: ["请输入槽位提示要求", "Enter slot prompt requirements"], invalidLengthRange: ["最大长度不可小于最小长度", "Maximum length must not be below minimum"] }; return map[code]?.[zh ? 0 : 1] ?? (zh ? "请检查此字段" : "Check this field"); }

@@ -339,6 +339,34 @@ func (s *TemplateService) Archive(ctx context.Context, versionPublicID string) e
 	})
 }
 
+// DeleteDraft removes only an unpublished draft. Published versions are immutable
+// audit records and must be archived instead.
+func (s *TemplateService) DeleteDraft(ctx context.Context, versionPublicID string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		version, err := getTemplateVersion(tx.Clauses(clause.Locking{Strength: "UPDATE"}), versionPublicID)
+		if err != nil {
+			return err
+		}
+		if version.Status != models.AITemplateDraft {
+			return ErrTemplateVersionImmutable
+		}
+		if err := tx.Where("ai_content_template_version_id = ?", version.ID).Delete(&models.AIContentSlot{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Delete(version).Error; err != nil {
+			return err
+		}
+		var versionCount int64
+		if err := tx.Model(&models.AIContentTemplateVersion{}).Where("ai_content_template_id = ?", version.AIContentTemplateID).Count(&versionCount).Error; err != nil {
+			return err
+		}
+		if versionCount == 0 {
+			return tx.Delete(&models.AIContentTemplate{}, version.AIContentTemplateID).Error
+		}
+		return nil
+	})
+}
+
 func ValidateTemplateVersion(version models.AIContentTemplateVersion, slots []models.AIContentSlot) []ValidationIssue {
 	issues := make([]ValidationIssue, 0)
 	if strings.TrimSpace(version.DefaultLocale) == "" {

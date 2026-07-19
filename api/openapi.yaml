@@ -644,6 +644,16 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '500': { $ref: '#/components/responses/InternalServerError' }
+    delete:
+      operationId: deleteAIContentTemplateDraft
+      responses:
+        '204': { description: Deleted unpublished draft; if it was the only version, its empty template is also removed. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Published and archived versions are immutable; archive published versions instead., content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '500': { $ref: '#/components/responses/InternalServerError' }
   /ai-content-template-versions/{version_id}/validate:
     parameters: [ { $ref: '#/components/parameters/AIContentTemplateVersionID' } ]
     post:

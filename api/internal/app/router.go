@@ -174,6 +174,7 @@ func registerAIRoutes(protected *gin.RouterGroup, server *Server) {
 	aiAdmin.POST("/ai-content-template-versions/:version_id/validate", server.validateAIContentTemplateVersion)
 	aiAdmin.POST("/ai-content-template-versions/:version_id/publish", server.publishAIContentTemplateVersion)
 	aiAdmin.POST("/ai-content-template-versions/:version_id/archive", server.archiveAIContentTemplateVersion)
+	aiAdmin.DELETE("/ai-content-template-versions/:version_id", server.deleteAIContentTemplateDraft)
 }
 
 func newAIDependencies(cfg config.Config, db *gorm.DB) (AIDependencies, error) {

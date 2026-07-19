@@ -396,6 +396,17 @@ func (s *Server) archiveAIContentTemplateVersion(c *gin.Context) {
 	c.JSON(http.StatusOK, aiContentTemplateVersionDTOFromModel(*value))
 }
 
+func (s *Server) deleteAIContentTemplateDraft(c *gin.Context) {
+	if !requireAIUUIDParam(c, "version_id") {
+		return
+	}
+	if err := s.ai.Templates.DeleteDraft(c.Request.Context(), c.Param("version_id")); err != nil {
+		respondAIError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func templateValidationDTO(issues []ai.ValidationIssue) aiTemplateValidationDTO {
 	if issues == nil {
 		issues = []ai.ValidationIssue{}
