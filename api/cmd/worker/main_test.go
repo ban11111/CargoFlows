@@ -25,7 +25,7 @@ func TestBuildExecutorRequiresMasterKeyOnlyForRealMode(t *testing.T) {
 		t.Fatal("real mode accepted malformed master key")
 	}
 	encoded := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x42}, 32))
-	cfg := config.Config{AIWorkerDryRun: false, SecretsMasterKey: encoded, OpenAIBaseURL: "https://api.openai.invalid/v1", OpenAITextModel: "fake-model", OpenAIReasoningEffort: "low"}
+	cfg := config.Config{AIWorkerDryRun: false, SecretsMasterKey: encoded, OpenAIBaseURL: "https://api.openai.invalid/v1", OpenAITextModel: "fake-model", OpenAIReasoningEffort: "low", MinIOEndpoint: "127.0.0.1:9000", MinIOPublicEndpoint: "127.0.0.1:9000", MinIOAccessKey: "test", MinIOSecretKey: "test", MinIOBucket: "source", MinIOAIBucket: "generated"}
 	if executor, err := buildExecutor(cfg, db); err != nil || executor == nil {
 		t.Fatalf("real executor=%#v error=%v", executor, err)
 	}

@@ -87,7 +87,13 @@ func buildExecutor(cfg config.Config, db *gorm.DB) (ai.ItemExecutor, error) {
 		Model: cfg.OpenAITextModel, ReasoningEffort: cfg.OpenAIReasoningEffort, RequestTimeout: cfg.OpenAIRequestTimeout,
 	})
 	text := ai.NewTextExecutor(db, settings, provider, ai.TextExecutorConfig{Model: cfg.OpenAITextModel, ReasoningEffort: cfg.OpenAIReasoningEffort})
-	return ai.NewKindRoutingExecutor(false, dryRun, text), nil
+	storage, err := buildImageStorage(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("configure AI image storage: %w", err)
+	}
+	imageProvider := ai.NewOpenAIImageResponsesClient(cfg.OpenAIBaseURL, nil, ai.OpenAIImageResponsesConfig{Model: cfg.OpenAIImageToolModel, RequestTimeout: cfg.OpenAIImageRequestTimeout})
+	image := ai.NewImageExecutor(db, settings, imageProvider, storage, cfg.OpenAIImageToolModel)
+	return ai.NewKindRoutingExecutor(false, dryRun, text, image), nil
 }
 
 type runOnceWorker interface {

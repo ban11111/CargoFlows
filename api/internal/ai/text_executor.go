@@ -465,10 +465,15 @@ type KindRoutingExecutor struct {
 	dryRun     bool
 	dryRunExec ItemExecutor
 	textExec   ItemExecutor
+	imageExec  ItemExecutor
 }
 
-func NewKindRoutingExecutor(dryRun bool, dryRunExecutor, textExecutor ItemExecutor) *KindRoutingExecutor {
-	return &KindRoutingExecutor{dryRun: dryRun, dryRunExec: dryRunExecutor, textExec: textExecutor}
+func NewKindRoutingExecutor(dryRun bool, dryRunExecutor, textExecutor ItemExecutor, imageExecutor ...ItemExecutor) *KindRoutingExecutor {
+	var imageExec ItemExecutor
+	if len(imageExecutor) > 0 {
+		imageExec = imageExecutor[0]
+	}
+	return &KindRoutingExecutor{dryRun: dryRun, dryRunExec: dryRunExecutor, textExec: textExecutor, imageExec: imageExec}
 }
 
 func (executor *KindRoutingExecutor) Execute(ctx context.Context, item LeasedItem) error {
@@ -485,7 +490,10 @@ func (executor *KindRoutingExecutor) Execute(ctx context.Context, item LeasedIte
 		}
 		return executor.textExec.Execute(ctx, item)
 	case models.AIContentSlotImage:
-		return ErrRealImageGenerationUnsupported
+		if executor.imageExec == nil {
+			return ErrRealImageGenerationUnsupported
+		}
+		return executor.imageExec.Execute(ctx, item)
 	default:
 		return ErrExecutionInputInvalid
 	}
