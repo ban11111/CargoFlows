@@ -525,7 +525,10 @@ struct SOPCaptureView: View {
             } else {
                 ForEach(historicalAssets) { asset in
                     let matchingView = views.first(where: {
-                        $0.id == asset.sopViewID || $0.presetKey == asset.sopViewKey
+                        $0.id == asset.sopViewID
+                            || (!asset.sopViewKey.isEmpty && $0.presetKey == asset.sopViewKey)
+                            || (!asset.sopViewName.zhCN.isEmpty && $0.name.zhCN == asset.sopViewName.zhCN)
+                            || (!asset.sopViewName.en.isEmpty && $0.name.en == asset.sopViewName.en)
                     })
                     AssetHistoryRow(
                         asset: asset,

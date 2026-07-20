@@ -79,7 +79,8 @@ final class APIClient {
     }
 
     func listAssets(skuID: String) async throws -> ListResponse<AssetReviewItem> {
-        try await request("assets/review?sku_id=\(encodedPathSegment(skuID))")
+        let response: ListResponse<AssetReviewItem> = try await request("assets/review?sku_id=\(encodedPathSegment(skuID))")
+        return ListResponse(data: response.data.filter { $0.skuID == skuID })
     }
 
     func loadAssetMedia(_ mediaURL: String) async throws -> Data {

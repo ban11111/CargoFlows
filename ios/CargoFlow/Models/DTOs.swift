@@ -422,4 +422,17 @@ struct AssetReviewItem: Identifiable, Decodable {
         case sopViewName = "sop_view_name"
         case photoSessionCode = "photo_session_code"
     }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        publicID = try container.decode(String.self, forKey: .publicID)
+        skuID = try container.decode(String.self, forKey: .skuID)
+        mediaURL = try container.decode(String.self, forKey: .mediaURL)
+        reviewStatus = try container.decode(String.self, forKey: .reviewStatus)
+        capturedAt = try container.decode(Date.self, forKey: .capturedAt)
+        sopViewID = try container.decodeIfPresent(String.self, forKey: .sopViewID) ?? ""
+        sopViewKey = try container.decodeIfPresent(String.self, forKey: .sopViewKey) ?? ""
+        sopViewName = try container.decode(LocalizedText.self, forKey: .sopViewName)
+        photoSessionCode = try container.decode(String.self, forKey: .photoSessionCode)
+    }
 }

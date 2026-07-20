@@ -145,6 +145,19 @@ final class SOPAPIClientTests: XCTestCase {
         XCTAssertEqual(media, Data("image-bytes".utf8))
     }
 
+    func testOldHistoryPayloadWithoutViewIdentityStillLoadsAndFiltersBySKU() async throws {
+        URLProtocolStub.handler = { request in
+            XCTAssertEqual(request.url?.path, "/api/v1/assets/review")
+            return Self.response(request, body: #"{"data":[{"public_id":"owned-asset","sku_id":"sku-id","media_url":"/api/v1/assets/owned-asset/media","review_status":"pending","captured_at":"2026-07-16T00:00:00Z","sop_view_name":{"zh-CN":"正面","en":"Front"},"photo_session_code":"PS-1"},{"public_id":"other-asset","sku_id":"other-sku","media_url":"/api/v1/assets/other-asset/media","review_status":"approved","captured_at":"2026-07-16T00:00:00Z","sop_view_name":{"zh-CN":"背面","en":"Back"},"photo_session_code":"PS-2"}]}"#)
+        }
+
+        let history = try await makeClient().listAssets(skuID: "sku-id")
+
+        XCTAssertEqual(history.data.map(\.publicID), ["owned-asset"])
+        XCTAssertEqual(history.data.first?.sopViewID, "")
+        XCTAssertEqual(history.data.first?.sopViewKey, "")
+    }
+
     private func makeClient() -> APIClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [URLProtocolStub.self]
