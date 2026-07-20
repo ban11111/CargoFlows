@@ -52,7 +52,9 @@ export async function POST(request: NextRequest) {
   } as const;
 
   if (formSubmission) {
-    const target = new URL(request.nextUrl.searchParams.get("next") ?? "/skus", browserOrigin(request));
+    const next = request.nextUrl.searchParams.get("next") ?? "/skus";
+    const targetPath = body.user?.must_change_password ? `/change-password?next=${encodeURIComponent(next)}` : next;
+    const target = new URL(targetPath, browserOrigin(request));
     const response = NextResponse.redirect(target, 303);
     response.cookies.set("cargo_flow_token", token, cookie);
     return response;

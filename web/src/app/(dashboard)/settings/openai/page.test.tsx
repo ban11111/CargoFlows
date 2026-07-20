@@ -88,7 +88,7 @@ describe("OpenAI settings", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => jsonResponse({ code: "forbidden" }, 403));
     render(<OpenAISettingsPage />, { wrapper: Providers });
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("仅管理员可以管理 OpenAI 凭据");
+    expect(await screen.findByRole("alert")).toHaveTextContent("仅超级管理员可以管理 OpenAI 凭据");
     expect(screen.queryByLabelText("OpenAI Project API Key")).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -185,10 +185,20 @@ describe("OpenAI settings", () => {
     expect(screen.queryByText("API Key 至少需要 20 个字符")).not.toBeInTheDocument();
   });
 
-  it("exposes an accessible deep link in the admin shell", () => {
+  it("exposes an accessible deep link for the super admin shell", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => String(input).includes("/auth/me") ? jsonResponse({ public_id: "00000000-0000-4000-8000-000000000001", name: "Owner", email: "owner@example.test", role: "super_admin", status: "active", must_change_password: false, last_seen_at: "2026-07-17T10:00:00Z", created_at: "2026-07-17T10:00:00Z" }) : jsonResponse(unconfigured));
     render(<AppShell><p>content</p></AppShell>, { wrapper: Providers });
-    const links = screen.getAllByRole("link", { name: "OpenAI 设置" });
+    const links = await screen.findAllByRole("link", { name: "OpenAI 设置" });
     expect(links[0]).toHaveAttribute("href", "/settings/openai");
+  });
+
+  it("keeps restricted destinations visible and explained for operators", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => jsonResponse({ public_id: "00000000-0000-4000-8000-000000000003", name: "Operator", email: "operator@example.test", role: "operator", status: "active", must_change_password: false, last_seen_at: "2026-07-17T10:00:00Z", created_at: "2026-07-17T10:00:00Z" }));
+    render(<AppShell><p>content</p></AppShell>, { wrapper: Providers });
+    expect(await screen.findAllByText("仅超级管理员")).not.toHaveLength(0);
+    expect(screen.getAllByText("需要管理员").length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByRole("link", { name: "OpenAI 设置" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("OpenAI 设置 · 仅超级管理员")).toBeDisabled();
   });
 });
 

@@ -34,6 +34,7 @@ export function LoginForm() {
       body: JSON.stringify(values),
     });
 
+    const body = await response.json().catch(() => ({}));
     if (!response.ok) {
       setError(t("loginError"));
       return;
@@ -43,7 +44,8 @@ export function LoginForm() {
     // login route is visible to the middleware before it evaluates the
     // protected destination. This matters behind HTTPS reverse proxies such
     // as a Cloudflare development tunnel.
-    window.location.assign(nextPath);
+    const target = body.user?.must_change_password ? `/change-password?next=${encodeURIComponent(nextPath)}` : nextPath;
+    window.location.assign(target);
   }
 
   return (

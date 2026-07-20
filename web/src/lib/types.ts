@@ -1,6 +1,6 @@
 import type { components } from "@/lib/openapi-types";
 
-export type Role = "admin" | "operator" | "photographer" | "viewer";
+export type Role = "super_admin" | "admin" | "operator";
 
 export type SkuStatus = "active" | "draft" | "disabled";
 
