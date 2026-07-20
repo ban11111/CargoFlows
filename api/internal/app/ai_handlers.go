@@ -75,6 +75,7 @@ func (s *Server) createAIJob(c *gin.Context) {
 		SelectedSlotKeys: req.SelectedSlotKeys, SelectedAssetIDs: *req.SelectedAssetIDs,
 		Locale: req.Locale, CreatedByID: currentUser(c).ID,
 		IdempotencyKey: c.GetHeader("Idempotency-Key"), UserPreference: req.UserPreference, GenerationOverrides: req.GenerationOverrides,
+		ImageCanvases: req.ImageCanvases,
 	})
 	if err != nil {
 		respondAIError(c, err)

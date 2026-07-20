@@ -23,6 +23,8 @@ const template = {
   versions: [{ public_id: "version-1", version_number: 1, status: "published", default_locale: "zh-CN", prompt_compiler_version: "v1", platform_prompt: "platform", published_at: "2026-07-17T00:00:00Z", archived_at: null, created_at: "2026-07-17T00:00:00Z", updated_at: "2026-07-17T00:00:00Z", slots: [
     { public_id: "slot-hero", slot_key: "hero", kind: "image", name_zh: "白底主图", name_en: "White-background hero", description_zh: "商品主图", description_en: "Product hero", sequence: 1, optional: true, default_selected: false, prompt_fragment: "hero", constraints: { required_views: ["reference_front"] }, generation_config: { allowed_candidate_count: [1, 2], allowed_sizes: ["1024x1024"], allowed_qualities: ["high"], allowed_styles: ["简洁", "生活方式"], allow_user_extra_prompt: true }, layout_config: {} },
     { public_id: "slot-title", slot_key: "title", kind: "title", name_zh: "商品标题", name_en: "Product title", description_zh: "搜索标题", description_en: "Search title", sequence: 2, optional: true, default_selected: false, prompt_fragment: "title", constraints: {}, generation_config: { allowed_candidate_count: [1, 3] }, layout_config: {} },
+    { public_id: "slot-detail", slot_key: "detail", kind: "image", name_zh: "细节卖点", name_en: "Detail benefits", description_zh: "展示边缘和按键", description_en: "Show edges and buttons", sequence: 3, optional: true, default_selected: false, prompt_fragment: "detail", constraints: { required_views: ["reference_front"] }, generation_config: { allowed_candidate_count: [1, 2], allowed_sizes: ["1024x1024"], allowed_qualities: ["high"], allowed_styles: ["简洁", "生活方式"], allow_user_extra_prompt: true }, layout_config: {} },
+    { public_id: "slot-lifestyle", slot_key: "lifestyle", kind: "image", name_zh: "生活场景", name_en: "Lifestyle", description_zh: "展示使用场景", description_en: "Show product in use", sequence: 4, optional: true, default_selected: false, prompt_fragment: "lifestyle", constraints: { required_views: ["reference_front"] }, generation_config: { allowed_candidate_count: [1, 2], allowed_sizes: ["1024x1024"], allowed_qualities: ["high"], allowed_styles: ["简洁", "生活方式"], allow_user_extra_prompt: true }, layout_config: {} },
   ] }],
 };
 
@@ -77,6 +79,42 @@ describe("NewAIJobPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "下一步" }));
     expect(screen.getByRole("alert")).toHaveTextContent("请至少选择一个输出槽位");
     expect(screen.getByRole("heading", { name: "选择输出槽位" })).toBeInTheDocument();
+  });
+
+  it("builds multiple canvases and allows a project to be reused", async () => {
+    const { requests } = installWizardFetch();
+    render(<NewAIJobPage />, { wrapper: Providers });
+    fireEvent.change(await screen.findByLabelText("选择 SKU"), { target: { value: skuPublicID } });
+    fireEvent.change(screen.getByLabelText("选择模板版本"), { target: { value: "version-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /白底主图/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /细节卖点/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /生活场景/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /自由编排多张画布/ }));
+    fireEvent.click(screen.getByRole("button", { name: "添加画布" }));
+    const detailCheckboxes = screen.getAllByRole("checkbox", { name: /细节卖点/ });
+    fireEvent.click(detailCheckboxes[1]);
+    const lifestyleCheckboxes = screen.getAllByRole("checkbox", { name: /生活场景/ });
+    fireEvent.click(lifestyleCheckboxes[lifestyleCheckboxes.length - 1]);
+
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    expect(screen.getByRole("heading", { name: "画布 1 设置" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "画布 2 设置" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    expect(screen.getByText(/2 张自定义画布，将生成 2 张图片/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "创建任务" }));
+
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/ai-jobs/job-created"));
+    const post = requests.find((request) => request.path.endsWith("/ai-jobs") && request.init?.method === "POST");
+    expect(post?.body).toMatchObject({
+      selected_slot_keys: ["hero", "detail", "lifestyle"],
+      image_canvases: [
+        { canvas_key: expect.any(String), slot_keys: ["hero", "detail"], generation_override: expect.any(Object) },
+        { canvas_key: expect.any(String), slot_keys: ["detail", "lifestyle"], generation_override: expect.any(Object) },
+      ],
+    });
+    expect(post?.body).not.toHaveProperty("image_composition");
   });
 
   it("blocks image slots until selected assets satisfy their required SOP views", async () => {

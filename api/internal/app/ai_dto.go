@@ -20,6 +20,7 @@ type createAIJobRequest struct {
 	Locale                  string                           `json:"locale"`
 	UserPreference          string                           `json:"user_preference"`
 	GenerationOverrides     map[string]ai.GenerationOverride `json:"generation_overrides"`
+	ImageCanvases           []ai.ImageCanvas                 `json:"image_canvases"`
 }
 
 type editAITextResultRequest struct {

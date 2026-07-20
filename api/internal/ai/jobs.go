@@ -54,6 +54,13 @@ type CreateJobInput struct {
 	IdempotencyKey          string
 	UserPreference          string
 	GenerationOverrides     map[string]GenerationOverride
+	ImageCanvases           []ImageCanvas `json:"image_canvases,omitempty"`
+}
+
+type ImageCanvas struct {
+	CanvasKey          string              `json:"canvas_key"`
+	SlotKeys           []string            `json:"slot_keys"`
+	GenerationOverride *GenerationOverride `json:"generation_override,omitempty"`
 }
 
 type GenerationOverride struct {
@@ -149,18 +156,21 @@ type AssetViewFacts struct {
 }
 
 type SlotFacts struct {
-	PublicID         string                   `json:"public_id"`
-	SlotKey          string                   `json:"slot_key"`
-	Kind             models.AIContentSlotKind `json:"kind"`
-	Name             LocalizedNameFacts       `json:"name"`
-	Description      LocalizedNameFacts       `json:"description"`
-	Sequence         int                      `json:"sequence"`
-	Optional         bool                     `json:"optional"`
-	DefaultSelected  bool                     `json:"default_selected"`
-	PromptFragment   string                   `json:"prompt_fragment"`
-	Constraints      json.RawMessage          `json:"constraints"`
-	GenerationConfig json.RawMessage          `json:"generation_config"`
-	LayoutConfig     json.RawMessage          `json:"layout_config"`
+	PublicID              string                   `json:"public_id"`
+	SlotKey               string                   `json:"slot_key"`
+	Kind                  models.AIContentSlotKind `json:"kind"`
+	Name                  LocalizedNameFacts       `json:"name"`
+	Description           LocalizedNameFacts       `json:"description"`
+	Sequence              int                      `json:"sequence"`
+	Optional              bool                     `json:"optional"`
+	DefaultSelected       bool                     `json:"default_selected"`
+	PromptFragment        string                   `json:"prompt_fragment"`
+	Constraints           json.RawMessage          `json:"constraints"`
+	GenerationConfig      json.RawMessage          `json:"generation_config"`
+	LayoutConfig          json.RawMessage          `json:"layout_config"`
+	CompositeRequirements []SlotFacts              `json:"composite_requirements,omitempty"`
+	CanvasKey             string                   `json:"canvas_key,omitempty"`
+	CanvasGeneration      *GenerationOverride      `json:"canvas_generation_override,omitempty"`
 }
 
 type TemplateFacts struct {
@@ -183,6 +193,7 @@ type ProductSnapshotV1 struct {
 	SelectedAssets      []AssetFacts                  `json:"selected_assets"`
 	UserPreference      string                        `json:"user_preference"`
 	GenerationOverrides map[string]GenerationOverride `json:"generation_overrides"`
+	ImageCanvases       []ImageCanvas                 `json:"image_canvases,omitempty"`
 }
 
 type JobItemDocument struct {
@@ -259,6 +270,10 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 		if err := validateGenerationOverrides(selectedSlots, normalized.GenerationOverrides); err != nil {
 			return err
 		}
+		resolvedCanvases, err := resolveImageCanvases(selectedSlots, normalized.ImageCanvases)
+		if err != nil {
+			return err
+		}
 		assets, assetIDs, err := loadEligibleAssets(tx.Clauses(clause.Locking{Strength: "UPDATE"}), sku.ID, normalized.SelectedAssetIDs)
 		if err != nil {
 			return err
@@ -271,7 +286,8 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 			return err
 		}
 		locale := normalized.Locale
-		snapshot := makeProductSnapshot(sku, sop, captureSOPPublicID, template, version, selectedSlots, assets, locale, normalized.UserPreference, normalized.GenerationOverrides)
+		orderedCanvases := imageCanvasFacts(resolvedCanvases)
+		snapshot := makeProductSnapshot(sku, sop, captureSOPPublicID, template, version, selectedSlots, assets, locale, normalized.UserPreference, normalized.GenerationOverrides, orderedCanvases)
 		snapshotJSON, err := json.Marshal(snapshot)
 		if err != nil {
 			return fmt.Errorf("marshal AI job snapshot: %w", err)
@@ -289,7 +305,11 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 			}
 		}
 		for _, slot := range selectedSlots {
-			slotSnapshot, err := json.Marshal(slotFacts(slot))
+			if slot.Kind == models.AIContentSlotImage && len(resolvedCanvases) > 0 {
+				continue
+			}
+			facts := slotFacts(slot)
+			slotSnapshot, err := json.Marshal(facts)
 			if err != nil {
 				return fmt.Errorf("marshal AI job slot: %w", err)
 			}
@@ -309,9 +329,33 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 			}
 			items = append(items, item)
 		}
+		for index, canvas := range resolvedCanvases {
+			anchor := canvas.Slots[0]
+			facts := slotFacts(anchor)
+			facts.CanvasKey = canvas.CanvasKey
+			facts.CanvasGeneration = canvas.GenerationOverride
+			facts.CompositeRequirements = make([]SlotFacts, 0, len(canvas.Slots))
+			for _, requirement := range canvas.Slots {
+				facts.CompositeRequirements = append(facts.CompositeRequirements, slotFacts(requirement))
+			}
+			facts.Name = canvasSlotName(index+1, canvas.Slots)
+			slotSnapshot, err := json.Marshal(facts)
+			if err != nil {
+				return fmt.Errorf("marshal AI image canvas: %w", err)
+			}
+			idsJSON, err := json.Marshal(assetIDs)
+			if err != nil {
+				return fmt.Errorf("marshal AI canvas assets: %w", err)
+			}
+			item := models.AIJobItem{PublicID: uuid.NewString(), AIJobID: job.ID, AIContentSlotID: anchor.ID, SlotKey: anchor.SlotKey, SlotSnapshotJSON: slotSnapshot, Kind: models.AIContentSlotImage, Status: models.AIJobItemQueued, SelectedInputAssetIDsJSON: idsJSON}
+			if err := tx.Create(&item).Error; err != nil {
+				return fmt.Errorf("create AI canvas item: %w", err)
+			}
+			items = append(items, item)
+		}
 		job.Items = items
 		job.SKU = sku
-		metadata, _ := json.Marshal(map[string]any{"snapshot_schema": ProductSnapshotSchemaV1, "slot_keys": normalized.SelectedSlotKeys, "asset_count": len(assetIDs), "request_sha256": requestHash})
+		metadata, _ := json.Marshal(map[string]any{"snapshot_schema": ProductSnapshotSchemaV1, "slot_keys": normalized.SelectedSlotKeys, "asset_count": len(assetIDs), "request_sha256": requestHash, "image_canvases": orderedCanvases})
 		jobID, actorID := job.ID, normalized.CreatedByID
 		audit := models.AIAuditEvent{PublicID: uuid.NewString(), EventType: "ai_job.created", EntityType: "ai_job", EntityPublicID: job.PublicID, ActorID: &actorID, AIJobID: &jobID, MetadataJSON: metadata}
 		if err := tx.Create(&audit).Error; err != nil {
@@ -349,6 +393,7 @@ func (s *JobService) recoverIdempotentCreate(ctx context.Context, input CreateJo
 
 var idempotencyKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$`)
 var localePattern = regexp.MustCompile(`^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$`)
+var canvasKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$`)
 
 func normalizeCreateJobInput(input CreateJobInput) (CreateJobInput, string, error) {
 	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
@@ -395,6 +440,33 @@ func normalizeCreateJobInput(input CreateJobInput) (CreateJobInput, string, erro
 	if input.GenerationOverrides == nil {
 		input.GenerationOverrides = map[string]GenerationOverride{}
 	}
+	if len(input.ImageCanvases) > 20 {
+		return input, "", ErrSlotSelectionInvalid
+	}
+	seenCanvasKeys := make(map[string]struct{}, len(input.ImageCanvases))
+	for index := range input.ImageCanvases {
+		canvas := &input.ImageCanvases[index]
+		canvas.CanvasKey = strings.TrimSpace(canvas.CanvasKey)
+		if !canvasKeyPattern.MatchString(canvas.CanvasKey) {
+			return input, "", ErrSlotSelectionInvalid
+		}
+		if _, duplicate := seenCanvasKeys[canvas.CanvasKey]; duplicate {
+			return input, "", ErrSlotSelectionInvalid
+		}
+		seenCanvasKeys[canvas.CanvasKey] = struct{}{}
+		keys := append([]string(nil), canvas.SlotKeys...)
+		for keyIndex := range keys {
+			keys[keyIndex] = strings.TrimSpace(keys[keyIndex])
+			if keys[keyIndex] == "" {
+				return input, "", ErrSlotSelectionInvalid
+			}
+		}
+		sort.Strings(keys)
+		if len(keys) == 0 || len(dedupeStrings(keys)) != len(keys) {
+			return input, "", ErrSlotSelectionInvalid
+		}
+		canvas.SlotKeys = keys
+	}
 	canonical := struct {
 		SKUID      string                        `json:"sku_id"`
 		Template   string                        `json:"template_version_id"`
@@ -403,7 +475,8 @@ func normalizeCreateJobInput(input CreateJobInput) (CreateJobInput, string, erro
 		Locale     string                        `json:"locale"`
 		Preference string                        `json:"user_preference"`
 		Overrides  map[string]GenerationOverride `json:"generation_overrides"`
-	}{input.SKUID, input.TemplateVersionPublicID, slots, assets, input.Locale, input.UserPreference, input.GenerationOverrides}
+		Canvases   []ImageCanvas                 `json:"image_canvases,omitempty"`
+	}{input.SKUID, input.TemplateVersionPublicID, slots, assets, input.Locale, input.UserPreference, input.GenerationOverrides, input.ImageCanvases}
 	encoded, err := json.Marshal(canonical)
 	if err != nil {
 		return input, "", err
@@ -661,6 +734,79 @@ func validateGenerationOverrides(slots []models.AIContentSlot, overrides map[str
 	return nil
 }
 
+type resolvedImageCanvas struct {
+	CanvasKey          string
+	Slots              []models.AIContentSlot
+	GenerationOverride *GenerationOverride
+}
+
+func resolveImageCanvases(selected []models.AIContentSlot, canvases []ImageCanvas) ([]resolvedImageCanvas, error) {
+	if len(canvases) == 0 {
+		return nil, nil
+	}
+	selectedImageKeys := make(map[string]struct{})
+	for _, slot := range selected {
+		if slot.Kind == models.AIContentSlotImage {
+			selectedImageKeys[slot.SlotKey] = struct{}{}
+		}
+	}
+	covered := make(map[string]struct{}, len(selectedImageKeys))
+	result := make([]resolvedImageCanvas, 0, len(canvases))
+	for _, canvas := range canvases {
+		wanted := make(map[string]struct{}, len(canvas.SlotKeys))
+		for _, key := range canvas.SlotKeys {
+			wanted[key] = struct{}{}
+		}
+		resolved := resolvedImageCanvas{CanvasKey: canvas.CanvasKey, GenerationOverride: canvas.GenerationOverride, Slots: make([]models.AIContentSlot, 0, len(wanted))}
+		for _, slot := range selected {
+			if _, ok := wanted[slot.SlotKey]; !ok {
+				continue
+			}
+			if slot.Kind != models.AIContentSlotImage {
+				return nil, ErrSlotSelectionInvalid
+			}
+			resolved.Slots = append(resolved.Slots, slot)
+			covered[slot.SlotKey] = struct{}{}
+			delete(wanted, slot.SlotKey)
+		}
+		if len(resolved.Slots) == 0 || len(wanted) != 0 {
+			return nil, ErrSlotSelectionInvalid
+		}
+		if canvas.GenerationOverride != nil {
+			if err := validateGenerationOverrides([]models.AIContentSlot{resolved.Slots[0]}, map[string]GenerationOverride{resolved.Slots[0].SlotKey: *canvas.GenerationOverride}); err != nil {
+				return nil, err
+			}
+		}
+		result = append(result, resolved)
+	}
+	if len(covered) != len(selectedImageKeys) {
+		return nil, ErrSlotSelectionInvalid
+	}
+	return result, nil
+}
+
+func imageCanvasFacts(canvases []resolvedImageCanvas) []ImageCanvas {
+	result := make([]ImageCanvas, 0, len(canvases))
+	for _, canvas := range canvases {
+		keys := make([]string, 0, len(canvas.Slots))
+		for _, slot := range canvas.Slots {
+			keys = append(keys, slot.SlotKey)
+		}
+		result = append(result, ImageCanvas{CanvasKey: canvas.CanvasKey, SlotKeys: keys, GenerationOverride: canvas.GenerationOverride})
+	}
+	return result
+}
+
+func canvasSlotName(number int, slots []models.AIContentSlot) LocalizedNameFacts {
+	zh := make([]string, 0, len(slots))
+	en := make([]string, 0, len(slots))
+	for _, slot := range slots {
+		zh = append(zh, slot.NameZH)
+		en = append(en, slot.NameEN)
+	}
+	return LocalizedNameFacts{ZH: fmt.Sprintf("画布 %d：%s", number, strings.Join(zh, " + ")), EN: fmt.Sprintf("Canvas %d: %s", number, strings.Join(en, " + "))}
+}
+
 func validateUserPreference(slots []models.AIContentSlot, preference string) error {
 	if preference == "" {
 		return nil
@@ -770,7 +916,7 @@ func loadPublishedSOP(tx *gorm.DB, categoryID uint) (models.SOPVersion, string, 
 	return version, sop.PublicID, nil
 }
 
-func makeProductSnapshot(sku models.SKU, sop models.SOPVersion, captureSOPPublicID string, template models.AIContentTemplate, version models.AIContentTemplateVersion, slots []models.AIContentSlot, assets []models.Asset, locale, preference string, overrides map[string]GenerationOverride) ProductSnapshotV1 {
+func makeProductSnapshot(sku models.SKU, sop models.SOPVersion, captureSOPPublicID string, template models.AIContentTemplate, version models.AIContentTemplateVersion, slots []models.AIContentSlot, assets []models.Asset, locale, preference string, overrides map[string]GenerationOverride, canvases []ImageCanvas) ProductSnapshotV1 {
 	tags := make([]string, 0, len(sku.Tags))
 	for _, tag := range sku.Tags {
 		tags = append(tags, tag.Name)
@@ -795,7 +941,7 @@ func makeProductSnapshot(sku models.SKU, sop models.SOPVersion, captureSOPPublic
 	if overrides == nil {
 		overrides = map[string]GenerationOverride{}
 	}
-	return ProductSnapshotV1{Schema: ProductSnapshotSchemaV1, Locale: locale, TargetPlatform: template.TargetPlatform, Product: ProductFacts{Name: sku.Product.Name, Brand: sku.Product.Brand, Description: sku.Product.Description, Category: CategoryFacts{NameZH: sku.Product.CatalogCategory.Name, NameEN: sku.Product.CatalogCategory.NameEN}}, SKU: SKUFacts{PublicID: sku.PublicID, Code: sku.Code, Color: sku.Color, Size: sku.Size, PlatformTitle: sku.PlatformTitle, SellingPoints: sku.SellingPoints, Tags: tags}, SOP: SOPFacts{PublicID: captureSOPPublicID, VersionPublicID: sop.PublicID, VersionNumber: sop.VersionNumber, SchemaVersion: sop.SchemaVersion, Name: LocalizedNameFacts{ZH: sop.NameZH, EN: sop.NameEN}, Description: LocalizedNameFacts{ZH: sop.DescriptionZH, EN: sop.DescriptionEN}, CoordinateSystem: sop.CoordinateSystem, Views: views}, Template: TemplateFacts{TemplatePublicID: template.PublicID, VersionPublicID: version.PublicID, VersionNumber: version.VersionNumber, PromptCompilerVersion: version.PromptCompilerVersion, PlatformPrompt: version.PlatformPrompt, SelectedSlots: selectedSlots}, SelectedAssets: assetFacts, UserPreference: preference, GenerationOverrides: overrides}
+	return ProductSnapshotV1{Schema: ProductSnapshotSchemaV1, Locale: locale, TargetPlatform: template.TargetPlatform, Product: ProductFacts{Name: sku.Product.Name, Brand: sku.Product.Brand, Description: sku.Product.Description, Category: CategoryFacts{NameZH: sku.Product.CatalogCategory.Name, NameEN: sku.Product.CatalogCategory.NameEN}}, SKU: SKUFacts{PublicID: sku.PublicID, Code: sku.Code, Color: sku.Color, Size: sku.Size, PlatformTitle: sku.PlatformTitle, SellingPoints: sku.SellingPoints, Tags: tags}, SOP: SOPFacts{PublicID: captureSOPPublicID, VersionPublicID: sop.PublicID, VersionNumber: sop.VersionNumber, SchemaVersion: sop.SchemaVersion, Name: LocalizedNameFacts{ZH: sop.NameZH, EN: sop.NameEN}, Description: LocalizedNameFacts{ZH: sop.DescriptionZH, EN: sop.DescriptionEN}, CoordinateSystem: sop.CoordinateSystem, Views: views}, Template: TemplateFacts{TemplatePublicID: template.PublicID, VersionPublicID: version.PublicID, VersionNumber: version.VersionNumber, PromptCompilerVersion: version.PromptCompilerVersion, PlatformPrompt: version.PlatformPrompt, SelectedSlots: selectedSlots}, SelectedAssets: assetFacts, UserPreference: preference, GenerationOverrides: overrides, ImageCanvases: canvases}
 }
 
 func slotFacts(slot models.AIContentSlot) SlotFacts {

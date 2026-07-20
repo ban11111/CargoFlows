@@ -107,9 +107,11 @@ func seedAIJobFixture(t *testing.T) (*gorm.DB, aiJobFixture) {
 		t.Fatal(err)
 	}
 	slots := []models.AIContentSlot{
-		{PublicID: uuid.NewString(), AIContentTemplateVersionID: published.ID, SlotKey: "hero", Kind: models.AIContentSlotImage, NameZH: "主图", NameEN: "Hero", Sequence: 2, Optional: true, DefaultSelected: true, PromptFragment: "hero", ConstraintsJSON: []byte(`{"required_views":["reference_front"]}`), GenerationConfigJSON: []byte(`{"size":"1024x1024"}`), LayoutConfigJSON: []byte(`{}`)},
+		{PublicID: uuid.NewString(), AIContentTemplateVersionID: published.ID, SlotKey: "hero", Kind: models.AIContentSlotImage, NameZH: "主图", NameEN: "Hero", Sequence: 2, Optional: true, DefaultSelected: true, PromptFragment: "hero", ConstraintsJSON: []byte(`{"required_views":["reference_front"]}`), GenerationConfigJSON: []byte(`{"size":"1024x1024","allowed_candidate_count":[1,2]}`), LayoutConfigJSON: []byte(`{}`)},
 		{PublicID: uuid.NewString(), AIContentTemplateVersionID: published.ID, SlotKey: "title", Kind: models.AIContentSlotTitle, NameZH: "标题", NameEN: "Title", Sequence: 1, Optional: true, DefaultSelected: true, PromptFragment: "title", ConstraintsJSON: []byte(`{}`), GenerationConfigJSON: []byte(`{"candidate_count":3,"allowed_candidate_count":[1,3],"allow_user_extra_prompt":true}`), LayoutConfigJSON: []byte(`{}`)},
 		{PublicID: uuid.NewString(), AIContentTemplateVersionID: published.ID, SlotKey: "seo", Kind: models.AIContentSlotSEODescription, NameZH: "搜索描述", NameEN: "SEO description", Sequence: 3, Optional: true, PromptFragment: "seo", ConstraintsJSON: []byte(`{}`), GenerationConfigJSON: []byte(`{"candidate_count":1}`), LayoutConfigJSON: []byte(`{}`)},
+		{PublicID: uuid.NewString(), AIContentTemplateVersionID: published.ID, SlotKey: "detail", Kind: models.AIContentSlotImage, NameZH: "细节图", NameEN: "Detail", Sequence: 4, Optional: true, PromptFragment: "detail", ConstraintsJSON: []byte(`{"required_views":["reference_front"]}`), GenerationConfigJSON: []byte(`{"size":"1024x1024"}`), LayoutConfigJSON: []byte(`{"focus":"edge"}`)},
+		{PublicID: uuid.NewString(), AIContentTemplateVersionID: published.ID, SlotKey: "selling", Kind: models.AIContentSlotImage, NameZH: "卖点图", NameEN: "Selling points", Sequence: 5, Optional: true, PromptFragment: "selling points", ConstraintsJSON: []byte(`{"required_views":["reference_front"]}`), GenerationConfigJSON: []byte(`{"size":"1024x1024"}`), LayoutConfigJSON: []byte(`{"focus":"benefits"}`)},
 	}
 	if err := db.Create(&slots).Error; err != nil {
 		t.Fatal(err)
@@ -227,6 +229,46 @@ func TestCreateJobAllowsTextOnlyWithoutAssets(t *testing.T) {
 	}
 }
 
+func TestCreateJobSupportsMultipleCanvasesWithReusableRequirements(t *testing.T) {
+	db, fixture := seedAIJobFixture(t)
+	count := 2
+	job, err := NewJobService(db).Create(t.Context(), CreateJobInput{
+		SKUID: fixture.SKU.PublicID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID,
+		SelectedSlotKeys: []string{"title", "hero", "detail", "selling"}, SelectedAssetIDs: []string{fixture.ApprovedAsset.PublicID},
+		ImageCanvases: []ImageCanvas{
+			{CanvasKey: "canvas-a", SlotKeys: []string{"detail", "hero"}, GenerationOverride: &GenerationOverride{CandidateCount: &count}},
+			{CanvasKey: "canvas-b", SlotKeys: []string{"selling", "detail"}},
+		}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID,
+		IdempotencyKey: "job-test-multiple-canvases",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []string{job.Items[0].SlotKey, job.Items[1].SlotKey, job.Items[2].SlotKey}; !reflect.DeepEqual(got, []string{"title", "hero", "detail"}) {
+		t.Fatalf("items = %v, want title + canvas A + canvas B", got)
+	}
+	var snapshot ProductSnapshotV1
+	if err := json.Unmarshal(job.InputSnapshot, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.ImageCanvases) != 2 || !reflect.DeepEqual(snapshot.ImageCanvases[0].SlotKeys, []string{"hero", "detail"}) || !reflect.DeepEqual(snapshot.ImageCanvases[1].SlotKeys, []string{"detail", "selling"}) {
+		t.Fatalf("ordered canvas snapshot = %#v", snapshot.ImageCanvases)
+	}
+	var canvasA, canvasB SlotFacts
+	if err := json.Unmarshal(job.Items[1].SlotSnapshot, &canvasA); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(job.Items[2].SlotSnapshot, &canvasB); err != nil {
+		t.Fatal(err)
+	}
+	if canvasA.CanvasKey != "canvas-a" || canvasB.CanvasKey != "canvas-b" || canvasA.CanvasGeneration == nil || canvasA.CanvasGeneration.CandidateCount == nil || *canvasA.CanvasGeneration.CandidateCount != 2 {
+		t.Fatalf("canvas identities/options were not snapshotted: A=%#v B=%#v", canvasA, canvasB)
+	}
+	if got := []string{canvasA.CompositeRequirements[0].SlotKey, canvasA.CompositeRequirements[1].SlotKey, canvasB.CompositeRequirements[0].SlotKey, canvasB.CompositeRequirements[1].SlotKey}; !reflect.DeepEqual(got, []string{"hero", "detail", "detail", "selling"}) {
+		t.Fatalf("canvas requirements = %v", got)
+	}
+}
+
 func TestCreateJobRejectsInvalidTemplateSlotsAndAssetsWithoutWriting(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -254,6 +296,21 @@ func TestCreateJobRejectsInvalidTemplateSlotsAndAssetsWithoutWriting(t *testing.
 		{"image without required asset", func(f aiJobFixture) CreateJobInput {
 			return CreateJobInput{SKUID: f.SKU.PublicID, TemplateVersionPublicID: f.PublishedVersion.PublicID, SelectedSlotKeys: []string{"hero"}}
 		}, ErrAssetNotEligible},
+		{"canvas contains text", func(f aiJobFixture) CreateJobInput {
+			return CreateJobInput{SKUID: f.SKU.PublicID, TemplateVersionPublicID: f.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title"}, ImageCanvases: []ImageCanvas{{CanvasKey: "canvas-a", SlotKeys: []string{"title"}}}}
+		}, ErrSlotSelectionInvalid},
+		{"canvas contains unselected image", func(f aiJobFixture) CreateJobInput {
+			return CreateJobInput{SKUID: f.SKU.PublicID, TemplateVersionPublicID: f.PublishedVersion.PublicID, SelectedSlotKeys: []string{"hero"}, SelectedAssetIDs: []string{f.ApprovedAsset.PublicID}, ImageCanvases: []ImageCanvas{{CanvasKey: "canvas-a", SlotKeys: []string{"detail"}}}}
+		}, ErrSlotSelectionInvalid},
+		{"canvas leaves selected image unused", func(f aiJobFixture) CreateJobInput {
+			return CreateJobInput{SKUID: f.SKU.PublicID, TemplateVersionPublicID: f.PublishedVersion.PublicID, SelectedSlotKeys: []string{"hero", "detail"}, SelectedAssetIDs: []string{f.ApprovedAsset.PublicID}, ImageCanvases: []ImageCanvas{{CanvasKey: "canvas-a", SlotKeys: []string{"hero"}}}}
+		}, ErrSlotSelectionInvalid},
+		{"duplicate canvas key", func(f aiJobFixture) CreateJobInput {
+			return CreateJobInput{SKUID: f.SKU.PublicID, TemplateVersionPublicID: f.PublishedVersion.PublicID, SelectedSlotKeys: []string{"hero"}, SelectedAssetIDs: []string{f.ApprovedAsset.PublicID}, ImageCanvases: []ImageCanvas{{CanvasKey: "canvas-a", SlotKeys: []string{"hero"}}, {CanvasKey: "canvas-a", SlotKeys: []string{"hero"}}}}
+		}, ErrSlotSelectionInvalid},
+		{"empty canvas", func(f aiJobFixture) CreateJobInput {
+			return CreateJobInput{SKUID: f.SKU.PublicID, TemplateVersionPublicID: f.PublishedVersion.PublicID, SelectedSlotKeys: []string{"hero"}, SelectedAssetIDs: []string{f.ApprovedAsset.PublicID}, ImageCanvases: []ImageCanvas{{CanvasKey: "canvas-a"}}}
+		}, ErrSlotSelectionInvalid},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

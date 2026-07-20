@@ -1162,6 +1162,13 @@ export interface components {
             generation_overrides?: {
                 [key: string]: components["schemas"]["AIJobGenerationOverride"];
             };
+            /** @description Explicit generated image canvases. Each canvas independently selects one or more published image requirements; requirements may be reused across canvases. */
+            image_canvases?: components["schemas"]["AIJobImageCanvas"][];
+        };
+        AIJobImageCanvas: {
+            canvas_key: string;
+            slot_keys: string[];
+            generation_override?: components["schemas"]["AIJobGenerationOverride"];
         };
         AIJobGenerationOverride: {
             candidate_count?: number;
@@ -1342,6 +1349,9 @@ export interface components {
             layout_config: {
                 [key: string]: unknown;
             };
+            composite_requirements?: components["schemas"]["AIJobSlotSnapshot"][];
+            canvas_key?: string;
+            canvas_generation_override?: components["schemas"]["AIJobGenerationOverride"];
         };
         AISnapshotLocalizedText: {
             zh: string;
@@ -1458,6 +1468,7 @@ export interface components {
             generation_overrides: {
                 [key: string]: components["schemas"]["AIJobGenerationOverride"];
             };
+            image_canvases?: components["schemas"]["AIJobImageCanvas"][];
         };
         AITemplateValidationIssue: {
             code: string;
