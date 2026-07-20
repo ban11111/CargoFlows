@@ -26,40 +26,31 @@ func TestAssetReviewRoutesEnforceRoleAndOwnership(t *testing.T) {
 	fixture := newAssetAccessFixture(t)
 
 	for _, path := range []string{"/api/v1/assets/review", "/api/v1/assets/review/hierarchy"} {
-		response := fixture.request(t, fixture.photographerA, http.MethodGet, path, "")
-		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), fixture.assetA.PublicID) || strings.Contains(response.Body.String(), fixture.assetB.PublicID) {
-			t.Fatalf("photographer-scoped %s = %d %s", path, response.Code, response.Body.String())
+		operator := fixture.request(t, fixture.photographerA, http.MethodGet, path, "")
+		if operator.Code != http.StatusForbidden {
+			t.Fatalf("operator %s = %d %s, want 403", path, operator.Code, operator.Body.String())
 		}
-		viewer := fixture.request(t, fixture.viewer, http.MethodGet, path, "")
-		if viewer.Code != http.StatusForbidden {
-			t.Fatalf("viewer %s = %d %s, want 403", path, viewer.Code, viewer.Body.String())
+		manager := fixture.request(t, fixture.operator, http.MethodGet, path, "")
+		if manager.Code != http.StatusOK || !strings.Contains(manager.Body.String(), fixture.assetA.PublicID) || !strings.Contains(manager.Body.String(), fixture.assetB.PublicID) {
+			t.Fatalf("admin %s = %d %s", path, manager.Code, manager.Body.String())
 		}
 	}
 
-	owned := fixture.request(t, fixture.photographerA, http.MethodGet, "/api/v1/assets/"+fixture.assetA.PublicID+"/media", "")
-	if owned.Code != http.StatusOK {
-		t.Fatalf("photographer own media = %d %s", owned.Code, owned.Body.String())
-	}
 	other := fixture.request(t, fixture.photographerA, http.MethodGet, "/api/v1/assets/"+fixture.assetB.PublicID+"/media", "")
-	if other.Code != http.StatusNotFound {
-		t.Fatalf("photographer other media = %d %s, want 404", other.Code, other.Body.String())
+	if other.Code != http.StatusOK {
+		t.Fatalf("operator media = %d %s", other.Code, other.Body.String())
 	}
 	reviewer := fixture.request(t, fixture.operator, http.MethodGet, "/api/v1/assets/"+fixture.assetB.PublicID+"/media", "")
 	if reviewer.Code != http.StatusOK {
 		t.Fatalf("operator media = %d %s", reviewer.Code, reviewer.Body.String())
 	}
-	viewer := fixture.request(t, fixture.viewer, http.MethodGet, "/api/v1/assets/"+fixture.assetA.PublicID+"/media", "")
-	if viewer.Code != http.StatusForbidden {
-		t.Fatalf("viewer media = %d %s, want 403", viewer.Code, viewer.Body.String())
-	}
-
 	photographerReview := fixture.request(t, fixture.photographerA, http.MethodPatch, "/api/v1/assets/"+fixture.assetA.PublicID+"/review", `{"status":"approved"}`)
 	if photographerReview.Code != http.StatusForbidden {
 		t.Fatalf("photographer review = %d %s, want 403", photographerReview.Code, photographerReview.Body.String())
 	}
 	approved := fixture.request(t, fixture.operator, http.MethodPatch, "/api/v1/assets/"+fixture.assetB.PublicID+"/review", `{"status":"approved"}`)
 	if approved.Code != http.StatusOK {
-		t.Fatalf("operator review = %d %s", approved.Code, approved.Body.String())
+		t.Fatalf("admin review = %d %s", approved.Code, approved.Body.String())
 	}
 	var audit models.AssetReview
 	if err := fixture.db.Where("asset_id = ?", fixture.assetB.ID).First(&audit).Error; err != nil || audit.ReviewerID != fixture.operator.ID || audit.Status != "approved" {
@@ -137,10 +128,10 @@ func newAssetAccessFixture(t *testing.T) assetAccessFixture {
 	t.Helper()
 	db := newTestDB(t)
 	users := []models.User{
-		{Name: "Photographer A", Email: uuid.NewString() + "@example.test", PasswordHash: "unused", Role: models.RolePhotographer, Status: "active"},
-		{Name: "Photographer B", Email: uuid.NewString() + "@example.test", PasswordHash: "unused", Role: models.RolePhotographer, Status: "active"},
-		{Name: "Operator", Email: uuid.NewString() + "@example.test", PasswordHash: "unused", Role: models.RoleOperator, Status: "active"},
-		{Name: "Viewer", Email: uuid.NewString() + "@example.test", PasswordHash: "unused", Role: models.RoleViewer, Status: "active"},
+		{Name: "Operator A", Email: uuid.NewString() + "@example.test", PasswordHash: "unused", Role: models.RoleOperator, Status: "active"},
+		{Name: "Operator B", Email: uuid.NewString() + "@example.test", PasswordHash: "unused", Role: models.RoleOperator, Status: "active"},
+		{Name: "Admin", Email: uuid.NewString() + "@example.test", PasswordHash: "unused", Role: models.RoleAdmin, Status: "active"},
+		{Name: "Operator C", Email: uuid.NewString() + "@example.test", PasswordHash: "unused", Role: models.RoleOperator, Status: "active"},
 	}
 	for index := range users {
 		if err := db.Create(&users[index]).Error; err != nil {

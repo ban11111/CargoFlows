@@ -28,6 +28,56 @@ type oldAIContentTemplate struct {
 	UpdatedAt      time.Time
 }
 
+type oldUser struct {
+	ID           uint `gorm:"primaryKey"`
+	Name         string
+	Email        string `gorm:"uniqueIndex"`
+	PasswordHash string
+	Role         string
+	Status       string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+func (oldUser) TableName() string { return "users" }
+
+func TestUserMigrationPromotesOneOwnerAndCollapsesLegacyRoles(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&oldUser{}); err != nil {
+		t.Fatal(err)
+	}
+	legacy := []oldUser{
+		{Name: "First admin", Email: "first@example.test", PasswordHash: "hash-one", Role: "admin", Status: "active"},
+		{Name: "Second admin", Email: "second@example.test", PasswordHash: "hash-two", Role: "admin", Status: "active"},
+		{Name: "Photographer", Email: "photo@example.test", PasswordHash: "hash-three", Role: "photographer", Status: "active"},
+		{Name: "Viewer", Email: "viewer@example.test", PasswordHash: "hash-four", Role: "viewer", Status: "active"},
+	}
+	if err := db.Create(&legacy).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateUserSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateUserSchema(db); err != nil {
+		t.Fatalf("second migration: %v", err)
+	}
+	var users []models.User
+	if err := db.Order("id ASC").Find(&users).Error; err != nil {
+		t.Fatal(err)
+	}
+	if users[0].Role != models.RoleSuperAdmin || users[1].Role != models.RoleAdmin || users[2].Role != models.RoleOperator || users[3].Role != models.RoleOperator {
+		t.Fatalf("migrated roles = %q, %q, %q, %q", users[0].Role, users[1].Role, users[2].Role, users[3].Role)
+	}
+	for index, user := range users {
+		if user.PublicID == "" || user.SessionVersion != 1 || user.MustChangePassword || user.PasswordHash != legacy[index].PasswordHash {
+			t.Fatalf("migrated user %d = %#v", index, user)
+		}
+	}
+}
+
 func (oldAIContentTemplate) TableName() string { return "ai_content_templates" }
 
 type oldAIContentTemplateVersion struct {

@@ -135,7 +135,7 @@ export const users: User[] = [
     id: "user_003",
     name: "Bo Lin",
     email: "bo@cargoflow.local",
-    role: "photographer",
+    role: "operator",
     status: "active",
     lastSeenAt: "2026-07-12T10:45:00.000Z",
   },

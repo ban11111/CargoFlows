@@ -80,6 +80,9 @@ func newRouter(cfg config.Config, db *gorm.DB, deps AIDependencies) *gin.Engine 
 
 	protected := v1.Group("")
 	protected.Use(server.requireAuth())
+	protected.GET("/auth/me", server.me)
+	protected.POST("/auth/change-password", server.changePassword)
+	protected.Use(server.requirePasswordChanged())
 	registerExistingRoutes(protected, server)
 	registerAIRoutes(protected, server)
 
@@ -106,11 +109,11 @@ func registerExistingRoutes(protected *gin.RouterGroup, server *Server) {
 	protected.GET("/model-families", server.listModelFamilies)
 	protected.GET("/model-families/:family_id", server.getModelFamily)
 	modelFamilyAdmins := protected.Group("")
-	modelFamilyAdmins.Use(requireRoles(models.RoleAdmin))
+	modelFamilyAdmins.Use(requireRoles(models.RoleSuperAdmin, models.RoleAdmin))
 	modelFamilyAdmins.POST("/model-families", server.createModelFamily)
 	modelFamilyAdmins.PATCH("/model-families/:family_id", server.updateModelFamily)
 	modelFamilyManagers := protected.Group("")
-	modelFamilyManagers.Use(requireRoles(models.RoleAdmin, models.RoleOperator))
+	modelFamilyManagers.Use(requireRoles(models.RoleSuperAdmin, models.RoleAdmin, models.RoleOperator))
 	modelFamilyManagers.POST("/model-families/:family_id/members", server.addModelFamilyMember)
 	modelFamilyManagers.DELETE("/model-families/:family_id/members/:member_id", server.removeModelFamilyMember)
 	modelFamilyManagers.POST("/skus/:sku_id/variant-identity/versions", server.createSKUVariantIdentityVersion)
@@ -118,7 +121,7 @@ func registerExistingRoutes(protected *gin.RouterGroup, server *Server) {
 	modelFamilyManagers.POST("/variant-identity-versions/:version_id/validate", server.validateVariantIdentityVersion)
 	modelFamilyManagers.POST("/variant-identity-versions/:version_id/publish", server.publishVariantIdentityVersion)
 	sopManagers := protected.Group("")
-	sopManagers.Use(requireRoles(models.RoleAdmin, models.RoleOperator))
+	sopManagers.Use(requireRoles(models.RoleSuperAdmin, models.RoleAdmin, models.RoleOperator))
 	sopManagers.POST("/capture-sops", server.createCaptureSOP)
 	sopManagers.PATCH("/sop-versions/:version_id", server.updateSOPVersion)
 	sopManagers.POST("/sop-versions/:version_id/views", server.addSOPView)
@@ -137,19 +140,26 @@ func registerExistingRoutes(protected *gin.RouterGroup, server *Server) {
 	protected.POST("/assets/upload-url", server.createUploadURL)
 	protected.POST("/assets/complete", server.completeAssetUpload)
 	assetReaders := protected.Group("")
-	assetReaders.Use(requireRoles(models.RoleAdmin, models.RoleOperator, models.RolePhotographer))
+	assetReaders.Use(requireRoles(models.RoleSuperAdmin, models.RoleAdmin, models.RoleOperator))
 	assetReaders.GET("/assets/:asset_id/media", server.assetMedia)
 	assetReaders.GET("/assets/review", server.listAssetsForReview)
-	assetReaders.GET("/assets/review/hierarchy", server.listAssetReviewHierarchy)
+	assetReviewManagers := protected.Group("")
+	assetReviewManagers.Use(requireRoles(models.RoleSuperAdmin, models.RoleAdmin))
+	assetReviewManagers.GET("/assets/review/hierarchy", server.listAssetReviewHierarchy)
 	assetReviewers := protected.Group("")
-	assetReviewers.Use(requireRoles(models.RoleAdmin, models.RoleOperator))
+	assetReviewers.Use(requireRoles(models.RoleSuperAdmin, models.RoleAdmin))
 	assetReviewers.PATCH("/assets/:asset_id/review", server.reviewAsset)
-	protected.GET("/users", server.listUsers)
+	userManagers := protected.Group("")
+	userManagers.Use(requireRoles(models.RoleSuperAdmin, models.RoleAdmin))
+	userManagers.GET("/users", server.listUsers)
+	userManagers.POST("/users", server.createUser)
+	userManagers.PATCH("/users/:user_id", server.updateUser)
+	userManagers.PUT("/users/:user_id/password", server.resetUserPassword)
 }
 
 func registerAIRoutes(protected *gin.RouterGroup, server *Server) {
 	aiJobs := protected.Group("")
-	aiJobs.Use(requireRoles(models.RoleAdmin, models.RoleOperator))
+	aiJobs.Use(requireRoles(models.RoleSuperAdmin, models.RoleAdmin, models.RoleOperator))
 	aiJobs.GET("/ai-jobs", server.listAIJobs)
 	aiJobs.POST("/ai-jobs", server.createAIJob)
 	aiJobs.GET("/ai-jobs/:job_id", server.getAIJob)
@@ -163,11 +173,13 @@ func registerAIRoutes(protected *gin.RouterGroup, server *Server) {
 	aiJobs.POST("/ai-jobs/:job_id/items/:item_id/text-results/:result_id/apply", server.applyAITextResult)
 	aiJobs.GET("/skus/:sku_id/platform-content", server.getSKUPlatformContent)
 	aiJobs.GET("/ai-content-templates", server.listAIContentTemplates)
+	aiSettings := protected.Group("")
+	aiSettings.Use(requireRoles(models.RoleSuperAdmin))
+	aiSettings.GET("/settings/openai", server.getOpenAISetting)
+	aiSettings.PUT("/settings/openai", server.putOpenAISetting)
+	aiSettings.DELETE("/settings/openai", server.disableOpenAISetting)
 	aiAdmin := protected.Group("")
-	aiAdmin.Use(requireRoles(models.RoleAdmin))
-	aiAdmin.GET("/settings/openai", server.getOpenAISetting)
-	aiAdmin.PUT("/settings/openai", server.putOpenAISetting)
-	aiAdmin.DELETE("/settings/openai", server.disableOpenAISetting)
+	aiAdmin.Use(requireRoles(models.RoleSuperAdmin, models.RoleAdmin))
 	aiAdmin.POST("/ai-content-templates", server.createAIContentTemplate)
 	aiAdmin.GET("/ai-content-templates/:template_id", server.getAIContentTemplate)
 	aiAdmin.POST("/ai-content-templates/:template_id/versions", server.copyAIContentTemplateVersion)
@@ -228,7 +240,11 @@ func requireRoles(roles ...models.Role) gin.HandlerFunc {
 }
 
 func isSOPManager(user models.User) bool {
-	return user.Role == models.RoleAdmin || user.Role == models.RoleOperator
+	return user.Role == models.RoleSuperAdmin || user.Role == models.RoleAdmin || user.Role == models.RoleOperator
+}
+
+func isAdministrator(user models.User) bool {
+	return user.Role == models.RoleSuperAdmin || user.Role == models.RoleAdmin
 }
 
 func (s *Server) requireAuth() gin.HandlerFunc {
@@ -260,8 +276,30 @@ func (s *Server) requireAuth() gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"message": "user not found"})
 			return
 		}
+		if user.Status != "active" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": "account_disabled", "message": "account is disabled"})
+			return
+		}
+		sessionVersion := uint(1)
+		if claimed, ok := claims["session_version"].(float64); ok {
+			sessionVersion = uint(claimed)
+		}
+		if sessionVersion != user.SessionVersion {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": "session_revoked", "message": "session has been revoked"})
+			return
+		}
 
 		c.Set("user", user)
+		c.Next()
+	}
+}
+
+func (s *Server) requirePasswordChanged() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if currentUser(c).MustChangePassword {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": "password_change_required", "message": "password change required"})
+			return
+		}
 		c.Next()
 	}
 }
@@ -274,10 +312,11 @@ func currentUser(c *gin.Context) models.User {
 
 func (s *Server) issueToken(user models.User) (string, error) {
 	claims := jwt.MapClaims{
-		"sub":  user.ID,
-		"role": user.Role,
-		"exp":  time.Now().Add(7 * 24 * time.Hour).Unix(),
-		"iat":  time.Now().Unix(),
+		"sub":             user.ID,
+		"role":            user.Role,
+		"exp":             time.Now().Add(7 * 24 * time.Hour).Unix(),
+		"iat":             time.Now().Unix(),
+		"session_version": user.SessionVersion,
 	}
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(s.cfg.JWTSecret))
 }

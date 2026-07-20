@@ -9,8 +9,10 @@ import (
 type Role string
 
 const (
-	RoleAdmin        Role = "admin"
-	RoleOperator     Role = "operator"
+	RoleSuperAdmin Role = "super_admin"
+	RoleAdmin      Role = "admin"
+	RoleOperator   Role = "operator"
+	// Legacy roles are retained only so old rows can be migrated safely.
 	RolePhotographer Role = "photographer"
 	RoleViewer       Role = "viewer"
 )
@@ -32,15 +34,28 @@ type Tag struct {
 }
 
 type User struct {
-	ID           uint      `gorm:"primaryKey" json:"id"`
-	Name         string    `gorm:"size:120;not null" json:"name"`
-	Email        string    `gorm:"size:180;uniqueIndex;not null" json:"email"`
-	PasswordHash string    `gorm:"size:255;not null" json:"-"`
-	Role         Role      `gorm:"size:32;not null" json:"role"`
-	Status       string    `gorm:"size:32;not null;default:active" json:"status"`
-	LastSeenAt   time.Time `json:"last_seen_at"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID                 uint      `gorm:"primaryKey" json:"-"`
+	PublicID           string    `gorm:"size:36;uniqueIndex" json:"public_id"`
+	Name               string    `gorm:"size:120;not null" json:"name"`
+	Email              string    `gorm:"size:180;uniqueIndex;not null" json:"email"`
+	PasswordHash       string    `gorm:"size:255;not null" json:"-"`
+	Role               Role      `gorm:"size:32;not null" json:"role"`
+	Status             string    `gorm:"size:32;not null;default:active" json:"status"`
+	MustChangePassword bool      `gorm:"not null;default:false" json:"must_change_password"`
+	SessionVersion     uint      `gorm:"not null;default:1" json:"-"`
+	LastSeenAt         time.Time `json:"last_seen_at"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+func (user *User) BeforeCreate(*gorm.DB) error {
+	if err := ensurePublicID(&user.PublicID); err != nil {
+		return err
+	}
+	if user.SessionVersion == 0 {
+		user.SessionVersion = 1
+	}
+	return nil
 }
 
 type Product struct {

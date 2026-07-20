@@ -7,6 +7,68 @@ servers:
 security:
   - bearerAuth: []
 paths:
+  /auth/me:
+    get:
+      operationId: getCurrentUser
+      responses:
+        '200': { description: Current authenticated user, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /auth/change-password:
+    post:
+      operationId: changePassword
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ChangePasswordRequest' } } }
+      responses:
+        '200': { description: Password changed and replacement bearer token issued, content: { application/json: { schema: { $ref: '#/components/schemas/AuthResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /users:
+    get:
+      operationId: listUsers
+      responses:
+        '200': { description: Users, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/User' } } } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createUser
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateUserRequest' } } }
+      responses:
+        '201': { description: User created, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /users/{user_id}:
+    parameters: [ { $ref: '#/components/parameters/UserID' } ]
+    patch:
+      operationId: updateUser
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateUserRequest' } } }
+      responses:
+        '200': { description: User updated, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /users/{user_id}/password:
+    parameters: [ { $ref: '#/components/parameters/UserID' } ]
+    put:
+      operationId: resetUserPassword
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ResetUserPasswordRequest' } } }
+      responses:
+        '200': { description: Temporary password set, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
   /skus:
     get:
       operationId: listSKUs
@@ -98,7 +160,7 @@ paths:
       operationId: listCaptureSOPs
       parameters:
         - { in: query, name: category_id, schema: { type: integer, minimum: 1 } }
-        - { in: query, name: include_all, description: "Manager-only lifecycle listing (admin/operator). When true, includes draft-only and archived-only SOPs and every ordered version. Defaults to published-only selection semantics.", schema: { type: boolean, default: false } }
+        - { in: query, name: include_all, description: "Operational lifecycle listing (super_admin/admin/operator). When true, includes draft-only and archived-only SOPs and every ordered version. Defaults to published-only selection semantics.", schema: { type: boolean, default: false } }
       responses:
         '200':
           description: Capture SOPs
@@ -848,6 +910,11 @@ components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
   parameters:
+    UserID:
+      name: user_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     ModelFamilyID: { in: path, name: family_id, required: true, schema: { type: string, format: uuid } }
     ModelFamilyMemberID: { in: path, name: member_id, required: true, schema: { type: string, format: uuid } }
     VariantIdentityVersionID: { in: path, name: version_id, required: true, schema: { type: string, format: uuid } }
@@ -886,6 +953,55 @@ components:
     InternalServerError: { description: Unexpected database or server error, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
     ServiceUnavailable: { description: Required service or server dependency unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
   schemas:
+    User:
+      type: object
+      additionalProperties: false
+      required: [public_id, name, email, role, status, must_change_password, last_seen_at, created_at]
+      properties:
+        public_id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { type: string, enum: [super_admin, admin, operator] }
+        status: { type: string, enum: [active, disabled] }
+        must_change_password: { type: boolean }
+        last_seen_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+    AuthResponse:
+      type: object
+      additionalProperties: false
+      required: [token, user]
+      properties:
+        token: { type: string, writeOnly: true }
+        user: { $ref: '#/components/schemas/User' }
+    ChangePasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [current_password, new_password]
+      properties:
+        current_password: { type: string, format: password, writeOnly: true }
+        new_password: { type: string, format: password, minLength: 12, maxLength: 72, writeOnly: true }
+    CreateUserRequest:
+      type: object
+      additionalProperties: false
+      required: [name, email, role, password]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        email: { type: string, format: email, maxLength: 180 }
+        role: { type: string, enum: [admin, operator] }
+        password: { type: string, format: password, minLength: 12, maxLength: 72, writeOnly: true }
+    UpdateUserRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        role: { type: string, enum: [admin, operator] }
+        status: { type: string, enum: [active, disabled] }
+    ResetUserPasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [password]
+      properties:
+        password: { type: string, format: password, minLength: 12, maxLength: 72, writeOnly: true }
     OpenAISetting:
       type: object
       additionalProperties: false

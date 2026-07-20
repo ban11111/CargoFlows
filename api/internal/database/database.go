@@ -82,6 +82,9 @@ func runWithMigrationLock(acquire func() (func() error, error), migrate func() e
 }
 
 func migrateSchema(db *gorm.DB) error {
+	if err := migrateUserSchema(db); err != nil {
+		return err
+	}
 	if err := backfillLegacyPublicIDs(db); err != nil {
 		return err
 	}
@@ -128,6 +131,57 @@ func migrateSchema(db *gorm.DB) error {
 		&models.SKUPlatformContent{},
 		&models.SKUPlatformContentRevision{},
 	)
+}
+
+func migrateUserSchema(db *gorm.DB) error {
+	if err := db.AutoMigrate(&models.User{}); err != nil {
+		return fmt.Errorf("migrate users: %w", err)
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		var users []models.User
+		if err := tx.Order("id ASC").Find(&users).Error; err != nil {
+			return err
+		}
+		for index := range users {
+			updates := map[string]any{}
+			if users[index].PublicID == "" {
+				updates["public_id"] = uuid.NewString()
+			}
+			if users[index].SessionVersion == 0 {
+				updates["session_version"] = 1
+			}
+			if users[index].Role == models.RolePhotographer || users[index].Role == models.RoleViewer {
+				updates["role"] = models.RoleOperator
+				users[index].Role = models.RoleOperator
+			}
+			if len(updates) > 0 {
+				if err := tx.Model(&models.User{}).Where("id = ?", users[index].ID).Updates(updates).Error; err != nil {
+					return err
+				}
+			}
+		}
+
+		var superAdmins []models.User
+		if err := tx.Where("role = ?", models.RoleSuperAdmin).Order("id ASC").Find(&superAdmins).Error; err != nil {
+			return err
+		}
+		if len(superAdmins) == 0 {
+			var oldestAdmin models.User
+			if err := tx.Where("role = ?", models.RoleAdmin).Order("id ASC").First(&oldestAdmin).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) && len(users) == 0 {
+					return nil
+				}
+				return fmt.Errorf("select initial super admin: %w", err)
+			}
+			return tx.Model(&oldestAdmin).Update("role", models.RoleSuperAdmin).Error
+		}
+		for _, duplicate := range superAdmins[1:] {
+			if err := tx.Model(&duplicate).Update("role", models.RoleAdmin).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func migrateAITextSchema(db *gorm.DB) error {
@@ -265,9 +319,9 @@ func Seed(db *gorm.DB) error {
 	}
 
 	users := []models.User{
-		{Name: "Zheng Baiyi", Email: "admin@cargoflow.local", PasswordHash: string(hash), Role: models.RoleAdmin, Status: "active", LastSeenAt: time.Now()},
+		{Name: "Zheng Baiyi", Email: "admin@cargoflow.local", PasswordHash: string(hash), Role: models.RoleSuperAdmin, Status: "active", LastSeenAt: time.Now()},
 		{Name: "Ivy Chen", Email: "ivy@cargoflow.local", PasswordHash: string(hash), Role: models.RoleOperator, Status: "active", LastSeenAt: time.Now()},
-		{Name: "Bo Lin", Email: "bo@cargoflow.local", PasswordHash: string(hash), Role: models.RolePhotographer, Status: "active", LastSeenAt: time.Now()},
+		{Name: "Bo Lin", Email: "bo@cargoflow.local", PasswordHash: string(hash), Role: models.RoleOperator, Status: "active", LastSeenAt: time.Now()},
 	}
 	if err := db.Create(&users).Error; err != nil {
 		return err

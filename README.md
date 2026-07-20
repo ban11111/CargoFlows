@@ -67,7 +67,7 @@ docker compose up -d --build mysql minio api worker
 
 The root `.env` contains local runtime settings consumed by Compose. Never add
 an OpenAI API key, Cloudflare Tunnel token, or plaintext administrator credential
-to that file. OpenAI credentials must be configured through the administrator UI
+to that file. OpenAI credentials must be configured through the super administrator UI
 and remain encrypted in the database.
 
 ### launchd-managed Web development server
@@ -201,14 +201,14 @@ go run ./cmd/worker
 
 The worker records zero-usage dry-run executions locally. To execute text and
 image slots through OpenAI, first configure a newly rotated project
-API key from the administrator OpenAI settings page, then start the worker with
+API key from the super administrator OpenAI settings page, then start the worker with
 `AI_WORKER_DRY_RUN=false` in a terminal that has the same
 `CARGOFLOW_SECRETS_MASTER_KEY`. Never place an OpenAI key in shell commands,
 environment files, source code, logs, or chat. Image jobs can create multiple
 independently configured canvases; each canvas selects one or more published
 image requirements, and a requirement may be reused across canvases.
 
-All normal AI jobs use that single administrator-managed credential. The API
+All normal AI jobs use that single super-administrator-managed credential. The API
 encrypts it in the database, never returns the plaintext, and the worker decrypts
 it only immediately before a provider call. Product text candidates remain
 separate from formal platform content until an operator edits (optionally),

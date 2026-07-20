@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/mail"
 	"strconv"
 	"strings"
 	"time"
@@ -35,7 +36,7 @@ func (s *Server) login(c *gin.Context) {
 	}
 
 	var user models.User
-	if err := s.db.Where("email = ? AND status = ?", req.Email, "active").First(&user).Error; err != nil {
+	if err := s.db.Where("email = ? AND status = ?", strings.ToLower(strings.TrimSpace(req.Email)), "active").First(&user).Error; err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"message": "invalid credentials"})
 		return
 	}
@@ -54,7 +55,73 @@ func (s *Server) login(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"token": token, "user": user})
+	c.JSON(http.StatusOK, gin.H{"token": token, "user": userDTOFromModel(user)})
+}
+
+type userDTO struct {
+	PublicID           string      `json:"public_id"`
+	Name               string      `json:"name"`
+	Email              string      `json:"email"`
+	Role               models.Role `json:"role"`
+	Status             string      `json:"status"`
+	MustChangePassword bool        `json:"must_change_password"`
+	LastSeenAt         time.Time   `json:"last_seen_at"`
+	CreatedAt          time.Time   `json:"created_at"`
+}
+
+func userDTOFromModel(user models.User) userDTO {
+	return userDTO{PublicID: user.PublicID, Name: user.Name, Email: user.Email, Role: user.Role, Status: user.Status,
+		MustChangePassword: user.MustChangePassword, LastSeenAt: user.LastSeenAt, CreatedAt: user.CreatedAt}
+}
+
+func (s *Server) me(c *gin.Context) {
+	c.JSON(http.StatusOK, userDTOFromModel(currentUser(c)))
+}
+
+type changePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
+func validManagedPassword(password string) bool {
+	return len([]byte(password)) >= 12 && len([]byte(password)) <= 72
+}
+
+func (s *Server) changePassword(c *gin.Context) {
+	var req changePasswordRequest
+	if err := decodeJSONStrict(c, &req); err != nil || !validManagedPassword(req.NewPassword) {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "validation_failed", "message": "new_password must be between 12 and 72 bytes"})
+		return
+	}
+	user := currentUser(c)
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.CurrentPassword)); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "current_password_invalid", "message": "current password is incorrect"})
+		return
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "change password failed"})
+		return
+	}
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		return tx.Model(&models.User{}).Where("id = ?", user.ID).Updates(map[string]any{
+			"password_hash": hash, "must_change_password": false, "session_version": gorm.Expr("session_version + 1"),
+		}).Error
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "change password failed"})
+		return
+	}
+	if err := s.db.First(&user, user.ID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "reload user failed"})
+		return
+	}
+	token, err := s.issueToken(user)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "issue token failed"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"token": token, "user": userDTOFromModel(user)})
 }
 
 type createSKURequest struct {
@@ -895,6 +962,10 @@ func respondCaptureError(c *gin.Context, err error) {
 }
 
 func (s *Server) listAssetsForReview(c *gin.Context) {
+	if currentUser(c).Role == models.RoleOperator && c.Query("status") != "approved" {
+		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": "operators may only read approved assets"})
+		return
+	}
 	var assets []models.Asset
 	query := scopeAssetsForUser(s.db.Model(&models.Asset{}), currentUser(c)).Preload("SKU.Product.CatalogCategory").Preload("SKU.Tags").Preload("SOPView").Preload("PhotoSession").Order("assets.created_at DESC")
 	if skuPublicID := c.Query("sku_id"); skuPublicID != "" {
@@ -943,7 +1014,7 @@ type reviewAssetRequest struct {
 }
 
 func (s *Server) reviewAsset(c *gin.Context) {
-	if !isSOPManager(currentUser(c)) {
+	if !isAdministrator(currentUser(c)) {
 		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": "insufficient permissions"})
 		return
 	}
@@ -1007,10 +1078,7 @@ func (s *Server) assetMedia(c *gin.Context) {
 }
 
 func scopeAssetsForUser(query *gorm.DB, user models.User) *gorm.DB {
-	if user.Role != models.RolePhotographer {
-		return query
-	}
-	return query.Joins("JOIN photo_sessions ON photo_sessions.id = assets.photo_session_id").Where("photo_sessions.photographer_id = ?", user.ID)
+	return query
 }
 
 func (s *Server) listUsers(c *gin.Context) {
@@ -1019,5 +1087,163 @@ func (s *Server) listUsers(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": users})
+	items := make([]userDTO, 0, len(users))
+	for _, user := range users {
+		items = append(items, userDTOFromModel(user))
+	}
+	c.JSON(http.StatusOK, gin.H{"data": items})
+}
+
+type createUserRequest struct {
+	Name     string      `json:"name"`
+	Email    string      `json:"email"`
+	Role     models.Role `json:"role"`
+	Password string      `json:"password"`
+}
+
+func isManagedRole(role models.Role) bool {
+	return role == models.RoleAdmin || role == models.RoleOperator
+}
+
+func isDuplicateUserError(err error) bool {
+	var mysqlErr *mysqlDriver.MySQLError
+	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "unique constraint") || strings.Contains(message, "duplicate entry")
+}
+
+func (s *Server) createUser(c *gin.Context) {
+	var req createUserRequest
+	if err := decodeJSONStrict(c, &req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": err.Error()})
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
+	parsedEmail, emailErr := mail.ParseAddress(req.Email)
+	if req.Name == "" || len(req.Name) > 120 || req.Email == "" || len(req.Email) > 180 || emailErr != nil || parsedEmail.Address != req.Email || !isManagedRole(req.Role) || !validManagedPassword(req.Password) {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "validation_failed", "message": "valid name, email, role, and 12-72 byte password are required"})
+		return
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "hash password failed"})
+		return
+	}
+	user := models.User{Name: req.Name, Email: req.Email, PasswordHash: string(hash), Role: req.Role, Status: "active", MustChangePassword: true}
+	if err := s.db.Create(&user).Error; err != nil {
+		if isDuplicateUserError(err) {
+			c.JSON(http.StatusConflict, gin.H{"code": "email_conflict", "message": "email already exists"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "create user failed"})
+		return
+	}
+	c.JSON(http.StatusCreated, userDTOFromModel(user))
+}
+
+type updateUserRequest struct {
+	Role   *models.Role `json:"role"`
+	Status *string      `json:"status"`
+}
+
+func (s *Server) findManagedUser(c *gin.Context) (models.User, bool) {
+	if !isUUID(c.Param("user_id")) {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": "user_id must be a UUID"})
+		return models.User{}, false
+	}
+	var target models.User
+	if err := s.db.Where("public_id = ?", c.Param("user_id")).First(&target).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "user not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "load user failed"})
+		}
+		return models.User{}, false
+	}
+	return target, true
+}
+
+func (s *Server) updateUser(c *gin.Context) {
+	var req updateUserRequest
+	if err := decodeJSONStrict(c, &req); err != nil || (req.Role == nil && req.Status == nil) {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": "role or status is required"})
+		return
+	}
+	target, ok := s.findManagedUser(c)
+	if !ok {
+		return
+	}
+	actor := currentUser(c)
+	if target.Role == models.RoleSuperAdmin {
+		c.JSON(http.StatusForbidden, gin.H{"code": "system_owner_protected", "message": "the system owner cannot be modified"})
+		return
+	}
+	if req.Role != nil && !isManagedRole(*req.Role) {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "validation_failed", "message": "role must be admin or operator"})
+		return
+	}
+	if req.Status != nil && *req.Status != "active" && *req.Status != "disabled" {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "validation_failed", "message": "status must be active or disabled"})
+		return
+	}
+	if target.ID == actor.ID && ((req.Role != nil && *req.Role != actor.Role) || (req.Status != nil && *req.Status != "active")) {
+		c.JSON(http.StatusForbidden, gin.H{"code": "self_management_forbidden", "message": "you cannot disable or change your own role"})
+		return
+	}
+	updates := map[string]any{}
+	if req.Role != nil {
+		updates["role"] = *req.Role
+	}
+	if req.Status != nil {
+		updates["status"] = *req.Status
+		if *req.Status == "disabled" && target.Status != "disabled" {
+			updates["session_version"] = gorm.Expr("session_version + 1")
+		}
+	}
+	if err := s.db.Model(&target).Updates(updates).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "update user failed"})
+		return
+	}
+	if err := s.db.First(&target, target.ID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "reload user failed"})
+		return
+	}
+	c.JSON(http.StatusOK, userDTOFromModel(target))
+}
+
+type resetUserPasswordRequest struct {
+	Password string `json:"password"`
+}
+
+func (s *Server) resetUserPassword(c *gin.Context) {
+	var req resetUserPasswordRequest
+	if err := decodeJSONStrict(c, &req); err != nil || !validManagedPassword(req.Password) {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "validation_failed", "message": "password must be between 12 and 72 bytes"})
+		return
+	}
+	target, ok := s.findManagedUser(c)
+	if !ok {
+		return
+	}
+	if target.Role == models.RoleSuperAdmin || target.ID == currentUser(c).ID {
+		c.JSON(http.StatusForbidden, gin.H{"code": "password_reset_forbidden", "message": "use the personal password change flow for this account"})
+		return
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "hash password failed"})
+		return
+	}
+	if err := s.db.Model(&target).Updates(map[string]any{"password_hash": hash, "must_change_password": true, "session_version": gorm.Expr("session_version + 1")}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "reset password failed"})
+		return
+	}
+	if err := s.db.First(&target, target.ID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "reload user failed"})
+		return
+	}
+	c.JSON(http.StatusOK, userDTOFromModel(target))
 }

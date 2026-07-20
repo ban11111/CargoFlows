@@ -39,7 +39,7 @@ func (f *handlerVerifier) Verify(context.Context, string) (ai.ProviderVerificati
 
 func authenticatedAIRouter(t *testing.T, db *gorm.DB, verifier ai.ProviderVerifier) (*ginTestServer, models.User, models.User) {
 	t.Helper()
-	admin := models.User{Name: "AI Admin", Email: "ai-admin@example.test", PasswordHash: "unused", Role: models.RoleAdmin}
+	admin := models.User{Name: "AI Super Admin", Email: "ai-admin@example.test", PasswordHash: "unused", Role: models.RoleSuperAdmin}
 	operator := models.User{Name: "AI Operator", Email: "ai-operator@example.test", PasswordHash: "unused", Role: models.RoleOperator}
 	if err := db.Create(&admin).Error; err != nil {
 		t.Fatal(err)
