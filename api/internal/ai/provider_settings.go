@@ -14,10 +14,11 @@ import (
 const openAIProvider = "openai"
 
 var (
-	ErrInvalidAPIKey          = errors.New("invalid API key")
-	ErrCredentialVerification = errors.New("credential verification failed")
-	ErrProviderNotConfigured  = errors.New("provider is not configured")
-	ErrProviderNotActive      = errors.New("provider is not active")
+	ErrInvalidAPIKey             = errors.New("invalid API key")
+	ErrCredentialVerification    = errors.New("credential verification failed")
+	ErrProviderNotConfigured     = errors.New("provider is not configured")
+	ErrProviderNotActive         = errors.New("provider is not active")
+	ErrProviderModelsUnavailable = errors.New("provider models are unavailable")
 )
 
 type ProviderVerification struct {
@@ -26,6 +27,15 @@ type ProviderVerification struct {
 
 type ProviderVerifier interface {
 	Verify(ctx context.Context, apiKey string) (ProviderVerification, error)
+}
+
+type ProviderModel struct {
+	ID      string `json:"id"`
+	OwnedBy string `json:"owned_by"`
+}
+
+type ProviderModelLister interface {
+	ListModels(ctx context.Context, apiKey string) ([]ProviderModel, error)
 }
 
 type ProviderSettingView struct {
@@ -63,6 +73,23 @@ func (s *ProviderSettingsService) Get(ctx context.Context) (ProviderSettingView,
 		return ProviderSettingView{}, err
 	}
 	return providerSettingView(row), nil
+}
+
+func (s *ProviderSettingsService) ListModels(ctx context.Context) ([]ProviderModel, error) {
+	lister, ok := s.verifier.(ProviderModelLister)
+	if !ok {
+		return nil, ErrProviderModelsUnavailable
+	}
+	credential, err := s.DecryptActiveCredential(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer clearByteSlice(credential.APIKey)
+	models, err := lister.ListModels(ctx, string(credential.APIKey))
+	if err != nil {
+		return nil, ErrProviderModelsUnavailable
+	}
+	return models, nil
 }
 
 func (s *ProviderSettingsService) Configure(ctx context.Context, actorID uint, apiKey string) (ProviderSettingView, error) {

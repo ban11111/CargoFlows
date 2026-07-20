@@ -31,10 +31,15 @@ import (
 
 type handlerVerifier struct {
 	authenticated bool
+	models        []ai.ProviderModel
 }
 
 func (f *handlerVerifier) Verify(context.Context, string) (ai.ProviderVerification, error) {
 	return ai.ProviderVerification{Authenticated: f.authenticated}, nil
+}
+
+func (f *handlerVerifier) ListModels(context.Context, string) ([]ai.ProviderModel, error) {
+	return f.models, nil
 }
 
 func authenticatedAIRouter(t *testing.T, db *gorm.DB, verifier ai.ProviderVerifier) (*ginTestServer, models.User, models.User) {
@@ -122,6 +127,25 @@ func TestOpenAISettingIsAdminOnlyAndNeverEchoesKey(t *testing.T) {
 	disabled := aiRequest(t, server, server.token(t, admin), http.MethodDelete, "/api/v1/settings/openai", "")
 	if disabled.Code != http.StatusOK || !strings.Contains(disabled.Body.String(), `"status":"disabled"`) {
 		t.Fatalf("DELETE status/body = %d %s", disabled.Code, disabled.Body.String())
+	}
+}
+
+func TestOpenAIModelsAreFetchedForSuperAdminWithActiveCredential(t *testing.T) {
+	db := newTestDB(t)
+	verifier := &handlerVerifier{authenticated: true, models: []ai.ProviderModel{{ID: "gpt-live", OwnedBy: "openai"}}}
+	server, admin, operator := authenticatedAIRouter(t, db, verifier)
+	configured := aiRequest(t, server, server.token(t, admin), http.MethodPut, "/api/v1/settings/openai", `{"api_key":"sk-proj-secret-value-MODELS"}`)
+	if configured.Code != http.StatusOK {
+		t.Fatalf("configure = %d %s", configured.Code, configured.Body.String())
+	}
+
+	response := aiRequest(t, server, server.token(t, admin), http.MethodGet, "/api/v1/settings/openai/models", "")
+	if response.Code != http.StatusOK || response.Body.String() != `{"data":[{"id":"gpt-live","owned_by":"openai"}]}` {
+		t.Fatalf("models = %d %s", response.Code, response.Body.String())
+	}
+	forbidden := aiRequest(t, server, server.token(t, operator), http.MethodGet, "/api/v1/settings/openai/models", "")
+	if forbidden.Code != http.StatusForbidden {
+		t.Fatalf("operator models status = %d", forbidden.Code)
 	}
 }
 

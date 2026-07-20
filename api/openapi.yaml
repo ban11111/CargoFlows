@@ -676,6 +676,17 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /settings/openai/models:
+    get:
+      operationId: listOpenAIModels
+      description: Fetches the current model list from OpenAI using the active server-side credential. The response is not cached by CargoFlows.
+      responses:
+        '200': { description: Models visible to the configured OpenAI project, content: { application/json: { schema: { type: object, additionalProperties: false, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/OpenAIModel' } } } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: The OpenAI provider is not active, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '502': { description: OpenAI model list is unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /ai-content-templates:
     get:
       operationId: listAIContentTemplates
@@ -1053,6 +1064,13 @@ components:
       required: [api_key]
       properties:
         api_key: { type: string, format: password, minLength: 20, writeOnly: true }
+    OpenAIModel:
+      type: object
+      additionalProperties: false
+      required: [id, owned_by]
+      properties:
+        id: { type: string, maxLength: 200 }
+        owned_by: { type: string, maxLength: 200 }
     AIContentSlotMutation:
       type: object
       additionalProperties: false

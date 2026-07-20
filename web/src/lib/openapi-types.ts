@@ -745,6 +745,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/settings/openai/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Fetches the current model list from OpenAI using the active server-side credential. The response is not cached by CargoFlows. */
+        get: operations["listOpenAIModels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ai-content-templates": {
         parameters: {
             query?: never;
@@ -1163,6 +1180,10 @@ export interface components {
         OpenAISettingRequest: {
             /** Format: password */
             api_key: string;
+        };
+        OpenAIModel: {
+            id: string;
+            owned_by: string;
         };
         AIContentSlotMutation: {
             slot_key?: string;
@@ -3832,6 +3853,49 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalServerError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listOpenAIModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Models visible to the configured OpenAI project */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OpenAIModel"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description The OpenAI provider is not active */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description OpenAI model list is unavailable */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             503: components["responses"]["ServiceUnavailable"];
         };
     };

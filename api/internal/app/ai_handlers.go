@@ -26,6 +26,22 @@ func (s *Server) getOpenAISetting(c *gin.Context) {
 	c.JSON(http.StatusOK, openAISettingDTOFromView(value))
 }
 
+func (s *Server) listOpenAIModels(c *gin.Context) {
+	if s.ai.ProviderSettings == nil {
+		respondAIUnavailable(c)
+		return
+	}
+	values, err := s.ai.ProviderSettings.ListModels(c.Request.Context())
+	if err != nil {
+		respondAIError(c, err)
+		return
+	}
+	if values == nil {
+		values = []ai.ProviderModel{}
+	}
+	c.JSON(http.StatusOK, gin.H{"data": values})
+}
+
 func (s *Server) putOpenAISetting(c *gin.Context) {
 	if s.ai.ProviderSettings == nil {
 		respondAIUnavailable(c)
@@ -443,6 +459,10 @@ func respondAIError(c *gin.Context, err error) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "credential_verification_failed", "message": "OpenAI credential verification failed"})
 	case errors.Is(err, ai.ErrProviderNotConfigured):
 		c.JSON(http.StatusNotFound, gin.H{"code": "provider_not_configured", "message": err.Error()})
+	case errors.Is(err, ai.ErrProviderNotActive):
+		c.JSON(http.StatusConflict, gin.H{"code": "provider_not_active", "message": err.Error()})
+	case errors.Is(err, ai.ErrProviderModelsUnavailable):
+		c.JSON(http.StatusBadGateway, gin.H{"code": "provider_models_unavailable", "message": "OpenAI model list is unavailable"})
 	case errors.Is(err, ai.ErrTemplateNotFound), errors.Is(err, ai.ErrTemplateVersionNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
 	case errors.Is(err, ai.ErrJobNotFound), errors.Is(err, ai.ErrSKUNotFound):

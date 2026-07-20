@@ -16,9 +16,16 @@ import (
 )
 
 type fakeVerifier struct {
-	result ProviderVerification
-	err    error
-	keys   []string
+	result   ProviderVerification
+	err      error
+	keys     []string
+	models   []ProviderModel
+	modelErr error
+}
+
+func (f *fakeVerifier) ListModels(_ context.Context, apiKey string) ([]ProviderModel, error) {
+	f.keys = append(f.keys, apiKey)
+	return f.models, f.modelErr
 }
 
 func (f *fakeVerifier) Verify(_ context.Context, apiKey string) (ProviderVerification, error) {
@@ -86,6 +93,22 @@ func TestGetReturnsUnconfiguredWithoutCreatingRow(t *testing.T) {
 	var count int64
 	if err := db.Model(&models.OpenAIProviderSetting{}).Count(&count).Error; err != nil || count != 0 {
 		t.Fatalf("row count = %d, err = %v", count, err)
+	}
+}
+
+func TestListModelsUsesActiveDecryptedCredential(t *testing.T) {
+	db := providerTestDB(t)
+	verifier := &fakeVerifier{result: ProviderVerification{Authenticated: true}, models: []ProviderModel{{ID: "gpt-test", OwnedBy: "openai"}}}
+	service := providerService(t, db, verifier)
+	if _, err := service.Configure(t.Context(), 7, "sk-proj-very-secret-MODEL"); err != nil {
+		t.Fatal(err)
+	}
+	models, err := service.ListModels(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || models[0].ID != "gpt-test" || verifier.keys[len(verifier.keys)-1] != "sk-proj-very-secret-MODEL" {
+		t.Fatalf("models/keys = %#v / %#v", models, verifier.keys)
 	}
 }
 
