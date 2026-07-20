@@ -38,6 +38,20 @@ final class SOPDTOTests: XCTestCase {
         XCTAssertThrowsError(try JSONDecoder().decode(Vector3DTO.self, from: Data("[1,2,3,4]".utf8)))
         XCTAssertThrowsError(try JSONDecoder().decode(Vector3DTO.self, from: Data("[1,2,1e400]".utf8)))
     }
+
+    func testApprovedAssetSuppressesRetakeForRejectedAssetOfSameView() throws {
+        let assets = try decodeAssetHistory(#"{"data":[{"public_id":"rejected-front","sku_id":"sku-id","media_url":"/front-old","review_status":"rejected","captured_at":"2026-07-16T00:00:00Z","sop_view_id":"old-front","sop_view_key":"reference_front","sop_view_name":{"zh-CN":"正面","en":"Front"},"photo_session_code":"PS-1"},{"public_id":"approved-front","sku_id":"sku-id","media_url":"/front-new","review_status":"approved","captured_at":"2026-07-17T00:00:00Z","sop_view_id":"new-front","sop_view_key":"reference_front","sop_view_name":{"zh-CN":"正面","en":"Front"},"photo_session_code":"PS-2"},{"public_id":"rejected-back","sku_id":"sku-id","media_url":"/back","review_status":"rejected","captured_at":"2026-07-17T00:00:00Z","sop_view_id":"back","sop_view_key":"back","sop_view_name":{"zh-CN":"背面","en":"Back"},"photo_session_code":"PS-2"}]}"#)
+
+        XCTAssertFalse(rejectedAssetRequiresRetake(assets[0], among: assets))
+        XCTAssertFalse(rejectedAssetRequiresRetake(assets[1], among: assets))
+        XCTAssertTrue(rejectedAssetRequiresRetake(assets[2], among: assets))
+    }
+
+    private func decodeAssetHistory(_ json: String) throws -> [AssetReviewItem] {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(ListResponse<AssetReviewItem>.self, from: Data(json.utf8)).data
+    }
 }
 
 @MainActor

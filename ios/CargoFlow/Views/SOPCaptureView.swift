@@ -7,6 +7,24 @@ func requiredViewsComplete(views: [SOPView], capturedViewIDs: Set<String>) -> Bo
     views.filter(\.required).allSatisfy { capturedViewIDs.contains($0.id) }
 }
 
+func captureAssetsReferToSameView(_ lhs: AssetReviewItem, _ rhs: AssetReviewItem) -> Bool {
+    if !lhs.sopViewKey.isEmpty, !rhs.sopViewKey.isEmpty {
+        return lhs.sopViewKey == rhs.sopViewKey
+    }
+    if !lhs.sopViewID.isEmpty, lhs.sopViewID == rhs.sopViewID {
+        return true
+    }
+    return (!lhs.sopViewName.zhCN.isEmpty && lhs.sopViewName.zhCN == rhs.sopViewName.zhCN)
+        || (!lhs.sopViewName.en.isEmpty && lhs.sopViewName.en == rhs.sopViewName.en)
+}
+
+func rejectedAssetRequiresRetake(_ asset: AssetReviewItem, among assets: [AssetReviewItem]) -> Bool {
+    guard asset.reviewStatus == "rejected" else { return false }
+    return !assets.contains {
+        $0.reviewStatus == "approved" && captureAssetsReferToSameView(asset, $0)
+    }
+}
+
 func captureUploadJPEGData(
     from image: UIImage,
     maxPixelDimension: CGFloat = 4_096,
@@ -533,6 +551,7 @@ struct SOPCaptureView: View {
                     AssetHistoryRow(
                         asset: asset,
                         canRetake: matchingView != nil && uploadingViewID == nil,
+                        requiresRetake: rejectedAssetRequiresRetake(asset, among: historicalAssets),
                         language: language
                     ) {
                         guard let matchingView else { return }
@@ -756,10 +775,9 @@ func shotRowAccessibilityLabel(
 private struct AssetHistoryRow: View {
     let asset: AssetReviewItem
     let canRetake: Bool
+    let requiresRetake: Bool
     let language: LanguageStore
     let onRetake: () -> Void
-
-    private var isRejected: Bool { asset.reviewStatus == "rejected" }
 
     private var statusKey: String {
         switch asset.reviewStatus {
@@ -806,7 +824,7 @@ private struct AssetHistoryRow: View {
                 }
             }
 
-            if isRejected {
+            if requiresRetake {
                 Label(language.t("capture.review.rejected.help"), systemImage: "arrow.triangle.2.circlepath")
                     .font(.subheadline)
                     .foregroundStyle(.red)
