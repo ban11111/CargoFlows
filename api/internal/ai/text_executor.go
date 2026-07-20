@@ -95,7 +95,7 @@ func (executor *TextExecutor) Execute(ctx context.Context, leased LeasedItem) er
 	}
 	runtimeModel := prepared.execution.Model
 	if prepared.newExecution {
-		runtimeModel = configuredModel(credential.TextModel, executor.config.Model)
+		runtimeModel = configuredModel(prepared.modelSnapshot.TextModel, configuredModel(credential.TextModel, executor.config.Model))
 		if err := bindExecutionModel(ctx, executor.db, &prepared.execution, runtimeModel); err != nil {
 			persistErr := executor.markProviderFailure(ctx, prepared.execution.ID, models.AIExecutionFailed, "OpenAI model selection could not be stored", "")
 			return errors.Join(err, persistErr)
@@ -152,6 +152,7 @@ type preparedTextExecution struct {
 	recoverStored  bool
 	needsAttention bool
 	newExecution   bool
+	modelSnapshot  JobModelSnapshot
 }
 
 func (executor *TextExecutor) prepare(ctx context.Context, leased LeasedItem) (preparedTextExecution, error) {
@@ -167,6 +168,7 @@ func (executor *TextExecutor) prepare(ctx context.Context, leased LeasedItem) (p
 		if _, err := validateDryRunProvenance(job, item, version, relationalSlot); err != nil {
 			return err
 		}
+		modelSnapshot := decodeJobModelSnapshot(job.ModelSnapshotJSON)
 		var snapshot ProductSnapshotV1
 		var slot SlotFacts
 		if decodeStrictJSON(job.InputSnapshotJSON, &snapshot) != nil || decodeStrictJSON(item.SlotSnapshotJSON, &slot) != nil {
@@ -184,7 +186,7 @@ func (executor *TextExecutor) prepare(ctx context.Context, leased LeasedItem) (p
 		var existing models.AIExecution
 		err = tx.Where("ai_job_item_id = ?", item.ID).Order("attempt_number DESC, id DESC").First(&existing).Error
 		if err == nil {
-			prepared = preparedTextExecution{execution: existing, prompt: prompt, jobPublicID: job.PublicID, itemPublicID: item.PublicID, sourceKeys: sourceKeys}
+			prepared = preparedTextExecution{execution: existing, prompt: prompt, jobPublicID: job.PublicID, itemPublicID: item.PublicID, sourceKeys: sourceKeys, modelSnapshot: modelSnapshot}
 			if existing.CompiledPromptSHA256 != prompt.SHA256 {
 				return invalidExecutionInput("compiled prompt changed during recovery")
 			}
@@ -219,12 +221,12 @@ func (executor *TextExecutor) prepare(ctx context.Context, leased LeasedItem) (p
 				L2TemplateVersionPublicID: prompt.LayerVersions.L2, L3ContentSlotPublicID: prompt.LayerVersions.L3,
 				NormalizedInputJSON: prompt.InputJSON, OrderedInputListJSON: item.SelectedInputAssetIDsJSON,
 				CompiledPrompt: prompt.Instructions, CompiledPromptSHA256: prompt.SHA256, UserInstruction: snapshot.UserPreference,
-				Model: executor.config.Model, RequestConfigJSON: requestConfig, WorkerID: leased.LeaseOwner, LeaseExpiresAt: item.LeaseExpiresAt, StartedAt: &now,
+				Model: executor.config.Model, RequestedModel: executor.config.Model, APIMode: "responses", RequestConfigJSON: requestConfig, WorkerID: leased.LeaseOwner, LeaseExpiresAt: item.LeaseExpiresAt, StartedAt: &now,
 			}
 			if createErr := tx.Create(&existing).Error; createErr != nil {
 				return createErr
 			}
-			prepared = preparedTextExecution{execution: existing, prompt: prompt, jobPublicID: job.PublicID, itemPublicID: item.PublicID, sourceKeys: sourceKeys, newExecution: true}
+			prepared = preparedTextExecution{execution: existing, prompt: prompt, jobPublicID: job.PublicID, itemPublicID: item.PublicID, sourceKeys: sourceKeys, newExecution: true, modelSnapshot: modelSnapshot}
 		}
 		return nil
 	})
@@ -350,7 +352,7 @@ func (executor *TextExecutor) captureProviderResponse(ctx context.Context, execu
 		}
 		result := tx.Model(&execution).Where("status IN ?", []models.AIExecutionStatus{models.AIExecutionCallingOpenAI, models.AIExecutionNeedsAttention}).Updates(map[string]any{
 			"status": models.AIExecutionStoring, "provider_output_json": []byte(response.OutputJSON), "open_ai_response_id": response.ResponseID,
-			"open_ai_request_id": response.RequestID, "model": response.Model, "input_text_tokens": response.Usage.InputTextTokens, "input_image_tokens": response.Usage.InputImageTokens, "output_text_tokens": response.Usage.OutputTextTokens,
+			"open_ai_request_id": response.RequestID, "model": response.Model, "actual_model": response.Model, "input_text_tokens": response.Usage.InputTextTokens, "input_image_tokens": response.Usage.InputImageTokens, "output_text_tokens": response.Usage.OutputTextTokens,
 			"reasoning_tokens": response.Usage.ReasoningTokens, "total_tokens": response.Usage.TotalTokens,
 		})
 		if result.Error != nil {
@@ -456,7 +458,7 @@ func (executor *TextExecutor) markProviderFailure(ctx context.Context, execution
 			return nil
 		}
 		now := executor.clock.Now()
-		updates := map[string]any{"status": status, "safe_error": safeError, "completed_at": now}
+		updates := map[string]any{"status": status, "safe_error": safeError, "failure_code": failureCodeForSafeError(safeError), "completed_at": now}
 		if requestID != "" || execution.OpenAIRequestID == "" {
 			updates["open_ai_request_id"] = requestID
 		}
@@ -541,7 +543,7 @@ func bindExecutionModel(ctx context.Context, db *gorm.DB, execution *models.AIEx
 	}
 	result := db.WithContext(ctx).Model(&models.AIExecution{}).
 		Where("id = ? AND status = ?", execution.ID, models.AIExecutionPreparing).
-		Updates(map[string]any{"model": model, "request_config_json": encoded})
+		Updates(map[string]any{"model": model, "requested_model": model, "request_config_json": encoded})
 	if result.Error != nil {
 		return result.Error
 	}
@@ -549,8 +551,33 @@ func bindExecutionModel(ctx context.Context, db *gorm.DB, execution *models.AIEx
 		return ErrExecutionNeedsAttention
 	}
 	execution.Model = model
+	execution.RequestedModel = model
 	execution.RequestConfigJSON = encoded
 	return nil
+}
+
+func failureCodeForSafeError(safe string) string {
+	value := strings.ToLower(safe)
+	switch {
+	case strings.Contains(value, "authentication"), strings.Contains(value, "credential"):
+		return "openai_authentication_failed"
+	case strings.Contains(value, "rate limit"):
+		return "openai_rate_limited"
+	case strings.Contains(value, "ambiguous"), strings.Contains(value, "timed out"):
+		return "openai_timeout_ambiguous"
+	case strings.Contains(value, "moderation"), strings.Contains(value, "blocked"):
+		return "openai_moderation_blocked"
+	case strings.Contains(value, "refused"):
+		return "openai_refused"
+	case strings.Contains(value, "model"):
+		return "openai_model_incompatible"
+	case strings.Contains(value, "stored"), strings.Contains(value, "storage"):
+		return "storage_unavailable"
+	case strings.Contains(value, "source image"), strings.Contains(value, "input"):
+		return "invalid_input"
+	default:
+		return "internal_execution_error"
+	}
 }
 
 type KindRoutingExecutor struct {

@@ -95,8 +95,13 @@ type OpenAIProviderSetting struct {
 	Status                    string     `gorm:"size:32;not null" json:"status"`
 	TextModel                 string     `gorm:"size:200;not null;default:gpt-5.6-terra" json:"text_model"`
 	ImageModel                string     `gorm:"size:200;not null;default:gpt-5.6" json:"image_model"`
+	ImageAPIMode              string     `gorm:"size:32;not null;default:responses" json:"image_api_mode"`
+	ImageResponsesModel       string     `gorm:"size:200;not null;default:gpt-5.6" json:"image_responses_model"`
+	ImageGenerationModel      string     `gorm:"size:200;not null;default:gpt-image-2" json:"image_generation_model"`
 	VerifiedAt                *time.Time `json:"verified_at"`
 	ImageCapabilityVerifiedAt *time.Time `json:"image_capability_verified_at"`
+	ImageResponsesVerifiedAt  *time.Time `json:"image_responses_verified_at"`
+	ImageGenerationVerifiedAt *time.Time `json:"image_generation_verified_at"`
 	LastUsedAt                *time.Time `json:"last_used_at"`
 	CreatedByID               uint       `gorm:"index;not null" json:"-"`
 	UpdatedByID               uint       `gorm:"index;not null" json:"-"`
@@ -167,6 +172,8 @@ type AIJob struct {
 	Status                     AIJobStatus `gorm:"size:32;index;not null;default:queued" json:"status"`
 	SnapshotSchema             string      `gorm:"size:64;not null" json:"snapshot_schema"`
 	InputSnapshotJSON          []byte      `gorm:"type:json;not null" json:"input_snapshot"`
+	CreatedBySnapshotJSON      []byte      `gorm:"type:json;not null" json:"created_by_snapshot"`
+	ModelSnapshotJSON          []byte      `gorm:"type:json;not null" json:"model_snapshot"`
 	CreatedByID                uint        `gorm:"index;uniqueIndex:idx_ai_job_actor_idempotency,priority:1;not null" json:"-"`
 	IdempotencyKey             *string     `gorm:"size:128;uniqueIndex:idx_ai_job_actor_idempotency,priority:2" json:"-"`
 	RequestSHA256              string      `gorm:"size:64;not null;default:''" json:"-"`
@@ -177,6 +184,16 @@ type AIJob struct {
 	UpdatedAt                  time.Time   `json:"updated_at"`
 	Items                      []AIJobItem `json:"items,omitempty"`
 	SKU                        SKU         `json:"sku,omitempty"`
+}
+
+func (job *AIJob) BeforeCreate(*gorm.DB) error {
+	if len(job.CreatedBySnapshotJSON) == 0 {
+		job.CreatedBySnapshotJSON = []byte(`{}`)
+	}
+	if len(job.ModelSnapshotJSON) == 0 {
+		job.ModelSnapshotJSON = []byte(`{}`)
+	}
+	return nil
 }
 
 type AIJobItem struct {
@@ -195,11 +212,13 @@ type AIJobItem struct {
 	LeaseOwner                string            `gorm:"size:120;index" json:"-"`
 	LeaseExpiresAt            *time.Time        `gorm:"index" json:"-"`
 	SafeError                 string            `gorm:"type:text" json:"safe_error"`
+	FailureCode               string            `gorm:"size:80;index" json:"failure_code"`
 	InternalError             string            `gorm:"type:text" json:"-"`
 	StartedAt                 *time.Time        `json:"started_at"`
 	CompletedAt               *time.Time        `json:"completed_at"`
 	CreatedAt                 time.Time         `json:"created_at"`
 	UpdatedAt                 time.Time         `json:"updated_at"`
+	Executions                []AIExecution     `json:"executions,omitempty"`
 }
 
 type AIExecution struct {
@@ -226,6 +245,9 @@ type AIExecution struct {
 	OpenAIKeyFingerprint      string               `gorm:"column:openai_key_fingerprint;size:16" json:"-"`
 	ProviderOutputJSON        []byte               `gorm:"type:json" json:"-"`
 	Model                     string               `gorm:"size:120;index;not null" json:"model"`
+	RequestedModel            string               `gorm:"size:120;index;not null;default:''" json:"requested_model"`
+	ActualModel               string               `gorm:"size:120;index;not null;default:''" json:"actual_model"`
+	APIMode                   string               `gorm:"size:32;index;not null;default:responses" json:"api_mode"`
 	RequestConfigJSON         []byte               `gorm:"type:json;not null" json:"request_config"`
 	InputTextTokens           int64                `gorm:"not null;default:0" json:"input_text_tokens"`
 	InputImageTokens          int64                `gorm:"not null;default:0" json:"input_image_tokens"`
@@ -239,6 +261,7 @@ type AIExecution struct {
 	WorkerID                  string               `gorm:"size:120;index" json:"worker_id"`
 	LeaseExpiresAt            *time.Time           `gorm:"index" json:"lease_expires_at"`
 	SafeError                 string               `gorm:"type:text" json:"safe_error"`
+	FailureCode               string               `gorm:"size:80;index" json:"failure_code"`
 	InternalError             string               `gorm:"type:text" json:"-"`
 	StartedAt                 *time.Time           `json:"started_at"`
 	CompletedAt               *time.Time           `json:"completed_at"`

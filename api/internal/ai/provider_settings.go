@@ -12,9 +12,11 @@ import (
 )
 
 const (
-	openAIProvider          = "openai"
-	DefaultOpenAITextModel  = "gpt-5.6-terra"
-	DefaultOpenAIImageModel = "gpt-5.6"
+	openAIProvider                    = "openai"
+	DefaultOpenAITextModel            = "gpt-5.6-terra"
+	DefaultOpenAIImageModel           = "gpt-5.6"
+	DefaultOpenAIImageMode            = "responses"
+	DefaultOpenAIImageGenerationModel = "gpt-image-2"
 )
 
 var (
@@ -35,8 +37,19 @@ type ProviderVerifier interface {
 }
 
 type ProviderModel struct {
-	ID      string `json:"id"`
-	OwnedBy string `json:"owned_by"`
+	ID                  string `json:"id"`
+	OwnedBy             string `json:"owned_by"`
+	SupportsText        bool   `json:"supports_text"`
+	SupportsImageTool   bool   `json:"supports_image_tool"`
+	SupportsImagesAPI   bool   `json:"supports_images_api"`
+	CompatibilityReason string `json:"compatibility_reason,omitempty"`
+}
+
+type ModelConfiguration struct {
+	TextModel            string
+	ImageAPIMode         string
+	ImageResponsesModel  string
+	ImageGenerationModel string
 }
 
 type ProviderModelLister interface {
@@ -49,17 +62,25 @@ type ProviderSettingView struct {
 	KeyFingerprint            string     `json:"key_fingerprint"`
 	TextModel                 string     `json:"text_model"`
 	ImageModel                string     `json:"image_model"`
+	ImageAPIMode              string     `json:"image_api_mode"`
+	ImageResponsesModel       string     `json:"image_responses_model"`
+	ImageGenerationModel      string     `json:"image_generation_model"`
 	VerifiedAt                *time.Time `json:"verified_at"`
 	ImageCapabilityVerifiedAt *time.Time `json:"image_capability_verified_at"`
+	ImageResponsesVerifiedAt  *time.Time `json:"image_responses_verified_at"`
+	ImageGenerationVerifiedAt *time.Time `json:"image_generation_verified_at"`
 	LastUsedAt                *time.Time `json:"last_used_at"`
 }
 
 type ActiveOpenAICredential struct {
-	SettingID      uint
-	KeyFingerprint string
-	APIKey         []byte
-	TextModel      string
-	ImageModel     string
+	SettingID            uint
+	KeyFingerprint       string
+	APIKey               []byte
+	TextModel            string
+	ImageModel           string
+	ImageAPIMode         string
+	ImageResponsesModel  string
+	ImageGenerationModel string
 }
 
 type ProviderSettingsService struct {
@@ -76,7 +97,7 @@ func (s *ProviderSettingsService) Get(ctx context.Context) (ProviderSettingView,
 	var row models.OpenAIProviderSetting
 	err := s.db.WithContext(ctx).Where("provider = ?", openAIProvider).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return ProviderSettingView{Provider: openAIProvider, Status: "unconfigured", TextModel: DefaultOpenAITextModel, ImageModel: DefaultOpenAIImageModel}, nil
+		return ProviderSettingView{Provider: openAIProvider, Status: "unconfigured", TextModel: DefaultOpenAITextModel, ImageModel: DefaultOpenAIImageModel, ImageAPIMode: DefaultOpenAIImageMode, ImageResponsesModel: DefaultOpenAIImageModel, ImageGenerationModel: DefaultOpenAIImageGenerationModel}, nil
 	}
 	if err != nil {
 		return ProviderSettingView{}, err
@@ -98,27 +119,43 @@ func (s *ProviderSettingsService) ListModels(ctx context.Context) ([]ProviderMod
 	if err != nil {
 		return nil, ErrProviderModelsUnavailable
 	}
+	for index := range models {
+		classifyProviderModel(&models[index])
+	}
 	return models, nil
 }
 
-func (s *ProviderSettingsService) UpdateModels(ctx context.Context, actorID uint, textModel, imageModel string) (ProviderSettingView, error) {
-	textModel = strings.TrimSpace(textModel)
-	imageModel = strings.TrimSpace(imageModel)
-	if textModel == "" || imageModel == "" || len(textModel) > 200 || len(imageModel) > 200 {
+func (s *ProviderSettingsService) UpdateModels(ctx context.Context, actorID uint, value any, legacyImageModel ...string) (ProviderSettingView, error) {
+	config, ok := value.(ModelConfiguration)
+	if !ok {
+		textModel, textOK := value.(string)
+		if !textOK || len(legacyImageModel) != 1 {
+			return ProviderSettingView{}, ErrProviderModelInvalid
+		}
+		config = ModelConfiguration{TextModel: textModel, ImageAPIMode: "responses", ImageResponsesModel: legacyImageModel[0], ImageGenerationModel: DefaultOpenAIImageGenerationModel}
+	}
+	config.TextModel = strings.TrimSpace(config.TextModel)
+	config.ImageAPIMode = strings.TrimSpace(config.ImageAPIMode)
+	config.ImageResponsesModel = strings.TrimSpace(config.ImageResponsesModel)
+	config.ImageGenerationModel = strings.TrimSpace(config.ImageGenerationModel)
+	if config.TextModel == "" || (config.ImageAPIMode != "responses" && config.ImageAPIMode != "images") || config.ImageResponsesModel == "" || config.ImageGenerationModel == "" || len(config.TextModel) > 200 || len(config.ImageResponsesModel) > 200 || len(config.ImageGenerationModel) > 200 {
 		return ProviderSettingView{}, ErrProviderModelInvalid
 	}
 	available, err := s.ListModels(ctx)
 	if err != nil {
 		return ProviderSettingView{}, err
 	}
-	known := make(map[string]struct{}, len(available))
+	known := make(map[string]ProviderModel, len(available))
 	for _, model := range available {
-		known[model.ID] = struct{}{}
+		known[model.ID] = model
 	}
-	if _, ok := known[textModel]; !ok {
+	if model, ok := known[config.TextModel]; !ok || !model.SupportsText {
 		return ProviderSettingView{}, ErrProviderModelInvalid
 	}
-	if _, ok := known[imageModel]; !ok {
+	if model, ok := known[config.ImageResponsesModel]; !ok || !model.SupportsImageTool {
+		return ProviderSettingView{}, ErrProviderModelInvalid
+	}
+	if model, ok := known[config.ImageGenerationModel]; !ok || !model.SupportsImagesAPI {
 		return ProviderSettingView{}, ErrProviderModelInvalid
 	}
 
@@ -130,8 +167,18 @@ func (s *ProviderSettingsService) UpdateModels(ctx context.Context, actorID uint
 			}
 			return err
 		}
-		updates := map[string]any{"text_model": textModel, "image_model": imageModel, "updated_by_id": actorID}
-		if row.ImageModel != imageModel {
+		activeImageModel := config.ImageResponsesModel
+		if config.ImageAPIMode == "images" {
+			activeImageModel = config.ImageGenerationModel
+		}
+		updates := map[string]any{"text_model": config.TextModel, "image_model": activeImageModel, "image_api_mode": config.ImageAPIMode, "image_responses_model": config.ImageResponsesModel, "image_generation_model": config.ImageGenerationModel, "updated_by_id": actorID}
+		if row.ImageResponsesModel != config.ImageResponsesModel {
+			updates["image_responses_verified_at"] = nil
+		}
+		if row.ImageGenerationModel != config.ImageGenerationModel {
+			updates["image_generation_verified_at"] = nil
+		}
+		if row.ImageModel != activeImageModel || row.ImageAPIMode != config.ImageAPIMode {
 			updates["image_capability_verified_at"] = nil
 		}
 		if err := tx.Model(&row).Updates(updates).Error; err != nil {
@@ -171,6 +218,11 @@ func (s *ProviderSettingsService) Configure(ctx context.Context, actorID uint, a
 				EncryptionKeyVersion: sealed.KeyVersion,
 				KeyFingerprint:       fingerprint(apiKey),
 				Status:               "active",
+				TextModel:            DefaultOpenAITextModel,
+				ImageModel:           DefaultOpenAIImageModel,
+				ImageAPIMode:         DefaultOpenAIImageMode,
+				ImageResponsesModel:  DefaultOpenAIImageModel,
+				ImageGenerationModel: DefaultOpenAIImageGenerationModel,
 				VerifiedAt:           &verifiedAt,
 				CreatedByID:          actorID,
 				UpdatedByID:          actorID,
@@ -250,9 +302,41 @@ func (s *ProviderSettingsService) DecryptActiveCredential(ctx context.Context) (
 	}
 	return ActiveOpenAICredential{
 		SettingID: row.ID, KeyFingerprint: row.KeyFingerprint, APIKey: plain,
-		TextModel:  configuredModel(row.TextModel, DefaultOpenAITextModel),
-		ImageModel: configuredModel(row.ImageModel, DefaultOpenAIImageModel),
+		TextModel:            configuredModel(row.TextModel, DefaultOpenAITextModel),
+		ImageModel:           configuredModel(row.ImageModel, activeImageModel(row)),
+		ImageAPIMode:         configuredImageMode(row.ImageAPIMode),
+		ImageResponsesModel:  configuredModel(row.ImageResponsesModel, DefaultOpenAIImageModel),
+		ImageGenerationModel: configuredModel(row.ImageGenerationModel, DefaultOpenAIImageGenerationModel),
 	}, nil
+}
+
+func configuredImageMode(value string) string {
+	if value == "images" {
+		return "images"
+	}
+	return "responses"
+}
+
+func activeImageModel(row models.OpenAIProviderSetting) string {
+	if configuredImageMode(row.ImageAPIMode) == "images" {
+		return configuredModel(row.ImageGenerationModel, DefaultOpenAIImageGenerationModel)
+	}
+	return configuredModel(row.ImageResponsesModel, DefaultOpenAIImageModel)
+}
+
+func classifyProviderModel(model *ProviderModel) {
+	if model == nil {
+		return
+	}
+	id := strings.ToLower(model.ID)
+	model.SupportsImagesAPI = strings.HasPrefix(id, "gpt-image-")
+	mainline := strings.HasPrefix(id, "gpt-5") || strings.HasPrefix(id, "gpt-4.1") || strings.HasPrefix(id, "gpt-4o") || strings.HasPrefix(id, "o3") || strings.HasPrefix(id, "o4")
+	incompatible := strings.Contains(id, "realtime") || strings.Contains(id, "audio") || strings.Contains(id, "transcribe") || strings.Contains(id, "tts") || strings.Contains(id, "search") || strings.Contains(id, "embedding") || strings.Contains(id, "moderation")
+	model.SupportsText = mainline && !incompatible && !model.SupportsImagesAPI
+	model.SupportsImageTool = model.SupportsText
+	if !model.SupportsText && !model.SupportsImagesAPI {
+		model.CompatibilityReason = "This model is not supported by CargoFlows text or image workflows"
+	}
 }
 
 func configuredModel(value, fallback string) string {
@@ -275,9 +359,14 @@ func providerSettingView(row models.OpenAIProviderSetting) ProviderSettingView {
 		Status:                    row.Status,
 		KeyFingerprint:            row.KeyFingerprint,
 		TextModel:                 configuredModel(row.TextModel, DefaultOpenAITextModel),
-		ImageModel:                configuredModel(row.ImageModel, DefaultOpenAIImageModel),
+		ImageModel:                configuredModel(row.ImageModel, activeImageModel(row)),
+		ImageAPIMode:              configuredImageMode(row.ImageAPIMode),
+		ImageResponsesModel:       configuredModel(row.ImageResponsesModel, DefaultOpenAIImageModel),
+		ImageGenerationModel:      configuredModel(row.ImageGenerationModel, DefaultOpenAIImageGenerationModel),
 		VerifiedAt:                row.VerifiedAt,
 		ImageCapabilityVerifiedAt: row.ImageCapabilityVerifiedAt,
+		ImageResponsesVerifiedAt:  row.ImageResponsesVerifiedAt,
+		ImageGenerationVerifiedAt: row.ImageGenerationVerifiedAt,
 		LastUsedAt:                row.LastUsedAt,
 	}
 }

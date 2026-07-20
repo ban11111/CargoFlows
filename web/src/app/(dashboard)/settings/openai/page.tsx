@@ -19,6 +19,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ErrorNotice } from "@/components/error-notice";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { openAIKeySchema } from "@/lib/ai-schemas";
@@ -35,23 +36,46 @@ const emptySetting: OpenAISetting = {
   key_fingerprint: "",
   text_model: "gpt-5.6-terra",
   image_model: "gpt-5.6",
+  image_api_mode: "responses",
+  image_responses_model: "gpt-5.6",
+  image_generation_model: "gpt-image-2",
   verified_at: null,
   image_capability_verified_at: null,
+  image_responses_verified_at: null,
+  image_generation_verified_at: null,
   last_used_at: null,
 };
 
 async function getSetting() {
   try {
-    return await safeOpenAIRequest<OpenAISetting>("/settings/openai");
+    return normalizeSetting(await safeOpenAIRequest<OpenAISetting>("/settings/openai"));
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) return emptySetting;
     throw error;
   }
 }
 
+function normalizeSetting(value: OpenAISetting): OpenAISetting {
+  const legacyImage = value.image_model || emptySetting.image_model;
+  const legacyDirect = legacyImage.toLowerCase().startsWith("gpt-image-");
+  return {
+    ...emptySetting,
+    ...value,
+    image_api_mode: value.image_api_mode ?? (legacyDirect ? "images" : "responses"),
+    image_responses_model: value.image_responses_model ?? (legacyDirect ? emptySetting.image_responses_model : legacyImage),
+    image_generation_model: value.image_generation_model ?? (legacyDirect ? legacyImage : emptySetting.image_generation_model),
+  };
+}
+
 async function getModels() {
   const response = await safeOpenAIRequest<{ data: OpenAIModel[] }>("/settings/openai/models");
-  return Array.isArray(response.data) ? response.data : [];
+  return Array.isArray(response.data) ? response.data.map(normalizeModel) : [];
+}
+
+function normalizeModel(model: OpenAIModel): OpenAIModel {
+  if (typeof model.supports_text === "boolean") return model;
+  const directImage = model.id.toLowerCase().startsWith("gpt-image-");
+  return { ...model, supports_text: !directImage, supports_image_tool: !directImage, supports_images_api: directImage };
 }
 
 async function safeOpenAIRequest<TResponse>(path: string, options?: RequestInit) {
@@ -59,7 +83,7 @@ async function safeOpenAIRequest<TResponse>(path: string, options?: RequestInit)
     return await apiRequest<TResponse>(path, options);
   } catch (error) {
     if (error instanceof ApiError) {
-      throw new ApiError("OpenAI settings request failed", error.status);
+      throw new ApiError(error.message, error.status, error.code, error.requestId, error.details);
     }
     throw new Error("OpenAI settings request failed");
   }
@@ -157,7 +181,7 @@ export default function OpenAISettingsPage() {
   }
 
   const verified = configured && Boolean(setting.verified_at) && setting.status === "active";
-  const imageReady = verified && Boolean(setting.image_capability_verified_at);
+  const imageReady = verified && Boolean(setting.image_api_mode === "images" ? setting.image_generation_verified_at : setting.image_responses_verified_at);
   const statusLabel = setting.status === "active" ? t("openAIActive") : setting.status === "invalid" ? t("openAIInvalid") : setting.status === "disabled" ? t("openAIDisabled") : t("openAIUnconfigured");
 
   return (
@@ -183,7 +207,9 @@ export default function OpenAISettingsPage() {
               <Detail label={t("openAICompatibility")} value={t("openAICompatibilityValue")} />
               <Detail label={t("openAIKeyFingerprint")} value={setting.key_fingerprint || t("openAINever")} mono />
               <Detail label={t("openAITextModelLabel")} value={setting.text_model} mono />
-              <Detail label={t("openAIImageModelLabel")} value={setting.image_model} mono />
+              <Detail label={language === "zh" ? "图片调用方式" : "Image API mode"} value={setting.image_api_mode === "images" ? "Images API" : "Responses"} />
+              <Detail label={language === "zh" ? "Responses 编排模型" : "Responses orchestration model"} value={setting.image_responses_model} mono />
+              <Detail label={language === "zh" ? "Images API 图像模型" : "Images API image model"} value={setting.image_generation_model} mono />
               <Detail label={t("openAIVerifiedAt")} value={formatDate(setting.verified_at, language, t("openAINever"))} />
               <Detail label={t("openAIImageVerifiedAt")} value={formatDate(setting.image_capability_verified_at, language, t("openAINever"))} />
               <Detail label={t("openAILastUsedAt")} value={formatDate(setting.last_used_at, language, t("openAINever"))} />
@@ -227,10 +253,13 @@ export default function OpenAISettingsPage() {
 }
 
 function ModelSettingsCard({ setting }: { setting: OpenAISetting }) {
-  const { t } = useLanguage();
+  const { language, t } = useLanguage();
+  const zh = language === "zh";
   const queryClient = useQueryClient();
   const [textModel, setTextModel] = useState(setting.text_model);
-  const [imageModel, setImageModel] = useState(setting.image_model);
+  const [imageAPIMode, setImageAPIMode] = useState<"responses" | "images">(setting.image_api_mode);
+  const [imageResponsesModel, setImageResponsesModel] = useState(setting.image_responses_model);
+  const [imageGenerationModel, setImageGenerationModel] = useState(setting.image_generation_model);
   const [saved, setSaved] = useState(false);
   const modelsQuery = useQuery({
     queryKey: ["openai-models", setting.key_fingerprint],
@@ -239,20 +268,29 @@ function ModelSettingsCard({ setting }: { setting: OpenAISetting }) {
     staleTime: 0,
   });
   const models = modelsQuery.data ?? [];
-  const canSave = modelsQuery.isSuccess && models.length > 0 && (textModel !== setting.text_model || imageModel !== setting.image_model);
+  const changed = textModel !== setting.text_model || imageAPIMode !== setting.image_api_mode || imageResponsesModel !== setting.image_responses_model || imageGenerationModel !== setting.image_generation_model;
+  const canSave = modelsQuery.isSuccess && models.length > 0 && changed;
   const saveModels = useMutation({
     mutationFn: () => safeOpenAIRequest<OpenAISetting>("/settings/openai/models", {
       method: "PATCH",
-      body: JSON.stringify({ text_model: textModel, image_model: imageModel }),
+      body: JSON.stringify({
+        text_model: textModel,
+        image_api_mode: imageAPIMode,
+        image_responses_model: imageResponsesModel,
+        image_generation_model: imageGenerationModel,
+      }),
     }),
     onSuccess(next) {
       queryClient.setQueryData(["openai-setting"], next);
       setSaved(true);
     },
   });
-  const options = (current: string) => models.some((model) => model.id === current)
-    ? models
-    : [{ id: current, owned_by: "" }, ...models];
+  const options = (current: string, predicate: (model: OpenAIModel) => boolean) => {
+    const compatible = models.filter(predicate);
+    return compatible.some((model) => model.id === current)
+      ? compatible
+      : [{ id: current, owned_by: "", supports_text: false, supports_image_tool: false, supports_images_api: false, compatibility_reason: zh ? "当前配置；该模型未出现在兼容列表中" : "Current setting; not present in the compatible list" }, ...compatible];
+  };
   const placeholder = modelsQuery.isLoading
     ? t("openAIModelsLoading")
     : modelsQuery.isError
@@ -264,10 +302,17 @@ function ModelSettingsCard({ setting }: { setting: OpenAISetting }) {
     <CardHeader><CardTitle className="flex items-center gap-2"><MonitorCog className="h-4 w-4 text-primary" />{t("openAIModelsTitle")}</CardTitle></CardHeader>
     <CardContent className="space-y-5">
       <p className="text-sm leading-6 text-muted-foreground">{t("openAIModelsIntro")}</p>
-      <ModelSelect id="openai-text-model" label={t("openAITextModelLabel")} help={t("openAITextModelHelper")} value={textModel} onChange={(value) => { setTextModel(value); setSaved(false); saveModels.reset(); }} models={options(textModel)} placeholder={placeholder} disabled={disabled} />
-      <ModelSelect id="openai-image-model" label={t("openAIImageModelLabel")} help={t("openAIImageModelHelper")} value={imageModel} onChange={(value) => { setImageModel(value); setSaved(false); saveModels.reset(); }} models={options(imageModel)} placeholder={placeholder} disabled={disabled} />
-      {modelsQuery.isError ? <div className="rounded-md border border-danger/30 bg-danger/5 p-3" role="alert"><p className="text-sm text-danger">{t("openAIModelsError")}</p></div> : null}
-      {saveModels.isError ? <div className="rounded-md border border-danger/30 bg-danger/5 p-3" role="alert"><p className="text-sm text-danger">{t("openAIModelsSaveError")}</p></div> : null}
+      <ModelSelect id="openai-text-model" label={t("openAITextModelLabel")} help={t("openAITextModelHelper")} value={textModel} onChange={(value) => { setTextModel(value); setSaved(false); saveModels.reset(); }} models={options(textModel, (model) => model.supports_text)} placeholder={placeholder} disabled={disabled} />
+
+      <fieldset className="space-y-3 rounded-lg border border-border p-4">
+        <legend className="px-1 text-sm font-semibold">{zh ? "图片调用方式" : "Image API mode"}</legend>
+        {(["responses", "images"] as const).map((mode) => <label className={`flex min-h-11 cursor-pointer items-start gap-3 rounded-md border p-3 ${imageAPIMode === mode ? "border-primary bg-primary/5" : "border-border"}`} key={mode}><input checked={imageAPIMode === mode} className="mt-1" name="image-api-mode" onChange={() => { setImageAPIMode(mode); setSaved(false); saveModels.reset(); }} type="radio" value={mode} /><span><span className="block text-sm font-medium">{mode === "responses" ? (zh ? "Responses 对话编排" : "Responses orchestration") : (zh ? "Images API 直接生成/编辑" : "Direct Images API")}</span><span className="mt-1 block text-xs leading-5 text-muted-foreground">{mode === "responses" ? (zh ? "使用主模型规划图片工具调用，适合多轮和上下文编排。" : "A mainline model orchestrates the image tool for contextual, multi-turn work.") : (zh ? "直接调用图像生成或编辑接口，gpt-image-2 应选择此方式。" : "Calls image generation or editing directly; use this mode for gpt-image-2.")}</span></span></label>)}
+      </fieldset>
+
+      <ModelSelect id="openai-image-responses-model" label={t("openAIImageModelLabel")} help={zh ? "Responses 编排模型：必须支持 image_generation 工具；不能选择 gpt-image-*。" : "Responses orchestration model: must support the image_generation tool; gpt-image-* is not valid here."} value={imageResponsesModel} onChange={(value) => { setImageResponsesModel(value); setSaved(false); saveModels.reset(); }} models={options(imageResponsesModel, (model) => model.supports_image_tool)} placeholder={placeholder} disabled={disabled} />
+      <ModelSelect id="openai-image-generation-model" label={zh ? "Images API 图像模型" : "Images API image model"} help={zh ? "用于 /v1/images/generations 和 /v1/images/edits，例如 gpt-image-2。" : "Used by /v1/images/generations and /v1/images/edits, such as gpt-image-2."} value={imageGenerationModel} onChange={(value) => { setImageGenerationModel(value); setSaved(false); saveModels.reset(); }} models={options(imageGenerationModel, (model) => model.supports_images_api)} placeholder={placeholder} disabled={disabled} />
+      {modelsQuery.isError ? <ErrorNotice actionLabel={t("openAIModelsRefresh")} message={zh ? "后端无法使用当前凭据读取 OpenAI 模型列表。请检查密钥、组织权限和网络后重试。" : "The backend could not read the OpenAI model list with the current credential. Check the key, organization access, and network, then retry."} onAction={() => modelsQuery.refetch()} requestId={modelsQuery.error instanceof ApiError ? modelsQuery.error.requestId : ""} title={zh ? "无法获取模型列表" : "Could not load models"} /> : null}
+      {saveModels.isError ? <ErrorNotice message={saveModels.error instanceof ApiError ? saveModels.error.message : t("openAIModelsSaveError")} recovery={zh ? "确认每个模型与所选 API 路径兼容，然后重新保存。" : "Confirm each model is compatible with its selected API path, then save again."} requestId={saveModels.error instanceof ApiError ? saveModels.error.requestId : ""} title={zh ? "模型配置未保存" : "Model settings were not saved"} /> : null}
       {saved ? <p className="flex items-center gap-2 text-sm text-success" role="status"><CheckCircle2 className="h-4 w-4" />{t("openAIModelsSaveSuccess")}</p> : null}
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
         <p aria-live="polite" className="text-xs text-muted-foreground">{modelsQuery.isSuccess ? t("openAIModelsCount").replace("{count}", String(models.length)) : ""}</p>

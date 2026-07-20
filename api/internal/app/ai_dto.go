@@ -13,8 +13,11 @@ type openAISettingRequest struct {
 }
 
 type openAIModelSelectionRequest struct {
-	TextModel  *string `json:"text_model"`
-	ImageModel *string `json:"image_model"`
+	TextModel            *string `json:"text_model"`
+	ImageModel           *string `json:"image_model"`
+	ImageAPIMode         *string `json:"image_api_mode"`
+	ImageResponsesModel  *string `json:"image_responses_model"`
+	ImageGenerationModel *string `json:"image_generation_model"`
 }
 
 type createAIJobRequest struct {
@@ -38,8 +41,13 @@ type openAISettingDTO struct {
 	KeyFingerprint            string     `json:"key_fingerprint"`
 	TextModel                 string     `json:"text_model"`
 	ImageModel                string     `json:"image_model"`
+	ImageAPIMode              string     `json:"image_api_mode"`
+	ImageResponsesModel       string     `json:"image_responses_model"`
+	ImageGenerationModel      string     `json:"image_generation_model"`
 	VerifiedAt                *time.Time `json:"verified_at"`
 	ImageCapabilityVerifiedAt *time.Time `json:"image_capability_verified_at"`
+	ImageResponsesVerifiedAt  *time.Time `json:"image_responses_verified_at"`
+	ImageGenerationVerifiedAt *time.Time `json:"image_generation_verified_at"`
 	LastUsedAt                *time.Time `json:"last_used_at"`
 }
 

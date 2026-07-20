@@ -116,7 +116,7 @@ func TestUpdateModelsValidatesPersistsAndReturnsRuntimeSelections(t *testing.T) 
 	db := providerTestDB(t)
 	verifier := &fakeVerifier{
 		result: ProviderVerification{Authenticated: true},
-		models: []ProviderModel{{ID: "gpt-text", OwnedBy: "openai"}, {ID: "gpt-image-host", OwnedBy: "openai"}},
+		models: []ProviderModel{{ID: "gpt-5.6-terra", OwnedBy: "openai"}, {ID: "gpt-5.6", OwnedBy: "openai"}, {ID: "gpt-image-2", OwnedBy: "openai"}},
 	}
 	service := providerService(t, db, verifier)
 	configured, err := service.Configure(t.Context(), 1, "sk-proj-model-selection-WXYZ")
@@ -127,11 +127,11 @@ func TestUpdateModelsValidatesPersistsAndReturnsRuntimeSelections(t *testing.T) 
 		t.Fatalf("defaults = %q/%q", configured.TextModel, configured.ImageModel)
 	}
 
-	view, err := service.UpdateModels(t.Context(), 9, " gpt-text ", "gpt-image-host")
+	view, err := service.UpdateModels(t.Context(), 9, ModelConfiguration{TextModel: " gpt-5.6-terra ", ImageAPIMode: "images", ImageResponsesModel: "gpt-5.6", ImageGenerationModel: "gpt-image-2"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if view.TextModel != "gpt-text" || view.ImageModel != "gpt-image-host" {
+	if view.TextModel != "gpt-5.6-terra" || view.ImageModel != "gpt-image-2" || view.ImageAPIMode != "images" {
 		t.Fatalf("view = %#v", view)
 	}
 	credential, err := service.DecryptActiveCredential(t.Context())
@@ -139,7 +139,7 @@ func TestUpdateModelsValidatesPersistsAndReturnsRuntimeSelections(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer clearByteSlice(credential.APIKey)
-	if credential.TextModel != "gpt-text" || credential.ImageModel != "gpt-image-host" {
+	if credential.TextModel != "gpt-5.6-terra" || credential.ImageModel != "gpt-image-2" || credential.ImageAPIMode != "images" {
 		t.Fatalf("credential models = %q/%q", credential.TextModel, credential.ImageModel)
 	}
 	var row models.OpenAIProviderSetting
@@ -150,13 +150,16 @@ func TestUpdateModelsValidatesPersistsAndReturnsRuntimeSelections(t *testing.T) 
 		t.Fatalf("updated actor = %d", row.UpdatedByID)
 	}
 
-	if _, err := service.UpdateModels(t.Context(), 10, "not-visible", "gpt-image-host"); !errors.Is(err, ErrProviderModelInvalid) {
+	if _, err := service.UpdateModels(t.Context(), 10, ModelConfiguration{TextModel: "not-visible", ImageAPIMode: "images", ImageResponsesModel: "gpt-5.6", ImageGenerationModel: "gpt-image-2"}); !errors.Is(err, ErrProviderModelInvalid) {
 		t.Fatalf("unknown model error = %v", err)
+	}
+	if _, err := service.UpdateModels(t.Context(), 10, ModelConfiguration{TextModel: "gpt-5.6-terra", ImageAPIMode: "responses", ImageResponsesModel: "gpt-image-2", ImageGenerationModel: "gpt-image-2"}); !errors.Is(err, ErrProviderModelInvalid) {
+		t.Fatalf("gpt-image model must not be accepted as Responses orchestrator: %v", err)
 	}
 	if err := db.First(&row).Error; err != nil {
 		t.Fatal(err)
 	}
-	if row.TextModel != "gpt-text" || row.UpdatedByID != 9 {
+	if row.TextModel != "gpt-5.6-terra" || row.UpdatedByID != 9 {
 		t.Fatalf("invalid update mutated row: %#v", row)
 	}
 }

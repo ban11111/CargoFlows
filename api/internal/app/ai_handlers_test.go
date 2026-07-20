@@ -132,7 +132,7 @@ func TestOpenAISettingIsAdminOnlyAndNeverEchoesKey(t *testing.T) {
 
 func TestOpenAIModelsAreFetchedForSuperAdminWithActiveCredential(t *testing.T) {
 	db := newTestDB(t)
-	verifier := &handlerVerifier{authenticated: true, models: []ai.ProviderModel{{ID: "gpt-live", OwnedBy: "openai"}}}
+	verifier := &handlerVerifier{authenticated: true, models: []ai.ProviderModel{{ID: "gpt-5.6", OwnedBy: "openai"}}}
 	server, admin, operator := authenticatedAIRouter(t, db, verifier)
 	configured := aiRequest(t, server, server.token(t, admin), http.MethodPut, "/api/v1/settings/openai", `{"api_key":"sk-proj-secret-value-MODELS"}`)
 	if configured.Code != http.StatusOK {
@@ -140,7 +140,7 @@ func TestOpenAIModelsAreFetchedForSuperAdminWithActiveCredential(t *testing.T) {
 	}
 
 	response := aiRequest(t, server, server.token(t, admin), http.MethodGet, "/api/v1/settings/openai/models", "")
-	if response.Code != http.StatusOK || response.Body.String() != `{"data":[{"id":"gpt-live","owned_by":"openai"}]}` {
+	if response.Code != http.StatusOK || response.Body.String() != `{"data":[{"id":"gpt-5.6","owned_by":"openai","supports_text":true,"supports_image_tool":true,"supports_images_api":false}]}` {
 		t.Fatalf("models = %d %s", response.Code, response.Body.String())
 	}
 	forbidden := aiRequest(t, server, server.token(t, operator), http.MethodGet, "/api/v1/settings/openai/models", "")
@@ -148,16 +148,16 @@ func TestOpenAIModelsAreFetchedForSuperAdminWithActiveCredential(t *testing.T) {
 		t.Fatalf("operator models status = %d", forbidden.Code)
 	}
 
-	verifier.models = append(verifier.models, ai.ProviderModel{ID: "gpt-image-host", OwnedBy: "openai"})
-	updated := aiRequest(t, server, server.token(t, admin), http.MethodPatch, "/api/v1/settings/openai/models", `{"text_model":"gpt-live","image_model":"gpt-image-host"}`)
-	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"text_model":"gpt-live"`) || !strings.Contains(updated.Body.String(), `"image_model":"gpt-image-host"`) {
+	verifier.models = append(verifier.models, ai.ProviderModel{ID: "gpt-image-2", OwnedBy: "openai"})
+	updated := aiRequest(t, server, server.token(t, admin), http.MethodPatch, "/api/v1/settings/openai/models", `{"text_model":"gpt-5.6","image_api_mode":"images","image_responses_model":"gpt-5.6","image_generation_model":"gpt-image-2"}`)
+	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"text_model":"gpt-5.6"`) || !strings.Contains(updated.Body.String(), `"image_model":"gpt-image-2"`) {
 		t.Fatalf("update models = %d %s", updated.Code, updated.Body.String())
 	}
-	invalid := aiRequest(t, server, server.token(t, admin), http.MethodPatch, "/api/v1/settings/openai/models", `{"text_model":"unknown","image_model":"gpt-image-host"}`)
+	invalid := aiRequest(t, server, server.token(t, admin), http.MethodPatch, "/api/v1/settings/openai/models", `{"text_model":"unknown","image_api_mode":"images","image_responses_model":"gpt-5.6","image_generation_model":"gpt-image-2"}`)
 	if invalid.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("invalid model = %d %s", invalid.Code, invalid.Body.String())
 	}
-	forbidden = aiRequest(t, server, server.token(t, operator), http.MethodPatch, "/api/v1/settings/openai/models", `{"text_model":"gpt-live","image_model":"gpt-image-host"}`)
+	forbidden = aiRequest(t, server, server.token(t, operator), http.MethodPatch, "/api/v1/settings/openai/models", `{"text_model":"gpt-5.6","image_api_mode":"images","image_responses_model":"gpt-5.6","image_generation_model":"gpt-image-2"}`)
 	if forbidden.Code != http.StatusForbidden {
 		t.Fatalf("operator model update status = %d", forbidden.Code)
 	}
@@ -523,17 +523,27 @@ func TestAIJobEndpointsUseTypedArraysUUIDsAndSafeDTOs(t *testing.T) {
 		t.Fatalf("POST status/body = %d %s", created.Code, created.Body.String())
 	}
 	var job struct {
-		PublicID string `json:"public_id"`
-		SKUID    string `json:"sku_id"`
-		Items    []struct {
+		PublicID  string `json:"public_id"`
+		SKUID     string `json:"sku_id"`
+		CreatedBy struct {
+			PublicID string `json:"public_id"`
+			Name     string `json:"name"`
+			Email    string `json:"email"`
+		} `json:"created_by"`
+		Items []struct {
 			PublicID string `json:"public_id"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(created.Body.Bytes(), &job); err != nil {
 		t.Fatal(err)
 	}
-	if !isUUID(job.PublicID) || job.SKUID != sku.PublicID || len(job.Items) != 1 || !isUUID(job.Items[0].PublicID) {
+	if !isUUID(job.PublicID) || job.SKUID != sku.PublicID || len(job.Items) != 1 || !isUUID(job.Items[0].PublicID) || job.CreatedBy.PublicID != operator.PublicID || job.CreatedBy.Email != operator.Email {
 		t.Fatalf("invalid public job DTO: %s", created.Body.String())
+	}
+	spoofBody := strings.Replace(createBody, `"locale":"zh-CN"}`, `"locale":"zh-CN","created_by":{"public_id":"`+uuid.NewString()+`","name":"Impostor","email":"impostor@example.test"}}`, 1)
+	spoofed := aiRequestWithIdempotency(t, server, token, http.MethodPost, "/api/v1/ai-jobs", spoofBody, "http-job-spoof-0001")
+	if spoofed.Code != http.StatusBadRequest {
+		t.Fatalf("creator spoof status/body = %d %s", spoofed.Code, spoofed.Body.String())
 	}
 	replayed := aiRequestWithIdempotency(t, server, token, http.MethodPost, "/api/v1/ai-jobs", createBody, "http-job-idem-0001")
 	if replayed.Code != http.StatusOK || !strings.Contains(replayed.Body.String(), job.PublicID) {

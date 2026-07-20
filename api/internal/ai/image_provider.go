@@ -24,6 +24,7 @@ type ImageInput struct {
 
 type ImageRequest struct {
 	Model    string
+	APIMode  string
 	Prompt   CompiledImagePrompt
 	Inputs   []ImageInput
 	Metadata map[string]string

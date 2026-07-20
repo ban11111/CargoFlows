@@ -196,6 +196,43 @@ type ProductSnapshotV1 struct {
 	ImageCanvases       []ImageCanvas                 `json:"image_canvases,omitempty"`
 }
 
+type JobCreatorSnapshot struct {
+	PublicID string `json:"public_id"`
+	Name     string `json:"name"`
+	Email    string `json:"email"`
+}
+
+type JobModelSnapshot struct {
+	TextModel            string `json:"text_model"`
+	ImageAPIMode         string `json:"image_api_mode"`
+	ImageResponsesModel  string `json:"image_responses_model"`
+	ImageGenerationModel string `json:"image_generation_model"`
+}
+
+type JobExecutionDocument struct {
+	PublicID          string                      `json:"public_id"`
+	Operation         models.AIExecutionOperation `json:"operation"`
+	Status            models.AIExecutionStatus    `json:"status"`
+	AttemptNumber     int                         `json:"attempt_number"`
+	RequestedModel    string                      `json:"requested_model"`
+	ActualModel       string                      `json:"actual_model"`
+	APIMode           string                      `json:"api_mode"`
+	ProviderRequestID string                      `json:"provider_request_id"`
+	FailureCode       string                      `json:"failure_code"`
+	SafeError         string                      `json:"safe_error"`
+	StartedAt         *time.Time                  `json:"started_at"`
+	CompletedAt       *time.Time                  `json:"completed_at"`
+}
+
+type JobFailureDocument struct {
+	Code              string `json:"code"`
+	SafeMessage       string `json:"safe_message"`
+	RecoveryAction    string `json:"recovery_action"`
+	Model             string `json:"model"`
+	APIMode           string `json:"api_mode"`
+	ProviderRequestID string `json:"provider_request_id"`
+}
+
 type JobItemDocument struct {
 	PublicID              string                   `json:"public_id"`
 	SlotKey               string                   `json:"slot_key"`
@@ -205,6 +242,8 @@ type JobItemDocument struct {
 	SelectedInputAssetIDs []string                 `json:"selected_input_asset_ids"`
 	AttemptCount          int                      `json:"attempt_count"`
 	SafeError             string                   `json:"safe_error"`
+	Failure               *JobFailureDocument      `json:"failure"`
+	Executions            []JobExecutionDocument   `json:"executions"`
 	StartedAt             *time.Time               `json:"started_at"`
 	CompletedAt           *time.Time               `json:"completed_at"`
 	CreatedAt             time.Time                `json:"created_at"`
@@ -220,6 +259,9 @@ type JobDocument struct {
 	Status                  models.AIJobStatus `json:"status"`
 	SnapshotSchema          string             `json:"snapshot_schema"`
 	InputSnapshot           json.RawMessage    `json:"input_snapshot"`
+	CreatedBy               JobCreatorSnapshot `json:"created_by"`
+	CreatedBySnapshot       JobCreatorSnapshot `json:"created_by_snapshot"`
+	ModelSnapshot           JobModelSnapshot   `json:"model_snapshot"`
 	StartedAt               *time.Time         `json:"started_at"`
 	CompletedAt             *time.Time         `json:"completed_at"`
 	CancelledAt             *time.Time         `json:"cancelled_at"`
@@ -227,6 +269,12 @@ type JobDocument struct {
 	UpdatedAt               time.Time          `json:"updated_at"`
 	Items                   []JobItemDocument  `json:"items"`
 	Replayed                bool               `json:"-"`
+}
+
+type JobListFilters struct {
+	CreatedBy string
+	Model     string
+	APIMode   string
 }
 
 type JobService struct{ db *gorm.DB }
@@ -292,8 +340,20 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 		if err != nil {
 			return fmt.Errorf("marshal AI job snapshot: %w", err)
 		}
+		creatorSnapshot, modelSnapshot, err := loadJobAuditSnapshots(tx, normalized.CreatedByID)
+		if err != nil {
+			return err
+		}
+		creatorJSON, err := json.Marshal(creatorSnapshot)
+		if err != nil {
+			return err
+		}
+		modelJSON, err := json.Marshal(modelSnapshot)
+		if err != nil {
+			return err
+		}
 		key := normalized.IdempotencyKey
-		job := models.AIJob{PublicID: uuid.NewString(), SKUID: sku.ID, AIContentTemplateVersionID: version.ID, TargetPlatform: template.TargetPlatform, Locale: locale, Status: models.AIJobQueued, SnapshotSchema: ProductSnapshotSchemaV1, InputSnapshotJSON: snapshotJSON, CreatedByID: normalized.CreatedByID, IdempotencyKey: &key, RequestSHA256: requestHash}
+		job := models.AIJob{PublicID: uuid.NewString(), SKUID: sku.ID, AIContentTemplateVersionID: version.ID, TargetPlatform: template.TargetPlatform, Locale: locale, Status: models.AIJobQueued, SnapshotSchema: ProductSnapshotSchemaV1, InputSnapshotJSON: snapshotJSON, CreatedBySnapshotJSON: creatorJSON, ModelSnapshotJSON: modelJSON, CreatedByID: normalized.CreatedByID, IdempotencyKey: &key, RequestSHA256: requestHash}
 		if err := tx.Create(&job).Error; err != nil {
 			return fmt.Errorf("create AI job: %w", err)
 		}
@@ -355,7 +415,7 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 		}
 		job.Items = items
 		job.SKU = sku
-		metadata, _ := json.Marshal(map[string]any{"snapshot_schema": ProductSnapshotSchemaV1, "slot_keys": normalized.SelectedSlotKeys, "asset_count": len(assetIDs), "request_sha256": requestHash, "image_canvases": orderedCanvases})
+		metadata, _ := json.Marshal(map[string]any{"snapshot_schema": ProductSnapshotSchemaV1, "slot_keys": normalized.SelectedSlotKeys, "asset_count": len(assetIDs), "request_sha256": requestHash, "image_canvases": orderedCanvases, "created_by": creatorSnapshot, "model_snapshot": modelSnapshot})
 		jobID, actorID := job.ID, normalized.CreatedByID
 		audit := models.AIAuditEvent{PublicID: uuid.NewString(), EventType: "ai_job.created", EntityType: "ai_job", EntityPublicID: job.PublicID, ActorID: &actorID, AIJobID: &jobID, MetadataJSON: metadata}
 		if err := tx.Create(&audit).Error; err != nil {
@@ -505,7 +565,7 @@ func findIdempotentJob(db *gorm.DB, actorID uint, key string) (models.AIJob, boo
 }
 
 func documentFromPersistedJob(db *gorm.DB, job models.AIJob) (JobDocument, error) {
-	if err := db.Preload("SKU").Preload("Items", func(q *gorm.DB) *gorm.DB { return q.Order("created_at ASC, id ASC") }).First(&job, job.ID).Error; err != nil {
+	if err := db.Preload("SKU").Preload("Items", func(q *gorm.DB) *gorm.DB { return q.Order("created_at ASC, id ASC") }).Preload("Items.Executions", func(q *gorm.DB) *gorm.DB { return q.Order("attempt_number ASC, id ASC") }).First(&job, job.ID).Error; err != nil {
 		return JobDocument{}, err
 	}
 	ids, err := versionPublicIDs(db, []uint{job.AIContentTemplateVersionID})
@@ -516,8 +576,22 @@ func documentFromPersistedJob(db *gorm.DB, job models.AIJob) (JobDocument, error
 }
 
 func (s *JobService) List(ctx context.Context) ([]JobDocument, error) {
+	return s.ListFiltered(ctx, JobListFilters{})
+}
+
+func (s *JobService) ListFiltered(ctx context.Context, filters JobListFilters) ([]JobDocument, error) {
 	var jobs []models.AIJob
-	if err := s.db.WithContext(ctx).Preload("SKU").Preload("Items", func(db *gorm.DB) *gorm.DB { return db.Order("created_at ASC, id ASC") }).Order("created_at DESC, id DESC").Find(&jobs).Error; err != nil {
+	query := s.db.WithContext(ctx).Preload("SKU").Preload("Items", func(db *gorm.DB) *gorm.DB { return db.Order("created_at ASC, id ASC") }).Preload("Items.Executions", func(db *gorm.DB) *gorm.DB { return db.Order("attempt_number ASC, id ASC") })
+	if value := strings.TrimSpace(filters.CreatedBy); value != "" {
+		query = query.Where("LOWER(created_by_snapshot_json) LIKE ?", "%"+strings.ToLower(value)+"%")
+	}
+	if value := strings.TrimSpace(filters.Model); value != "" {
+		query = query.Where("model_snapshot_json LIKE ?", "%"+value+"%")
+	}
+	if value := strings.TrimSpace(filters.APIMode); value != "" {
+		query = query.Where("model_snapshot_json LIKE ?", "%\"image_api_mode\":\""+value+"\"%")
+	}
+	if err := query.Order("created_at DESC, id DESC").Find(&jobs).Error; err != nil {
 		return nil, err
 	}
 	versionIDs := make([]uint, 0, len(jobs))
@@ -537,7 +611,7 @@ func (s *JobService) List(ctx context.Context) ([]JobDocument, error) {
 
 func (s *JobService) Get(ctx context.Context, publicID string) (JobDocument, error) {
 	var job models.AIJob
-	if err := s.db.WithContext(ctx).Preload("SKU").Preload("Items", func(db *gorm.DB) *gorm.DB { return db.Order("created_at ASC, id ASC") }).Where("public_id = ?", publicID).First(&job).Error; err != nil {
+	if err := s.db.WithContext(ctx).Preload("SKU").Preload("Items", func(db *gorm.DB) *gorm.DB { return db.Order("created_at ASC, id ASC") }).Preload("Items.Executions", func(db *gorm.DB) *gorm.DB { return db.Order("attempt_number ASC, id ASC") }).Where("public_id = ?", publicID).First(&job).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return JobDocument{}, ErrJobNotFound
 		}
@@ -973,11 +1047,84 @@ func versionPublicIDs(db *gorm.DB, ids []uint) (map[uint]string, error) {
 }
 
 func jobDocument(job models.AIJob, versionPublicID string) JobDocument {
+	creator := JobCreatorSnapshot{}
+	modelSnapshot := JobModelSnapshot{}
+	_ = json.Unmarshal(job.CreatedBySnapshotJSON, &creator)
+	_ = json.Unmarshal(job.ModelSnapshotJSON, &modelSnapshot)
 	items := make([]JobItemDocument, 0, len(job.Items))
 	for _, item := range job.Items {
 		ids := []string{}
 		_ = json.Unmarshal(item.SelectedInputAssetIDsJSON, &ids)
-		items = append(items, JobItemDocument{PublicID: item.PublicID, SlotKey: item.SlotKey, Kind: item.Kind, Status: item.Status, SlotSnapshot: cloneJSON(item.SlotSnapshotJSON), SelectedInputAssetIDs: ids, AttemptCount: item.AttemptCount, SafeError: item.SafeError, StartedAt: item.StartedAt, CompletedAt: item.CompletedAt, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt})
+		executions := make([]JobExecutionDocument, 0, len(item.Executions))
+		for _, execution := range item.Executions {
+			actual := execution.ActualModel
+			if actual == "" && execution.Status == models.AIExecutionCompleted {
+				actual = execution.Model
+			}
+			requested := execution.RequestedModel
+			if requested == "" {
+				requested = execution.Model
+			}
+			executions = append(executions, JobExecutionDocument{PublicID: execution.PublicID, Operation: execution.Operation, Status: execution.Status, AttemptNumber: execution.AttemptNumber, RequestedModel: requested, ActualModel: actual, APIMode: defaultString(execution.APIMode, "responses"), ProviderRequestID: execution.OpenAIRequestID, FailureCode: execution.FailureCode, SafeError: execution.SafeError, StartedAt: execution.StartedAt, CompletedAt: execution.CompletedAt})
+		}
+		var failure *JobFailureDocument
+		if item.SafeError != "" || item.FailureCode != "" {
+			failure = &JobFailureDocument{Code: defaultString(item.FailureCode, "internal_execution_error"), SafeMessage: item.SafeError, RecoveryAction: recoveryActionForFailure(item.FailureCode)}
+			if len(executions) > 0 {
+				latest := executions[len(executions)-1]
+				failure.Model = defaultString(latest.ActualModel, latest.RequestedModel)
+				failure.APIMode = latest.APIMode
+				failure.ProviderRequestID = latest.ProviderRequestID
+			}
+		}
+		items = append(items, JobItemDocument{PublicID: item.PublicID, SlotKey: item.SlotKey, Kind: item.Kind, Status: item.Status, SlotSnapshot: cloneJSON(item.SlotSnapshotJSON), SelectedInputAssetIDs: ids, AttemptCount: item.AttemptCount, SafeError: item.SafeError, Failure: failure, Executions: executions, StartedAt: item.StartedAt, CompletedAt: item.CompletedAt, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt})
 	}
-	return JobDocument{PublicID: job.PublicID, SKUID: job.SKU.PublicID, TemplateVersionPublicID: versionPublicID, TargetPlatform: job.TargetPlatform, Locale: job.Locale, Status: job.Status, SnapshotSchema: job.SnapshotSchema, InputSnapshot: append(json.RawMessage(nil), job.InputSnapshotJSON...), StartedAt: job.StartedAt, CompletedAt: job.CompletedAt, CancelledAt: job.CancelledAt, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt, Items: items}
+	return JobDocument{PublicID: job.PublicID, SKUID: job.SKU.PublicID, TemplateVersionPublicID: versionPublicID, TargetPlatform: job.TargetPlatform, Locale: job.Locale, Status: job.Status, SnapshotSchema: job.SnapshotSchema, InputSnapshot: append(json.RawMessage(nil), job.InputSnapshotJSON...), CreatedBy: creator, CreatedBySnapshot: creator, ModelSnapshot: modelSnapshot, StartedAt: job.StartedAt, CompletedAt: job.CompletedAt, CancelledAt: job.CancelledAt, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt, Items: items}
+}
+
+func loadJobAuditSnapshots(tx *gorm.DB, actorID uint) (JobCreatorSnapshot, JobModelSnapshot, error) {
+	var user models.User
+	if err := tx.Unscoped().Select("public_id", "name", "email").First(&user, actorID).Error; err != nil {
+		return JobCreatorSnapshot{}, JobModelSnapshot{}, err
+	}
+	creator := JobCreatorSnapshot{PublicID: user.PublicID, Name: user.Name, Email: user.Email}
+	modelSnapshot := JobModelSnapshot{TextModel: DefaultOpenAITextModel, ImageAPIMode: DefaultOpenAIImageMode, ImageResponsesModel: DefaultOpenAIImageModel, ImageGenerationModel: DefaultOpenAIImageGenerationModel}
+	if !tx.Migrator().HasTable(&models.OpenAIProviderSetting{}) {
+		return creator, modelSnapshot, nil
+	}
+	var setting models.OpenAIProviderSetting
+	if err := tx.Where("provider = ? AND status = ?", openAIProvider, "active").First(&setting).Error; err == nil {
+		modelSnapshot = JobModelSnapshot{TextModel: configuredModel(setting.TextModel, DefaultOpenAITextModel), ImageAPIMode: configuredImageMode(setting.ImageAPIMode), ImageResponsesModel: configuredModel(setting.ImageResponsesModel, DefaultOpenAIImageModel), ImageGenerationModel: configuredModel(setting.ImageGenerationModel, DefaultOpenAIImageGenerationModel)}
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return JobCreatorSnapshot{}, JobModelSnapshot{}, err
+	}
+	return creator, modelSnapshot, nil
+}
+
+func recoveryActionForFailure(code string) string {
+	switch code {
+	case "openai_authentication_failed", "openai_model_incompatible", "openai_access_denied":
+		return "review_openai_settings"
+	case "openai_rate_limited", "openai_timeout_ambiguous":
+		return "retry_later"
+	case "openai_moderation_blocked", "openai_refused", "invalid_input":
+		return "adjust_input"
+	case "storage_unavailable":
+		return "contact_support"
+	default:
+		return "create_new_job"
+	}
+}
+
+func defaultString(value, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return fallback
+}
+
+func decodeJobModelSnapshot(value []byte) JobModelSnapshot {
+	var snapshot JobModelSnapshot
+	_ = json.Unmarshal(value, &snapshot)
+	return snapshot
 }

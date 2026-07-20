@@ -77,6 +77,7 @@ func (q *Queue) LeaseNext(ctx context.Context, workerID string, now time.Time, t
 				"started_at":       gorm.Expr("COALESCE(started_at, ?)", now),
 				"completed_at":     nil,
 				"safe_error":       "",
+				"failure_code":     "",
 				"internal_error":   "",
 			}
 			result := tx.Model(&models.AIJobItem{}).
@@ -164,6 +165,7 @@ func (q *Queue) finish(ctx context.Context, leased LeasedItem, status models.AIJ
 		return ErrInvalidLease
 	}
 	return q.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		failureCode := ""
 		if status == models.AIJobItemFailed {
 			var latest models.AIExecution
 			executionQuery := tx.Where("ai_job_item_id = ?", leased.itemID).Order("attempt_number DESC, id DESC")
@@ -173,8 +175,16 @@ func (q *Queue) finish(ctx context.Context, leased LeasedItem, status models.AIJ
 			err := executionQuery.First(&latest).Error
 			if err == nil && latest.Status == models.AIExecutionCompleted {
 				status, safeError = models.AIJobItemCompleted, ""
+			} else if err == nil {
+				if latest.SafeError != "" {
+					safeError = latest.SafeError
+				}
+				failureCode = defaultString(latest.FailureCode, failureCodeForSafeError(safeError))
 			} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 				return fmt.Errorf("load latest AI execution before failure: %w", err)
+			}
+			if failureCode == "" {
+				failureCode = failureCodeForSafeError(safeError)
 			}
 		}
 		var item models.AIJobItem
@@ -191,7 +201,7 @@ func (q *Queue) finish(ctx context.Context, leased LeasedItem, status models.AIJ
 		if item.Status != models.AIJobItemRunning || item.LeaseOwner != leased.LeaseOwner || item.AttemptCount != leased.Attempt || item.LeaseExpiresAt == nil || !item.LeaseExpiresAt.After(now) {
 			return ErrLeaseLost
 		}
-		updates := map[string]any{"status": status, "lease_owner": "", "lease_expires_at": nil, "completed_at": now, "safe_error": safeError, "internal_error": ""}
+		updates := map[string]any{"status": status, "lease_owner": "", "lease_expires_at": nil, "completed_at": now, "safe_error": safeError, "failure_code": failureCode, "internal_error": ""}
 		result := tx.Model(&models.AIJobItem{}).
 			Where("id = ? AND status = ? AND lease_owner = ? AND attempt_count = ? AND lease_expires_at > ?", item.ID, models.AIJobItemRunning, leased.LeaseOwner, leased.Attempt, now).
 			Updates(updates)

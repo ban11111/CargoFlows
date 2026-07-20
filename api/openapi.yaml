@@ -826,6 +826,10 @@ paths:
   /ai-jobs:
     get:
       operationId: listAIJobs
+      parameters:
+        - { in: query, name: created_by, schema: { type: string }, description: Case-insensitive filter by immutable creator name, email, or public ID snapshot. }
+        - { in: query, name: model, schema: { type: string }, description: Filter by a model recorded in the job snapshot. }
+        - { in: query, name: api_mode, schema: { type: string, enum: [responses, images] }, description: Filter by configured image API mode. }
       responses:
         '200': { description: AI jobs in newest-first order, content: { application/json: { schema: { type: object, additionalProperties: false, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/AIJob' } } } } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -1065,15 +1069,20 @@ components:
     OpenAISetting:
       type: object
       additionalProperties: false
-      required: [provider, status, key_fingerprint, text_model, image_model, verified_at, image_capability_verified_at, last_used_at]
+      required: [provider, status, key_fingerprint, text_model, image_model, image_api_mode, image_responses_model, image_generation_model, verified_at, image_capability_verified_at, image_responses_verified_at, image_generation_verified_at, last_used_at]
       properties:
         provider: { type: string, enum: [openai] }
         status: { type: string, enum: [unconfigured, active, invalid, disabled] }
         key_fingerprint: { type: string, maxLength: 16, description: Non-secret display fingerprint; empty when unconfigured. }
         text_model: { type: string, maxLength: 200, description: Model used for new text generation tasks. }
-        image_model: { type: string, maxLength: 200, description: Responses API host model used with the image_generation tool for new image tasks. }
+        image_model: { type: string, maxLength: 200, description: Deprecated compatibility field containing the currently active image model. }
+        image_api_mode: { type: string, enum: [responses, images] }
+        image_responses_model: { type: string, maxLength: 200, description: Mainline Responses model that can call the image_generation tool. }
+        image_generation_model: { type: string, maxLength: 200, description: GPT Image model used directly with the Images API. }
         verified_at: { type: string, format: date-time, nullable: true }
         image_capability_verified_at: { type: string, format: date-time, nullable: true }
+        image_responses_verified_at: { type: string, format: date-time, nullable: true }
+        image_generation_verified_at: { type: string, format: date-time, nullable: true }
         last_used_at: { type: string, format: date-time, nullable: true }
     OpenAISettingRequest:
       type: object
@@ -1084,17 +1093,24 @@ components:
     OpenAIModel:
       type: object
       additionalProperties: false
-      required: [id, owned_by]
+      required: [id, owned_by, supports_text, supports_image_tool, supports_images_api]
       properties:
         id: { type: string, maxLength: 200 }
         owned_by: { type: string, maxLength: 200 }
+        supports_text: { type: boolean }
+        supports_image_tool: { type: boolean }
+        supports_images_api: { type: boolean }
+        compatibility_reason: { type: string }
     OpenAIModelSelectionRequest:
       type: object
       additionalProperties: false
-      required: [text_model, image_model]
+      required: [text_model, image_api_mode, image_responses_model, image_generation_model]
       properties:
         text_model: { type: string, minLength: 1, maxLength: 200 }
-        image_model: { type: string, minLength: 1, maxLength: 200 }
+        image_model: { type: string, minLength: 1, maxLength: 200, deprecated: true }
+        image_api_mode: { type: string, enum: [responses, images] }
+        image_responses_model: { type: string, minLength: 1, maxLength: 200 }
+        image_generation_model: { type: string, minLength: 1, maxLength: 200 }
     AIContentSlotMutation:
       type: object
       additionalProperties: false
@@ -1299,7 +1315,7 @@ components:
     AIJob:
       type: object
       additionalProperties: false
-      required: [public_id, sku_id, template_version_id, target_platform, locale, status, snapshot_schema, input_snapshot, started_at, completed_at, cancelled_at, created_at, updated_at, items]
+      required: [public_id, sku_id, template_version_id, target_platform, locale, status, snapshot_schema, input_snapshot, created_by, created_by_snapshot, model_snapshot, started_at, completed_at, cancelled_at, created_at, updated_at, items]
       properties:
         public_id: { type: string, format: uuid }
         sku_id: { type: string, format: uuid }
@@ -1309,6 +1325,9 @@ components:
         status: { type: string, enum: [queued, running, partial, completed, failed, cancelled] }
         snapshot_schema: { type: string, enum: [cargoflows_product_generation_v1] }
         input_snapshot: { $ref: '#/components/schemas/ProductSnapshotV1' }
+        created_by: { $ref: '#/components/schemas/AIJobCreator' }
+        created_by_snapshot: { $ref: '#/components/schemas/AIJobCreator' }
+        model_snapshot: { $ref: '#/components/schemas/AIJobModelSnapshot' }
         started_at: { type: string, format: date-time, nullable: true }
         completed_at: { type: string, format: date-time, nullable: true }
         cancelled_at: { type: string, format: date-time, nullable: true }
@@ -1318,7 +1337,7 @@ components:
     AIJobItem:
       type: object
       additionalProperties: false
-      required: [public_id, slot_key, kind, status, slot_snapshot, selected_input_asset_ids, attempt_count, safe_error, started_at, completed_at, created_at, updated_at]
+      required: [public_id, slot_key, kind, status, slot_snapshot, selected_input_asset_ids, attempt_count, safe_error, failure, executions, started_at, completed_at, created_at, updated_at]
       properties:
         public_id: { type: string, format: uuid }
         slot_key: { type: string }
@@ -1328,10 +1347,57 @@ components:
         selected_input_asset_ids: { type: array, items: { type: string, format: uuid } }
         attempt_count: { type: integer, minimum: 0 }
         safe_error: { type: string }
+        failure: { allOf: [ { $ref: '#/components/schemas/AIJobFailure' } ], nullable: true }
+        executions: { type: array, items: { $ref: '#/components/schemas/AIJobExecution' } }
         started_at: { type: string, format: date-time, nullable: true }
         completed_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    AIJobCreator:
+      type: object
+      additionalProperties: false
+      required: [public_id, name, email]
+      properties:
+        public_id: { type: string, description: Empty only for legacy jobs that predate creator snapshots. }
+        name: { type: string }
+        email: { type: string }
+    AIJobModelSnapshot:
+      type: object
+      additionalProperties: false
+      required: [text_model, image_api_mode, image_responses_model, image_generation_model]
+      properties:
+        text_model: { type: string }
+        image_api_mode: { type: string, enum: ['', responses, images], description: Empty only for legacy jobs that predate model snapshots. }
+        image_responses_model: { type: string }
+        image_generation_model: { type: string }
+    AIJobExecution:
+      type: object
+      additionalProperties: false
+      required: [public_id, operation, status, attempt_number, requested_model, actual_model, api_mode, provider_request_id, failure_code, safe_error, started_at, completed_at]
+      properties:
+        public_id: { type: string, format: uuid }
+        operation: { type: string, enum: [generate, edit, restart, text_generate] }
+        status: { type: string }
+        attempt_number: { type: integer, minimum: 1 }
+        requested_model: { type: string }
+        actual_model: { type: string }
+        api_mode: { type: string, enum: [responses, images] }
+        provider_request_id: { type: string }
+        failure_code: { type: string }
+        safe_error: { type: string }
+        started_at: { type: string, format: date-time, nullable: true }
+        completed_at: { type: string, format: date-time, nullable: true }
+    AIJobFailure:
+      type: object
+      additionalProperties: false
+      required: [code, safe_message, recovery_action, model, api_mode, provider_request_id]
+      properties:
+        code: { type: string }
+        safe_message: { type: string }
+        recovery_action: { type: string, enum: [review_openai_settings, retry_later, adjust_input, contact_support, create_new_job] }
+        model: { type: string }
+        api_mode: { type: string, enum: ['', responses, images], description: Empty only when a legacy failure has no execution record. }
+        provider_request_id: { type: string }
     AITextResult:
       type: object
       additionalProperties: false

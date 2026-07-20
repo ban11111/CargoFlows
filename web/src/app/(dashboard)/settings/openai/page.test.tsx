@@ -26,8 +26,13 @@ const active = {
   key_fingerprint: "ABCD1234",
   text_model: "gpt-a",
   image_model: "gpt-b",
+  image_api_mode: "responses",
+  image_responses_model: "gpt-b",
+  image_generation_model: "gpt-image-2",
   verified_at: "2026-07-17T10:00:00Z",
   image_capability_verified_at: "2026-07-17T10:00:01Z",
+  image_responses_verified_at: "2026-07-17T10:00:01Z",
+  image_generation_verified_at: null,
   last_used_at: null,
 };
 
@@ -143,8 +148,8 @@ describe("OpenAI settings", () => {
         }
         modelRequests += 1;
         return jsonResponse({ data: modelRequests === 1
-          ? [{ id: "gpt-a", owned_by: "openai" }, { id: "gpt-b", owned_by: "system" }, { id: "gpt-c", owned_by: "openai" }]
-          : [{ id: "gpt-a", owned_by: "openai" }, { id: "gpt-c", owned_by: "openai" }] });
+          ? [{ id: "gpt-a", owned_by: "openai", supports_text: true, supports_image_tool: true, supports_images_api: false }, { id: "gpt-b", owned_by: "system", supports_text: true, supports_image_tool: true, supports_images_api: false }, { id: "gpt-c", owned_by: "openai", supports_text: true, supports_image_tool: true, supports_images_api: false }, { id: "gpt-image-2", owned_by: "openai", supports_text: false, supports_image_tool: false, supports_images_api: true }]
+          : [{ id: "gpt-a", owned_by: "openai", supports_text: true, supports_image_tool: true, supports_images_api: false }, { id: "gpt-c", owned_by: "openai", supports_text: true, supports_image_tool: true, supports_images_api: false }, { id: "gpt-image-2", owned_by: "openai", supports_text: false, supports_image_tool: false, supports_images_api: true }] });
       }
       return jsonResponse(active);
     });
@@ -152,16 +157,19 @@ describe("OpenAI settings", () => {
 
     const textSelect = await screen.findByLabelText("文字任务模型");
     const imageSelect = screen.getByLabelText("图片任务主模型");
+    const directImageSelect = screen.getByLabelText("Images API 图像模型");
     await waitFor(() => expect(textSelect).toHaveValue("gpt-a"));
     expect(imageSelect).toHaveValue("gpt-b");
+    expect(directImageSelect).toHaveValue("gpt-image-2");
     expect(screen.getAllByRole("option", { name: "gpt-b · system" })).toHaveLength(2);
-    expect(screen.getByText("共 3 个模型")).toBeInTheDocument();
+    expect(screen.getByText("共 4 个模型")).toBeInTheDocument();
 
     fireEvent.change(textSelect, { target: { value: "gpt-c" } });
     fireEvent.change(imageSelect, { target: { value: "gpt-a" } });
+    fireEvent.click(screen.getByRole("radio", { name: /Images API 直接生成/ }));
     fireEvent.click(screen.getByRole("button", { name: "保存模型配置" }));
     expect(await screen.findByText(/文字和图片模型配置已保存/)).toBeInTheDocument();
-    expect(patchBody).toEqual({ text_model: "gpt-c", image_model: "gpt-a" });
+    expect(patchBody).toEqual({ text_model: "gpt-c", image_api_mode: "images", image_responses_model: "gpt-a", image_generation_model: "gpt-image-2" });
 
     fireEvent.click(screen.getByRole("button", { name: "刷新模型" }));
     await waitFor(() => expect(modelRequests).toBe(2));

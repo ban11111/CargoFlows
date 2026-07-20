@@ -88,13 +88,11 @@ export function SOPVersionEditor({ initialVersion, onVersionChange }: SOPVersion
 
   function readServerErrors(error: unknown) {
     if (error instanceof ApiError) {
-      try {
-        const body = JSON.parse(error.message) as Partial<ValidationResponse>;
-        if (Array.isArray(body.errors)) {
-          setErrors(body.errors);
-          return;
-        }
-      } catch { /* use the generic request error */ }
+      const body = error.details as Partial<ValidationResponse> | undefined;
+      if (Array.isArray(body?.errors)) {
+        setErrors(body.errors);
+        return;
+      }
     }
     setClientErrors([{ path: "", message: c.requestFailed }]);
   }
