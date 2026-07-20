@@ -13,6 +13,7 @@
 		4711555F3AEDF057814B13A9 /* CargoFlowApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77F70D31AE04C6BDDD4DBC7C /* CargoFlowApp.swift */; };
 		48616596AF03C520D8C7E44A /* SOPDTOTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4A2C46A39E75F3C83B117F0 /* SOPDTOTests.swift */; };
 		49FA5EC8A732C5E6EA3426C4 /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A63C5DFE8C84FA814CFD6B1 /* SessionStore.swift */; };
+		51114B73DC9EBF9976283FAF /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 588E2B22AE1F62A8FAF0F698 /* Assets.xcassets */; };
 		667EB79794128388DB4C2F91 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86B7A2EC84780AEE80AE232D /* DashboardView.swift */; };
 		66FCF0A5B6579339E428ED55 /* SOPCaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D50F3E09F2AE08EA1D8CB1E8 /* SOPCaptureView.swift */; };
 		7626401090A2802439E8A1DF /* DTOs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 541FD304152B402A02929F69 /* DTOs.swift */; };
@@ -41,13 +42,14 @@
 		021344742BEBA83C299EBC30 /* InventoryAdjustmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InventoryAdjustmentView.swift; sourceTree = "<group>"; };
 		1468152012DBD5DC022319A7 /* CargoDesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CargoDesignSystem.swift; sourceTree = "<group>"; };
 		1CF659B396047E7018A1B364 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
-		1F04FDF97C5195E31F4F3BE9 /* CargoFlow.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = CargoFlow.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1F04FDF97C5195E31F4F3BE9 /* CargoFlow.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CargoFlow.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		2EBB9E4D9ECEC4094EAA4967 /* SOPCaptureLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SOPCaptureLogicTests.swift; sourceTree = "<group>"; };
-		344A9C2CD95C0FF0D835018D /* CargoFlowTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CargoFlowTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		344A9C2CD95C0FF0D835018D /* CargoFlowTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CargoFlowTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		3866A4F7DB0CDDA70FADE273 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		3A63C5DFE8C84FA814CFD6B1 /* SessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStore.swift; sourceTree = "<group>"; };
 		4DEEC0F699589DF72D5E1FDD /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		541FD304152B402A02929F69 /* DTOs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DTOs.swift; sourceTree = "<group>"; };
+		588E2B22AE1F62A8FAF0F698 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		58BC2AD4A5AED4726D6D04C1 /* SKUDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SKUDetailView.swift; sourceTree = "<group>"; };
 		6263DD6E53C650757ED6C3C7 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		73DA8770346CDB98FF3B2E96 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -74,6 +76,7 @@
 		10978A513D97D81DAAF3FBE1 /* CargoFlow */ = {
 			isa = PBXGroup;
 			children = (
+				588E2B22AE1F62A8FAF0F698 /* Assets.xcassets */,
 				73DA8770346CDB98FF3B2E96 /* Info.plist */,
 				B4F6908CA47A8E365E2E5935 /* App */,
 				13DB0A56AE64056A00EF91AD /* Models */,
@@ -153,6 +156,7 @@
 			buildConfigurationList = F1E8458478B2401100413E7F /* Build configuration list for PBXNativeTarget "CargoFlow" */;
 			buildPhases = (
 				1D12E316942FA8501851C7CB /* Sources */,
+				1FD87548D1E04922BCE3CA20 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -193,7 +197,6 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					6F0F7E8E5D1634671CA667D9 = {
-						DevelopmentTeam = XDUSZQ42JP;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -217,6 +220,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1FD87548D1E04922BCE3CA20 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				51114B73DC9EBF9976283FAF /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		1D12E316942FA8501851C7CB /* Sources */ = {
@@ -266,6 +280,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = XDUSZQ42JP;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -283,6 +298,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = XDUSZQ42JP;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -359,12 +375,14 @@
 				CARGOFLOW_API_BASE_URL = "https://dev.cargoflows.cc/api/proxy/";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = XDUSZQ42JP;
 				INFOPLIST_FILE = CargoFlow/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.cargoflow.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -441,12 +459,14 @@
 				CARGOFLOW_API_BASE_URL = "https://dev.cargoflows.cc/api/proxy/";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = XDUSZQ42JP;
 				INFOPLIST_FILE = CargoFlow/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.cargoflow.app;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";

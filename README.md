@@ -306,6 +306,27 @@ Automatic signing is persisted in `ios/project.yml`. Set
 `CARGOFLOW_DEVELOPMENT_TEAM=YOUR_TEAM_ID` only when overriding the configured team. The landing
 page serves the signed IPA first, with the Simulator zip as a fallback when no IPA is present.
 
+### TestFlight distribution
+
+The iOS target uses Bundle ID `com.cargoflow.app`, marketing version `0.1.0`, and build number
+`1`. Increase `CURRENT_PROJECT_VERSION` in `ios/project.yml` for every new successful delivery.
+The generated Xcode project should never be the only place where version or signing settings are
+changed because `xcodegen generate` overwrites it.
+
+Before uploading, sign in to the configured team under Xcode > Settings > Accounts, create an
+Apple Distribution certificate, register the Bundle ID, create the App Store Connect app record,
+and add a 1024x1024 App Store icon. The first upload is best performed through Xcode Organizer so
+that signing and App Store validation messages are visible. Later uploads can use:
+
+```bash
+./scripts/package-ios.sh testflight
+```
+
+This mode archives with automatic signing and uploads with the `app-store-connect` distribution
+method. It does not publish a public App Store release. After Apple finishes processing the build,
+complete export-compliance and beta test information in App Store Connect and assign the build to
+an internal TestFlight group. See `ios/README.md` for the complete checklist.
+
 If XcodeGen is not installed, create a new iOS App project in Xcode and add files from `ios/CargoFlow/`.
 
 ## Product-Capture SOP Model
