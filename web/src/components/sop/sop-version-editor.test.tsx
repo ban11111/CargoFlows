@@ -181,11 +181,28 @@ describe("SOPVersionEditor", () => {
   it.each(["published", "archived"] as const)("makes every field read-only for a %s version", (status) => {
     renderEditor({ ...draftFixture, status });
 
-    expect(screen.getByText(status === "published" ? "已发布版本不可修改" : "已归档版本不可修改")).toBeInTheDocument();
+    expect(screen.getByText(status === "published" ? "已发布版本不可修改" : "已停用版本不可修改")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "添加视图" })).toBeDisabled();
     expect(screen.getByLabelText("SOP 中文名称")).toHaveAttribute("readonly");
     expect(screen.getByDisplayValue("背面")).toHaveAttribute("readonly");
     expect(screen.getByRole("button", { name: "保存版本信息" })).toBeDisabled();
+  });
+
+  it("re-enables an archived version without changing its identity or version number", async () => {
+    const archived = { ...draftFixture, status: "archived" as const };
+    const restored = { ...archived, status: "published" as const };
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() => response(restored));
+    renderEditor(archived);
+
+    fireEvent.click(screen.getByRole("button", { name: "重新启用" }));
+
+    expect(await screen.findByText("已发布版本不可修改")).toBeInTheDocument();
+    expect(screen.getByText("V1")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重新启用" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "停用版本" })).toBeEnabled();
+    expect(confirm).toHaveBeenCalledWith("重新启用后，该版本会再次出现在新拍摄批次的可选 SOP 中。继续？");
+    expect(fetchMock).toHaveBeenCalledWith(`/api/proxy/sop-versions/${versionID}/restore`, expect.objectContaining({ method: "POST", body: "{}" }));
   });
 
   it("validates before publishing and only publishes when no issues remain", async () => {
@@ -206,6 +223,27 @@ describe("SOPVersionEditor", () => {
       `/api/proxy/sop-versions/${versionID}/validate`,
       `/api/proxy/sop-versions/${versionID}/publish`,
     ]);
+  });
+
+  it("updates list and detail caches immediately after publishing a new version", async () => {
+    const oldPublished = { ...draftFixture, public_id: "88888888-8888-4888-8888-888888888888", version_number: 1, status: "published" as const };
+    const newDraft = { ...draftFixture, version_number: 2 };
+    const publishedV2 = { ...newDraft, status: "published" as const };
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => String(input).endsWith("/validate")
+      ? response({ code: "sop_valid", errors: [] })
+      : response(publishedV2));
+    const { client } = renderEditorWithClient(newDraft);
+    const summary = { public_id: sopID, category_id: 1, versions: [oldPublished, newDraft] };
+    client.setQueryData(["capture-sop", sopID], summary);
+    client.setQueryData(["capture-sops", "include-all", ""], { data: [summary] });
+
+    fireEvent.click(screen.getByRole("button", { name: "发布版本" }));
+    expect(await screen.findByText("已发布版本不可修改")).toBeInTheDocument();
+
+    const detail = client.getQueryData<typeof summary>(["capture-sop", sopID]);
+    const list = client.getQueryData<{ data: typeof summary[] }>(["capture-sops", "include-all", ""]);
+    expect(detail?.versions.map((version) => [version.version_number, version.status])).toEqual([[1, "published"], [2, "published"]]);
+    expect(list?.data[0].versions.map((version) => [version.version_number, version.status])).toEqual([[1, "published"], [2, "published"]]);
   });
 
   it("stops publication, summarizes server errors, and associates their field paths", async () => {

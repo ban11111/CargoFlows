@@ -132,6 +132,7 @@ func registerExistingRoutes(protected *gin.RouterGroup, server *Server) {
 	sopManagers.POST("/sop-versions/:version_id/publish", server.publishSOPVersion)
 	sopManagers.POST("/capture-sops/:sop_id/versions", server.copySOPVersion)
 	sopManagers.POST("/sop-versions/:version_id/archive", server.archiveSOPVersion)
+	sopManagers.POST("/sop-versions/:version_id/restore", server.restoreSOPVersion)
 	sopManagers.POST("/sop-versions/:version_id/views/:view_id/reference-images/upload-url", server.createSOPReferenceUploadURL)
 	sopManagers.POST("/sop-versions/:version_id/views/:view_id/reference-images", server.addSOPReferenceImage)
 	sopManagers.DELETE("/sop-versions/:version_id/views/:view_id/reference-images/:image_id", server.deleteSOPReferenceImage)

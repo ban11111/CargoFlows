@@ -48,7 +48,7 @@ func draftMutationPath(method, path string) bool {
 		return false
 	}
 	return strings.HasPrefix(path, "/api/v1/sop-versions/") &&
-		!strings.HasSuffix(path, "/validate") && !strings.HasSuffix(path, "/archive") && !strings.HasSuffix(path, "/upload-url")
+		!strings.HasSuffix(path, "/validate") && !strings.HasSuffix(path, "/archive") && !strings.HasSuffix(path, "/restore") && !strings.HasSuffix(path, "/upload-url")
 }
 
 func currentSOPRevision(t *testing.T, server *httptest.Server, token, mutationPath string) string {
@@ -262,6 +262,41 @@ func TestPublishedVersionRejectsPatch(t *testing.T) {
 	}
 	if failure["code"] != "version_immutable" {
 		t.Fatalf("failure = %#v", failure)
+	}
+}
+
+func TestArchivedVersionCanBeRestoredThroughLifecycleEndpoint(t *testing.T) {
+	db := newTestDB(t)
+	category, user := seedSOPCategoryAndUser(t, db)
+	service := NewSOPService(db)
+	created := createTestSOP(t, service, category, user)
+	if _, err := service.Publish(t.Context(), created.Version.PublicID); err != nil {
+		t.Fatal(err)
+	}
+	server, token := authenticatedSOPRouter(t, db, user)
+	defer server.Close()
+
+	archived := sopRequest(t, server, token, http.MethodPost, "/api/v1/sop-versions/"+created.Version.PublicID+"/archive", `{}`)
+	defer archived.Body.Close()
+	if archived.StatusCode != http.StatusOK {
+		t.Fatalf("archive status = %d", archived.StatusCode)
+	}
+
+	restored := sopRequest(t, server, token, http.MethodPost, "/api/v1/sop-versions/"+created.Version.PublicID+"/restore", `{}`)
+	defer restored.Body.Close()
+	if restored.StatusCode != http.StatusOK {
+		t.Fatalf("restore status = %d", restored.StatusCode)
+	}
+	var document struct {
+		PublicID      string                  `json:"public_id"`
+		VersionNumber int                     `json:"version_number"`
+		Status        models.SOPVersionStatus `json:"status"`
+	}
+	if err := json.NewDecoder(restored.Body).Decode(&document); err != nil {
+		t.Fatal(err)
+	}
+	if document.PublicID != created.Version.PublicID || document.VersionNumber != created.Version.VersionNumber || document.Status != models.SOPVersionPublished {
+		t.Fatalf("unexpected restored version = %#v", document)
 	}
 }
 

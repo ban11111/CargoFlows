@@ -480,6 +480,19 @@ func (s *SOPService) Archive(ctx context.Context, versionPublicID string) error 
 	})
 }
 
+func (s *SOPService) Restore(ctx context.Context, versionPublicID string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		version, err := getVersionRecord(tx.Clauses(clause.Locking{Strength: "UPDATE"}), versionPublicID)
+		if err != nil {
+			return err
+		}
+		if version.Status != models.SOPVersionArchived {
+			return ErrVersionImmutable
+		}
+		return tx.Model(version).Update("status", models.SOPVersionPublished).Error
+	})
+}
+
 func (s *SOPService) AddReferenceImage(ctx context.Context, versionPublicID, viewPublicID string, input ReferenceImageInput) (*models.SOPViewReferenceImage, error) {
 	var added models.SOPViewReferenceImage
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

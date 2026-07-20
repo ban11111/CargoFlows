@@ -1,6 +1,7 @@
 import type { components } from "./openapi-types";
 
 export type LocalizedText = components["schemas"]["LocalizedText"];
+export type CaptureSOPSummary = components["schemas"]["CaptureSOPSummary"];
 export type SOPVersion = components["schemas"]["SOPVersion"];
 export type SOPView = components["schemas"]["SOPView"];
 export type ValidationResponse = components["schemas"]["ValidationResponse"];
@@ -39,4 +40,18 @@ export function localizedText(
   if (preferred.trim()) return preferred;
   if (fallback.trim()) return fallback;
   return "";
+}
+
+export function mergeSOPVersion(summary: CaptureSOPSummary, next: SOPVersion): CaptureSOPSummary {
+  if (summary.public_id !== next.sop_public_id) return summary;
+  let found = false;
+  const versions = summary.versions.map((version) => {
+    if (version.public_id === next.public_id) {
+      found = true;
+      return next;
+    }
+    return version;
+  });
+  if (!found) versions.push(next);
+  return { ...summary, versions };
 }

@@ -403,6 +403,17 @@ func (s *Server) archiveSOPVersion(c *gin.Context) {
 	s.respondVersion(c, http.StatusOK, c.Param("version_id"))
 }
 
+func (s *Server) restoreSOPVersion(c *gin.Context) {
+	if !requireUUIDParam(c, "version_id") {
+		return
+	}
+	if err := NewSOPService(s.db).Restore(c.Request.Context(), c.Param("version_id")); err != nil {
+		respondSOPError(c, err)
+		return
+	}
+	s.respondVersion(c, http.StatusOK, c.Param("version_id"))
+}
+
 func (s *Server) createSOPReferenceUploadURL(c *gin.Context) {
 	if !requireUUIDParam(c, "version_id") || !requireUUIDParam(c, "view_id") {
 		return

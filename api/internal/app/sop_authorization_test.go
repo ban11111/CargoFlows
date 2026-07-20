@@ -115,6 +115,7 @@ func TestAllSOPMutationRoutesRejectViewerBeforeResourceLookup(t *testing.T) {
 		{http.MethodPost, "/api/v1/sop-versions/" + id + "/publish"},
 		{http.MethodPost, "/api/v1/capture-sops/" + id + "/versions"},
 		{http.MethodPost, "/api/v1/sop-versions/" + id + "/archive"},
+		{http.MethodPost, "/api/v1/sop-versions/" + id + "/restore"},
 		{http.MethodPost, "/api/v1/sop-versions/" + id + "/views/" + id + "/reference-images/upload-url"},
 		{http.MethodPost, "/api/v1/sop-versions/" + id + "/views/" + id + "/reference-images"},
 		{http.MethodDelete, "/api/v1/sop-versions/" + id + "/views/" + id + "/reference-images/" + id},

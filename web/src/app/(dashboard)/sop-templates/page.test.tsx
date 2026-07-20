@@ -27,7 +27,7 @@ function jsonResponse(body: unknown, status = 200) {
   return Promise.resolve(new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }));
 }
 
-beforeEach(() => { localStorage.clear(); vi.restoreAllMocks(); });
+beforeEach(() => { localStorage.clear(); vi.restoreAllMocks(); vi.spyOn(window, "confirm").mockReturnValue(true); });
 
 describe("SOP management list", () => {
   it("requests admin lifecycle mode and renders draft-only and archived-only SOPs", async () => {
@@ -47,8 +47,8 @@ describe("SOP management list", () => {
 
     render(<SopTemplatesPage />, { wrapper: Providers });
 
-    expect(await screen.findByText("新建草稿 SOP")).toBeInTheDocument();
-    expect(screen.getByText("已归档 SOP")).toBeInTheDocument();
+    expect((await screen.findAllByText("新建草稿 SOP")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("已归档 SOP").length).toBeGreaterThan(0);
     expect(requests).toContain("/api/proxy/capture-sops?include_all=true");
   });
 
@@ -70,7 +70,7 @@ describe("SOP management list", () => {
     });
     render(<SopTemplatesPage />, { wrapper: Providers });
 
-    expect(await screen.findByText("手机壳拍摄")).toBeInTheDocument();
+    expect((await screen.findAllByText("手机壳拍摄")).length).toBeGreaterThan(0);
     expect(screen.getByText("无法载入分类；仍可按 SOP 名称浏览。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "重试载入分类" })).toBeInTheDocument();
   });
@@ -86,5 +86,40 @@ describe("SOP management list", () => {
 
     expect(await screen.findByText("该 SOP 的版本详情载入失败。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "重试载入手机壳拍摄的版本详情" })).toBeInTheDocument();
+  });
+
+  it("lets an older published version be disabled and re-enabled", async () => {
+    const newest = { ...published, public_id: "66666666-6666-4666-8666-666666666666", version_number: 2 };
+    let summary = { public_id: sopID, category_id: 1, versions: [published, newest] };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith(`/sop-versions/${published.public_id}/archive`) && init?.method === "POST") {
+        const disabled = { ...published, status: "archived" };
+        summary = { ...summary, versions: [disabled, newest] };
+        return jsonResponse(disabled);
+      }
+      if (url.endsWith(`/sop-versions/${published.public_id}/restore`) && init?.method === "POST") {
+        summary = { ...summary, versions: [published, newest] };
+        return jsonResponse(published);
+      }
+      if (url.includes("/capture-sops?include_all=true")) return jsonResponse({ data: [summary] });
+      if (url.endsWith(`/capture-sops/${sopID}`)) return jsonResponse(summary);
+      return jsonResponse(categoryResponse);
+    });
+
+    render(<SopTemplatesPage />, { wrapper: Providers });
+
+    expect(await screen.findByRole("link", { name: "打开版本 V1" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "打开版本 V2" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "停用版本 V1" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(`/api/proxy/sop-versions/${published.public_id}/archive`, expect.objectContaining({ method: "POST" })));
+    expect(await screen.findByText("已停用")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "停用版本 V1" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "重新启用 V1" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(`/api/proxy/sop-versions/${published.public_id}/restore`, expect.objectContaining({ method: "POST" })));
+    expect(await screen.findByRole("button", { name: "停用版本 V1" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重新启用 V1" })).not.toBeInTheDocument();
   });
 });

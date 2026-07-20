@@ -269,6 +269,19 @@ func TestSOPServiceCopySingleDraftArchiveAndList(t *testing.T) {
 	if persisted.Status != models.SOPVersionArchived {
 		t.Fatalf("status = %q", persisted.Status)
 	}
+	if err := service.Restore(ctx, published.PublicID); err != nil {
+		t.Fatal(err)
+	}
+	listed, err = service.List(ctx, category.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || len(listed[0].Versions) != 1 || listed[0].Versions[0].PublicID != published.PublicID || listed[0].Versions[0].Status != models.SOPVersionPublished {
+		t.Fatalf("restored version is not selectable: %#v", listed)
+	}
+	if err := service.Restore(ctx, published.PublicID); !errors.Is(err, ErrVersionImmutable) {
+		t.Fatalf("second restore error = %v", err)
+	}
 }
 
 func TestSOPServiceCopyRejectsArchivedSource(t *testing.T) {

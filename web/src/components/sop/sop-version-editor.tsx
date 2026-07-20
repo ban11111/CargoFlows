@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { Archive, CheckCircle2, ClipboardPlus, Copy, LoaderCircle, Plus, Send, TriangleAlert } from "lucide-react";
+import { Archive, CheckCircle2, ClipboardPlus, Copy, LoaderCircle, Plus, RotateCcw, Send, TriangleAlert } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { SOPViewEditor } from "@/components/sop/sop-view-editor";
@@ -14,7 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ApiError, apiRequest } from "@/lib/api";
 import { useLanguage } from "@/lib/i18n";
 import { sopVersionSchema, sopViewSchema } from "@/lib/schemas";
-import { addableSOPPresetKeys, localizedText, type LocalizedText, type SOPPresetKey, type SOPVersion, type SOPView, type ValidationResponse } from "@/lib/sop";
+import { addableSOPPresetKeys, localizedText, mergeSOPVersion, type CaptureSOPSummary, type LocalizedText, type SOPPresetKey, type SOPVersion, type SOPView, type ValidationResponse } from "@/lib/sop";
 import { useUnsavedNavigationGuard } from "@/lib/use-unsaved-navigation-guard";
 
 interface SOPVersionEditorProps {
@@ -26,16 +26,16 @@ type ServerError = ValidationResponse["errors"][number];
 
 const labels = {
   zh: {
-    title: "商品拍摄视图", saveMeta: "保存版本信息", addView: "添加视图", publish: "发布版本", copy: "复制为新版本", archive: "归档版本",
-    immutablePublished: "已发布版本不可修改", immutableArchived: "已归档版本不可修改", draft: "草稿", published: "已发布", archived: "已归档",
+    title: "商品拍摄视图", saveMeta: "保存版本信息", addView: "添加视图", publish: "发布版本", copy: "复制为新版本", archive: "停用版本", restore: "重新启用",
+    immutablePublished: "已发布版本不可修改", immutableArchived: "已停用版本不可修改", draft: "草稿", published: "已发布", archived: "已停用",
     nameZh: "SOP 中文名称", nameEn: "SOP English name", descriptionZh: "中文说明", descriptionEn: "English description",
     validationFailed: "请修正以下问题后再发布", validationPassed: "验证通过，正在发布版本。", requestFailed: "请求失败，请检查输入后重试。",
     dirtyNotice: "请先保存所有未保存的修改，再执行发布、排序或新增视图。",
     preset: { back: "背面", left: "左侧", bottom: "底部", right: "右侧", top: "顶部", detail_label: "标签细节", packaging_front: "包装正面", supplemental_info: "补充信息图片" },
   },
   en: {
-    title: "Product capture views", saveMeta: "Save version details", addView: "Add view", publish: "Publish version", copy: "Copy as new version", archive: "Archive version",
-    immutablePublished: "Published versions cannot be changed", immutableArchived: "Archived versions cannot be changed", draft: "Draft", published: "Published", archived: "Archived",
+    title: "Product capture views", saveMeta: "Save version details", addView: "Add view", publish: "Publish version", copy: "Copy as new version", archive: "Disable version", restore: "Re-enable",
+    immutablePublished: "Published versions cannot be changed", immutableArchived: "Disabled versions cannot be changed", draft: "Draft", published: "Published", archived: "Disabled",
     nameZh: "SOP Chinese name", nameEn: "SOP English name", descriptionZh: "Chinese description", descriptionEn: "English description",
     validationFailed: "Fix the following issues before publishing", validationPassed: "Validation passed. Publishing version.", requestFailed: "Request failed. Check the input and try again.",
     dirtyNotice: "Save every unsaved change before publishing, reordering, or adding views.",
@@ -70,14 +70,19 @@ export function SOPVersionEditor({ initialVersion, onVersionChange }: SOPVersion
     setErrors([]);
     setClientErrors([]);
     onVersionChange?.(next);
-    void queryClient.invalidateQueries({ queryKey: ["capture-sops"] });
-    queryClient.setQueryData(["sop-version", next.public_id], next);
-    void queryClient.invalidateQueries({ queryKey: ["sop-version", next.public_id] });
+    syncVersionCaches(next);
   }
 
   function syncConfirmedVersion(next: SOPVersion) {
+    syncVersionCaches(next);
+  }
+
+  function syncVersionCaches(next: SOPVersion) {
+    queryClient.setQueryData<CaptureSOPSummary>(["capture-sop", next.sop_public_id], (current) => current ? mergeSOPVersion(current, next) : current);
+    queryClient.setQueriesData<{ data: CaptureSOPSummary[] }>({ queryKey: ["capture-sops"] }, (current) => current ? { ...current, data: current.data.map((summary) => mergeSOPVersion(summary, next)) } : current);
     queryClient.setQueryData(["sop-version", next.public_id], next);
     void queryClient.invalidateQueries({ queryKey: ["sop-version", next.public_id] });
+    void queryClient.invalidateQueries({ queryKey: ["capture-sop", next.sop_public_id] });
     void queryClient.invalidateQueries({ queryKey: ["capture-sops"] });
   }
 
@@ -189,8 +194,13 @@ export function SOPVersionEditor({ initialVersion, onVersionChange }: SOPVersion
   }
 
   async function archiveVersion() {
-    if (!window.confirm(language === "zh" ? "归档后该版本不能用于新的拍摄批次。继续？" : "Archived versions cannot be used for new sessions. Continue?")) return;
+    if (!window.confirm(language === "zh" ? "停用后该版本不能用于新的拍摄批次，历史记录仍会保留。继续？" : "Disabled versions cannot be used for new sessions. Existing history is preserved. Continue?")) return;
     await run("archive", async () => replaceVersion(await apiRequest<SOPVersion>(`/sop-versions/${version.public_id}/archive`, { method: "POST", body: "{}" })));
+  }
+
+  async function restoreVersion() {
+    if (!window.confirm(language === "zh" ? "重新启用后，该版本会再次出现在新拍摄批次的可选 SOP 中。继续？" : "Re-enabling makes this version available for new capture sessions again. Continue?")) return;
+    await run("restore", async () => replaceVersion(await apiRequest<SOPVersion>(`/sop-versions/${version.public_id}/restore`, { method: "POST", body: "{}" })));
   }
 
   async function uploadReference(viewIndex: number, file: File, caption: LocalizedText) {
@@ -238,6 +248,7 @@ export function SOPVersionEditor({ initialVersion, onVersionChange }: SOPVersion
           <Button className="min-h-11" disabled={immutable || aggregateLocked} onClick={validateAndPublish}><Send className="h-4 w-4" />{busy === "publish" ? <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : null}{c.publish}</Button>
           <Button className="min-h-11" disabled={version.status !== "published" || Boolean(busy)} onClick={copyVersion} variant="secondary"><Copy className="h-4 w-4" />{c.copy}</Button>
           <Button className="min-h-11" disabled={version.status !== "published" || Boolean(busy)} onClick={archiveVersion} variant="danger"><Archive className="h-4 w-4" />{c.archive}</Button>
+          {version.status === "archived" ? <Button className="min-h-11" disabled={Boolean(busy)} onClick={restoreVersion} variant="secondary"><RotateCcw className="h-4 w-4" />{busy === "restore" ? <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : null}{c.restore}</Button> : null}
         </div>
       </header>
 

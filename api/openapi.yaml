@@ -461,6 +461,18 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '500': { $ref: '#/components/responses/InternalServerError' }
+  /sop-versions/{version_id}/restore:
+    parameters: [ { $ref: '#/components/parameters/VersionID' } ]
+    post:
+      operationId: restoreSOPVersion
+      responses:
+        '200': { description: Restored, content: { application/json: { schema: { $ref: '#/components/schemas/SOPVersion' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
   /sop-versions/{version_id}/views/{view_id}/reference-images/upload-url:
     parameters: [ { $ref: '#/components/parameters/VersionID' }, { $ref: '#/components/parameters/ViewID' } ]
     post:
