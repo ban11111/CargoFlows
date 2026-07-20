@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Pencil, Tag, Trash2 } from "lucide-react";
+import { ArrowLeft, LoaderCircle, Pencil, Power, PowerOff, Tag, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
@@ -42,6 +42,7 @@ export default function SkuDetailPage() {
   const router = useRouter();
   const [tagDraft, setTagDraft] = useState<string>();
   const [editing, setEditing] = useState(false);
+  const [lifecycleResult, setLifecycleResult] = useState<"enabled" | "disabled">();
   const skuQuery = useQuery({
     queryKey: ["skus", params.id],
     queryFn: () => apiRequest<SKUDetail>(`/skus/${params.id}`),
@@ -78,6 +79,14 @@ export default function SkuDetailPage() {
     },
   });
   const update = useMutation({ mutationFn: (value: SKUFormValue) => apiRequest<SKUDetail>(`/skus/${params.id}`, { method: "PATCH", body: JSON.stringify(value) }), onSuccess: async () => { setEditing(false); setTagDraft(undefined); await queryClient.invalidateQueries({ queryKey: ["skus"] }); } });
+  const updateLifecycle = useMutation({
+    mutationFn: ({ sku, status }: { sku: SKUDetail; status: "active" | "disabled" }) => apiRequest<SKUDetail>(`/skus/${params.id}`, { method: "PATCH", body: JSON.stringify({ ...skuFormValue(sku), status }) }),
+    onMutate: () => setLifecycleResult(undefined),
+    onSuccess: async (_, variables) => {
+      setLifecycleResult(variables.status === "active" ? "enabled" : "disabled");
+      await queryClient.invalidateQueries({ queryKey: ["skus"] });
+    },
+  });
   const remove = useMutation({ mutationFn: () => apiRequest<void>(`/skus/${params.id}`, { method: "DELETE" }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["skus"] }); router.push("/skus"); } });
 
   const sku = skuQuery.data;
@@ -94,10 +103,12 @@ export default function SkuDetailPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-3"><Button asChild aria-label={language === "zh" ? "返回 SKU 列表" : "Back to SKUs"} size="icon" variant="secondary"><Link href="/skus"><ArrowLeft className="h-4 w-4" /></Link></Button><div><p className="mb-1 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">CargoFlows · SKU detail</p><h1 className="text-3xl font-bold tracking-tight text-navy sm:text-4xl">{sku.product.name}</h1><p className="mt-1 font-mono text-xs text-muted-foreground">{sku.code}</p></div></div>
-        <div className="flex flex-wrap gap-2"><Button onClick={() => setEditing((current) => !current)} variant="secondary"><Pencil className="h-4 w-4" />{language === "zh" ? "编辑资料" : "Edit details"}</Button><Button disabled={remove.isPending} onClick={() => { if (window.confirm(language === "zh" ? "删除这个 SKU？已有业务记录时系统会拒绝删除。" : "Delete this SKU? The system will refuse if it has business history.")) remove.mutate(); }} variant="danger"><Trash2 className="h-4 w-4" />{language === "zh" ? "删除 SKU" : "Delete SKU"}</Button></div>
+        <div className="flex items-start gap-3"><Button asChild aria-label={language === "zh" ? "返回 SKU 列表" : "Back to SKUs"} size="icon" variant="secondary"><Link href="/skus"><ArrowLeft className="h-4 w-4" /></Link></Button><div><p className="mb-1 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">CargoFlows · SKU detail</p><div className="flex flex-wrap items-center gap-2"><h1 className="text-3xl font-bold tracking-tight text-navy sm:text-4xl">{sku.product.name}</h1><Badge variant={sku.status === "active" ? "success" : sku.status === "draft" ? "warning" : "neutral"}>{t(sku.status)}</Badge></div><p className="mt-1 font-mono text-xs text-muted-foreground">{sku.code}</p></div></div>
+        <div className="flex flex-wrap gap-2"><Button onClick={() => setEditing((current) => !current)} variant="secondary"><Pencil className="h-4 w-4" />{language === "zh" ? "编辑资料" : "Edit details"}</Button>{sku.status === "active" ? <Button disabled={updateLifecycle.isPending} onClick={() => { if (window.confirm(t("skuDisableConfirm"))) updateLifecycle.mutate({ sku, status: "disabled" }); }} variant="outline">{updateLifecycle.isPending ? <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <PowerOff className="h-4 w-4" />}{t("skuDisable")}</Button> : <Button disabled={updateLifecycle.isPending} onClick={() => updateLifecycle.mutate({ sku, status: "active" })}>{updateLifecycle.isPending ? <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <Power className="h-4 w-4" />}{t("skuEnable")}</Button>}<Button disabled={remove.isPending} onClick={() => { if (window.confirm(language === "zh" ? "删除这个 SKU？已有业务记录时系统会拒绝删除。" : "Delete this SKU? The system will refuse if it has business history.")) remove.mutate(); }} variant="danger"><Trash2 className="h-4 w-4" />{language === "zh" ? "删除 SKU" : "Delete SKU"}</Button></div>
       </div>
 
+      {lifecycleResult ? <p className="rounded-md border border-success/30 bg-success/5 p-3 text-sm text-success" role="status">{t(lifecycleResult === "enabled" ? "skuEnableSuccess" : "skuDisableSuccess")}</p> : null}
+      {updateLifecycle.isError ? <p className="rounded-md border border-danger/30 bg-danger/5 p-3 text-sm text-danger" role="alert">{t("skuLifecycleError")}</p> : null}
       {remove.isError ? <p className="rounded-md border border-danger/30 bg-danger/5 p-3 text-sm text-danger" role="alert">{language === "zh" ? "无法删除：该 SKU 已有库存、素材、型号组、AI 任务或正式内容记录。请将状态改为停用。" : "Cannot delete: this SKU has inventory, media, model-family, AI-job, or published-content history. Disable it instead."}</p> : null}
 
       {editing ? <section className="rounded-lg border border-primary/30 bg-card p-5"><h2 className="mb-4 text-sm font-semibold">{language === "zh" ? "编辑 SKU 资料" : "Edit SKU details"}</h2><SKUForm busy={update.isPending} initial={skuFormValue(sku)} mode="edit" onCancel={() => setEditing(false)} onSubmit={(value) => update.mutate(value)} />{update.isError ? <p className="mt-4 text-sm text-danger" role="alert">{language === "zh" ? "保存失败，请检查填写内容。" : "Save failed. Check the entered values."}</p> : null}</section> : null}

@@ -80,6 +80,11 @@ export default function SkusPage() {
         return <span className={low ? "font-semibold text-danger" : ""}>{formatNumber(row.original.stock)}</span>;
       },
     },
+    {
+      accessorKey: "status",
+      header: t("status"),
+      cell: ({ row }) => <Badge variant={row.original.status === "active" ? "success" : row.original.status === "draft" ? "warning" : "neutral"}>{t(row.original.status)}</Badge>,
+    },
   ];
 
   return (

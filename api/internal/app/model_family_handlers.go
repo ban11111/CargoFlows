@@ -302,8 +302,10 @@ func (s *Server) modelFamilyDTO(family models.ModelFamily) (modelFamilyDTO, erro
 		for _, sku := range skus {
 			memberSKUs[sku.ID] = sku.PublicID
 		}
-		if len(memberSKUs) != len(family.Members) {
-			return modelFamilyDTO{}, gorm.ErrRecordNotFound
+		for _, member := range family.Members {
+			if _, found := memberSKUs[member.SKUID]; !found {
+				return modelFamilyDTO{}, gorm.ErrRecordNotFound
+			}
 		}
 	}
 	return modelFamilyDTOFromModel(family, memberSKUs), nil

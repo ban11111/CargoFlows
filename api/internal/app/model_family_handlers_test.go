@@ -102,6 +102,28 @@ func TestModelFamilyRoutesEnforceRolesAndExposeOnlyPublicIDs(t *testing.T) {
 	if removed.StatusCode != http.StatusNoContent {
 		t.Fatalf("remove status = %d", removed.StatusCode)
 	}
+	readded := sopRequest(t, server, operatorToken, http.MethodPost, "/api/v1/model-families/"+family.PublicID+"/members", `{"sku_id":"`+sku.PublicID+`"}`)
+	defer readded.Body.Close()
+	if readded.StatusCode != http.StatusCreated {
+		t.Fatalf("re-add status = %d", readded.StatusCode)
+	}
+	readAfterReadd := sopRequest(t, server, viewerToken, http.MethodGet, "/api/v1/model-families/"+family.PublicID, "")
+	defer readAfterReadd.Body.Close()
+	if readAfterReadd.StatusCode != http.StatusOK {
+		t.Fatalf("read after re-add status = %d", readAfterReadd.StatusCode)
+	}
+	var familyAfterReadd struct {
+		Members []struct {
+			SKUID     string  `json:"sku_id"`
+			RemovedAt *string `json:"removed_at"`
+		} `json:"members"`
+	}
+	if err := json.NewDecoder(readAfterReadd.Body).Decode(&familyAfterReadd); err != nil {
+		t.Fatal(err)
+	}
+	if len(familyAfterReadd.Members) != 2 || familyAfterReadd.Members[0].SKUID != sku.PublicID || familyAfterReadd.Members[0].RemovedAt == nil || familyAfterReadd.Members[1].SKUID != sku.PublicID || familyAfterReadd.Members[1].RemovedAt != nil {
+		t.Fatalf("membership history after re-add = %#v", familyAfterReadd.Members)
+	}
 }
 
 func TestVariantIdentityRoutesEnforceMutationRolesAndPublishReadOnlyFacts(t *testing.T) {
