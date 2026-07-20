@@ -166,6 +166,58 @@ func TestCreateJobSnapshotsOnlyWhitelistedFactsAndSelectedSlots(t *testing.T) {
 	}
 }
 
+func TestSupplementalAssetsAreInformationOnlyAndCannotSatisfyImageViews(t *testing.T) {
+	db, fixture := seedAIJobFixture(t)
+	var front models.SOPView
+	if err := db.First(&front, fixture.ApprovedAsset.SOPViewID).Error; err != nil {
+		t.Fatal(err)
+	}
+	supplementalView := models.SOPView{
+		PublicID: uuid.NewString(), SOPVersionID: front.SOPVersionID, Sequence: 2,
+		Role: models.SOPViewCapture, ViewKind: models.SOPViewDetail, PresetKey: "supplemental_info",
+		NameZH: "补充信息图片", NameEN: "Supplemental Product Information", Required: false, AllowMultiple: true,
+		CameraPositionZ: 1, ImageUpX: 1, Composition: models.Composition{FrameOccupancy: .95, AspectRatio: "4:5", AllowRotationCorrection: true},
+	}
+	if err := db.Create(&supplementalView).Error; err != nil {
+		t.Fatal(err)
+	}
+	supplemental := models.Asset{
+		PublicID: uuid.NewString(), SKUID: fixture.SKU.ID, PhotoSessionID: fixture.ApprovedAsset.PhotoSessionID, SOPViewID: supplementalView.ID,
+		ObjectKey: "approved/" + uuid.NewString() + ".jpg", OriginalURL: "private://supplemental", ReviewStatus: "approved", CapturedAt: time.Now().UTC(),
+	}
+	if err := db.Create(&supplemental).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	job, err := NewJobService(db).Create(t.Context(), CreateJobInput{
+		SKUID: fixture.SKU.PublicID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID,
+		SelectedSlotKeys: []string{"title"}, SelectedAssetIDs: []string{supplemental.PublicID}, Locale: "zh-CN",
+		CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-supplemental-text",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot ProductSnapshotV1
+	if err := json.Unmarshal(job.InputSnapshot, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.SelectedAssets) != 1 || snapshot.SelectedAssets[0].SourceType != AssetSourceProductInformation || snapshot.SelectedAssets[0].View.PresetKey != "supplemental_info" {
+		t.Fatalf("supplemental asset semantics = %#v", snapshot.SelectedAssets)
+	}
+	if len(job.Items) != 1 || !reflect.DeepEqual(job.Items[0].SelectedInputAssetIDs, []string{supplemental.PublicID}) {
+		t.Fatalf("text item supplemental inputs = %#v", job.Items)
+	}
+
+	_, err = NewJobService(db).Create(t.Context(), CreateJobInput{
+		SKUID: fixture.SKU.PublicID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID,
+		SelectedSlotKeys: []string{"hero"}, SelectedAssetIDs: []string{supplemental.PublicID}, Locale: "zh-CN",
+		CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-supplemental-image-only",
+	})
+	if !errors.Is(err, ErrAssetNotEligible) {
+		t.Fatalf("image-only supplemental error = %v", err)
+	}
+}
+
 func TestCreateJobAllowsTextOnlyWithoutAssets(t *testing.T) {
 	db, fixture := seedAIJobFixture(t)
 	job, err := NewJobService(db).Create(t.Context(), CreateJobInput{SKUID: fixture.SKU.PublicID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"seo", "title"}, Locale: "en", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-test-text-only"})

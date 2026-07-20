@@ -3,6 +3,7 @@ package ai
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -112,16 +113,29 @@ func (client *OpenAIResponsesClient) requestBody(request TextRequest) ([]byte, e
 			return nil, &TextProviderError{Kind: ErrTextProviderInvalidRequest}
 		}
 	}
+	content := make([]map[string]any, 0, len(request.Inputs)+1)
+	content = append(content, map[string]any{"type": "input_text", "text": string(request.Prompt.InputJSON)})
+	var inputBytes int
+	for _, input := range request.Inputs {
+		if input.MIMEType != "image/png" && input.MIMEType != "image/jpeg" && input.MIMEType != "image/webp" {
+			return nil, &TextProviderError{Kind: ErrTextProviderInvalidRequest}
+		}
+		inputBytes += len(input.Bytes)
+		if len(input.Bytes) == 0 || inputBytes > maxImageInputBytes {
+			return nil, &TextProviderError{Kind: ErrTextProviderInvalidRequest}
+		}
+		content = append(content, map[string]any{"type": "input_image", "image_url": "data:" + input.MIMEType + ";base64," + base64.StdEncoding.EncodeToString(input.Bytes), "detail": "original"})
+	}
 	payload := struct {
 		Model        string            `json:"model"`
 		Instructions string            `json:"instructions"`
-		Input        string            `json:"input"`
+		Input        []map[string]any  `json:"input"`
 		Store        bool              `json:"store"`
 		Reasoning    map[string]string `json:"reasoning"`
 		Text         any               `json:"text"`
 		Metadata     map[string]string `json:"metadata,omitempty"`
 	}{
-		Model: client.config.Model, Instructions: request.Prompt.Instructions, Input: string(request.Prompt.InputJSON), Store: false,
+		Model: client.config.Model, Instructions: request.Prompt.Instructions, Input: []map[string]any{{"role": "user", "content": content}}, Store: false,
 		Reasoning: map[string]string{"effort": client.config.ReasoningEffort},
 		Text:      map[string]any{"format": map[string]any{"type": "json_schema", "name": request.Prompt.SchemaName, "schema": request.Prompt.JSONSchema, "strict": true}},
 		Metadata:  request.Metadata,
@@ -169,6 +183,9 @@ func decodeOpenAITextResponse(response *http.Response, requestID string, prompt 
 			OutputDetails struct {
 				ReasoningTokens int64 `json:"reasoning_tokens"`
 			} `json:"output_tokens_details"`
+			InputDetails struct {
+				ImageTokens int64 `json:"image_tokens"`
+			} `json:"input_tokens_details"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &decoded); err != nil || decoded.Status != "completed" || decoded.ID == "" || strings.TrimSpace(decoded.Model) == "" || !validTextUsage(decoded.Usage) {
@@ -194,7 +211,7 @@ func decodeOpenAITextResponse(response *http.Response, requestID string, prompt 
 	}
 	return TextResponse{
 		ResponseID: decoded.ID, RequestID: requestID, Model: decoded.Model, OutputJSON: append(json.RawMessage(nil), outputJSON...),
-		Usage: TextUsage{InputTextTokens: decoded.Usage.InputTokens, OutputTextTokens: decoded.Usage.OutputTokens, TotalTokens: decoded.Usage.TotalTokens, ReasoningTokens: decoded.Usage.OutputDetails.ReasoningTokens},
+		Usage: TextUsage{InputTextTokens: decoded.Usage.InputTokens - decoded.Usage.InputDetails.ImageTokens, InputImageTokens: decoded.Usage.InputDetails.ImageTokens, OutputTextTokens: decoded.Usage.OutputTokens, TotalTokens: decoded.Usage.TotalTokens, ReasoningTokens: decoded.Usage.OutputDetails.ReasoningTokens},
 	}, nil
 }
 
@@ -205,8 +222,12 @@ func validTextUsage(usage *struct {
 	OutputDetails struct {
 		ReasoningTokens int64 `json:"reasoning_tokens"`
 	} `json:"output_tokens_details"`
+	InputDetails struct {
+		ImageTokens int64 `json:"image_tokens"`
+	} `json:"input_tokens_details"`
 }) bool {
 	return usage != nil && usage.InputTokens >= 0 && usage.OutputTokens >= 0 && usage.TotalTokens >= 0 &&
+		usage.InputDetails.ImageTokens >= 0 && usage.InputDetails.ImageTokens <= usage.InputTokens &&
 		usage.OutputDetails.ReasoningTokens >= 0 && usage.OutputDetails.ReasoningTokens <= usage.OutputTokens &&
 		usage.TotalTokens == usage.InputTokens+usage.OutputTokens
 }

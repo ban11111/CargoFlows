@@ -173,7 +173,7 @@ describe("sopVersionSchema", () => {
 describe("SOP contract helpers", () => {
   it("exposes the complete preset catalog and resolves both UI language forms", () => {
     expect(sopPresetKeys).toEqual([
-      "reference_front", "back", "left", "bottom", "right", "top", "detail_label", "packaging_front",
+      "reference_front", "back", "left", "bottom", "right", "top", "detail_label", "packaging_front", "supplemental_info",
     ]);
     expect(localizedText("zh", baseView.name)).toBe("包装正面");
     expect(localizedText("zh-CN", baseView.name)).toBe("包装正面");

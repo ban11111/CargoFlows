@@ -131,6 +131,20 @@ describe("NewAIJobPage", () => {
     expect(screen.getByRole("heading", { name: "确认参考素材" })).toBeInTheDocument();
   });
 
+  it("groups supplemental assets as facts and does not count them as required product views", async () => {
+    installWizardFetch("supplemental_info");
+    render(<NewAIJobPage />, { wrapper: Providers });
+    fireEvent.change(await screen.findByLabelText("选择 SKU"), { target: { value: skuPublicID } });
+    fireEvent.change(screen.getByLabelText("选择模板版本"), { target: { value: "version-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /白底主图/ }));
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+
+    expect(await screen.findByText("补充资料")).toBeInTheDocument();
+    expect(screen.getByText(/仅作为卖点、规格和说明书中的可见事实来源/)).toBeInTheDocument();
+    expect(screen.getByText(/reference_front/)).toBeInTheDocument();
+  });
+
   it("shows extra preference only when every selected slot permits it", async () => {
     installWizardFetch();
     render(<NewAIJobPage />, { wrapper: Providers });

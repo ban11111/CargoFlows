@@ -1394,6 +1394,7 @@ export interface components {
             name: components["schemas"]["AISnapshotLocalizedText"];
             instruction: components["schemas"]["AISnapshotLocalizedText"];
             required: boolean;
+            allow_multiple: boolean;
             camera_position_direction: components["schemas"]["AISnapshotVector"];
             image_up_direction: components["schemas"]["AISnapshotVector"];
             target: components["schemas"]["AISnapshotVector"];
@@ -1430,6 +1431,8 @@ export interface components {
         AISnapshotAsset: {
             /** Format: uuid */
             public_id: string;
+            /** @enum {string} */
+            source_type: "product_visual" | "product_information";
             /** @enum {string} */
             mime_type: "image/jpeg" | "image/png" | "image/webp";
             width: number;
@@ -1517,6 +1520,8 @@ export interface components {
             name: components["schemas"]["LocalizedText"];
             instruction: components["schemas"]["LocalizedText"];
             required: boolean;
+            /** @default false */
+            allow_multiple: boolean;
             pose: components["schemas"]["Pose"];
             composition: components["schemas"]["Composition"];
             reference_images: components["schemas"]["ReferenceImage"][];
@@ -1578,12 +1583,14 @@ export interface components {
             name: components["schemas"]["LocalizedText"];
             instruction: components["schemas"]["LocalizedText"];
             required: boolean;
+            /** @default false */
+            allow_multiple: boolean;
             pose: components["schemas"]["Pose"];
             composition: components["schemas"]["Composition"];
         };
         AddViewRequest: {
             /** @enum {string} */
-            preset_key?: "back" | "left" | "bottom" | "right" | "top" | "detail_label" | "packaging_front";
+            preset_key?: "back" | "left" | "bottom" | "right" | "top" | "detail_label" | "packaging_front" | "supplemental_info";
             custom?: components["schemas"]["ViewMutation"];
         } & (unknown | unknown);
         CreateCaptureSOPRequest: {

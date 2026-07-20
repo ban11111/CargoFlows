@@ -22,6 +22,7 @@ export const addableSOPPresetKeys = defineExhaustivePresetKeys([
   "top",
   "detail_label",
   "packaging_front",
+  "supplemental_info",
 ] as const);
 
 export const sopPresetKeys = [

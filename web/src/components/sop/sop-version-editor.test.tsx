@@ -25,6 +25,7 @@ const referenceView = {
   name: { "zh-CN": "正面", en: "Front" },
   instruction: { "zh-CN": "商品正面对准相机。", en: "Face the product toward the camera." },
   required: true,
+  allow_multiple: false,
   pose: {
     space: "object" as const,
     camera_position_direction: [0, 0, 1] as [number, number, number],

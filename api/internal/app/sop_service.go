@@ -62,6 +62,7 @@ type UpdateViewInput struct {
 	ViewKind                                     models.SOPViewKind
 	NameZH, NameEN, InstructionZH, InstructionEN string
 	Required                                     bool
+	AllowMultiple                                bool
 	CameraPosition, ImageUp, Target              sop.Vector3
 	Composition                                  models.Composition
 }
@@ -668,7 +669,7 @@ func newViewFromInput(versionID uint, sequence int, presetKey string, input sop.
 		PublicID: uuid.NewString(), SOPVersionID: versionID, Sequence: sequence,
 		Role: input.Role, ViewKind: input.Kind, PresetKey: presetKey,
 		NameZH: input.NameZH, NameEN: input.NameEN, InstructionZH: input.InstructionZH, InstructionEN: input.InstructionEN,
-		Required:        input.Required,
+		Required: input.Required, AllowMultiple: input.AllowMultiple,
 		CameraPositionX: pose.CameraPosition[0], CameraPositionY: pose.CameraPosition[1], CameraPositionZ: pose.CameraPosition[2],
 		ImageUpX: pose.ImageUp[0], ImageUpY: pose.ImageUp[1], ImageUpZ: pose.ImageUp[2],
 		TargetX: input.Target[0], TargetY: input.Target[1], TargetZ: input.Target[2], Composition: input.Composition,
@@ -678,7 +679,7 @@ func newViewFromInput(versionID uint, sequence int, presetKey string, input sop.
 func viewUpdateMap(input UpdateViewInput, pose sop.CanonicalPose) map[string]any {
 	return map[string]any{
 		"name_zh": input.NameZH, "name_en": input.NameEN,
-		"instruction_zh": input.InstructionZH, "instruction_en": input.InstructionEN, "required": input.Required,
+		"instruction_zh": input.InstructionZH, "instruction_en": input.InstructionEN, "required": input.Required, "allow_multiple": input.AllowMultiple,
 		"camera_position_x": pose.CameraPosition[0], "camera_position_y": pose.CameraPosition[1], "camera_position_z": pose.CameraPosition[2],
 		"image_up_x": pose.ImageUp[0], "image_up_y": pose.ImageUp[1], "image_up_z": pose.ImageUp[2],
 		"target_x": input.Target[0], "target_y": input.Target[1], "target_z": input.Target[2],
@@ -729,7 +730,7 @@ func cloneView(source models.SOPView, versionID uint) models.SOPView {
 		PublicID: uuid.NewString(), SOPVersionID: versionID, Sequence: source.Sequence,
 		Role: source.Role, ViewKind: source.ViewKind, PresetKey: source.PresetKey,
 		NameZH: source.NameZH, NameEN: source.NameEN, InstructionZH: source.InstructionZH, InstructionEN: source.InstructionEN,
-		Required:        source.Required,
+		Required: source.Required, AllowMultiple: source.AllowMultiple,
 		CameraPositionX: source.CameraPositionX, CameraPositionY: source.CameraPositionY, CameraPositionZ: source.CameraPositionZ,
 		ImageUpX: source.ImageUpX, ImageUpY: source.ImageUpY, ImageUpZ: source.ImageUpZ,
 		TargetX: source.TargetX, TargetY: source.TargetY, TargetZ: source.TargetZ, Composition: source.Composition,

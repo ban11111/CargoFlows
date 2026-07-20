@@ -148,6 +148,21 @@ func TestPublishValidatesGenerationAllowLists(t *testing.T) {
 	}
 }
 
+func TestPublishRequiresDefaultImageStyleInAllowList(t *testing.T) {
+	service := NewTemplateService(templateTestDB(t))
+	input := validTemplateInput()
+	input.Version.Slots[0].GenerationConfig = json.RawMessage(`{"size":"1024x1024","style":"premium_dark","allowed_styles":["clean_white_background"]}`)
+	created, err := service.Create(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issues, err := service.Publish(t.Context(), created.Version.PublicID, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertIssueCodes(t, issues, "default_style_not_allowed")
+}
+
 func TestPublishRejectsNonBooleanUserExtraPromptPermission(t *testing.T) {
 	service := NewTemplateService(templateTestDB(t))
 	input := validTemplateInput()

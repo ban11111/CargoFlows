@@ -21,6 +21,7 @@ func TestPresetCatalog(t *testing.T) {
 		{"top", Vector3{1, 0, 0}, Vector3{0, -1, 0}, true},
 		{"detail_label", Vector3{0, 0, 1}, Vector3{1, 0, 0}, false},
 		{"packaging_front", Vector3{0, 0, 1}, Vector3{1, 0, 0}, false},
+		{"supplemental_info", Vector3{0, 0, 1}, Vector3{1, 0, 0}, false},
 	}
 	for _, tc := range cases {
 		got, ok := PresetByKey(tc.key)
@@ -35,6 +36,10 @@ func TestPresetCatalog(t *testing.T) {
 	packaging, _ := PresetByKey("packaging_front")
 	if packaging.NameZH != "包装正面" || packaging.NameEN != "Packaging Front" || packaging.Kind != models.SOPViewStandard {
 		t.Fatalf("invalid packaging preset: %#v", packaging)
+	}
+	supplemental, _ := PresetByKey("supplemental_info")
+	if supplemental.NameZH != "补充信息图片" || supplemental.NameEN != "Supplemental Product Information" || supplemental.Kind != models.SOPViewDetail || !supplemental.AllowMultiple || supplemental.Required {
+		t.Fatalf("invalid supplemental preset: %#v", supplemental)
 	}
 }
 

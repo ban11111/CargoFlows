@@ -194,7 +194,13 @@ func TestCompileTextPromptGolden(t *testing.T) {
 			if kind == models.AIContentSlotSEODescription {
 				name = "seo_prompt.golden.json"
 			}
-			expected, err := os.ReadFile(filepath.Join("testdata", name))
+			goldenPath := filepath.Join("testdata", name)
+			if os.Getenv("UPDATE_GOLDEN") == "1" {
+				if err := os.WriteFile(goldenPath, append(actual, '\n'), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			expected, err := os.ReadFile(goldenPath)
 			if err != nil {
 				t.Fatal(err)
 			}

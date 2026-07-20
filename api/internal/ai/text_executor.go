@@ -25,6 +25,7 @@ type ActiveCredentialSource interface {
 type TextExecutorConfig struct {
 	Model           string
 	ReasoningEffort string
+	Storage         *ImageStorage
 }
 
 type TextExecutor struct {
@@ -32,6 +33,7 @@ type TextExecutor struct {
 	credentials ActiveCredentialSource
 	provider    TextProvider
 	config      TextExecutorConfig
+	storage     *ImageStorage
 	clock       Clock
 }
 
@@ -49,7 +51,7 @@ func newTextExecutorWithClock(db *gorm.DB, credentials ActiveCredentialSource, p
 	if clock == nil {
 		clock = SystemClock{}
 	}
-	return &TextExecutor{db: db, credentials: credentials, provider: provider, config: config, clock: clock}
+	return &TextExecutor{db: db, credentials: credentials, provider: provider, config: config, storage: config.Storage, clock: clock}
 }
 
 func (executor *TextExecutor) Execute(ctx context.Context, leased LeasedItem) error {
@@ -63,6 +65,22 @@ func (executor *TextExecutor) Execute(ctx context.Context, leased LeasedItem) er
 	if prepared.recoverStored {
 		return executor.finalize(ctx, prepared.execution, prepared.execution.ProviderOutputJSON)
 	}
+	inputs := make([]ImageInput, 0, len(prepared.sourceKeys))
+	for _, key := range prepared.sourceKeys {
+		if executor.storage == nil {
+			return executor.markProviderFailure(ctx, prepared.execution.ID, models.AIExecutionFailed, "Supplemental source image storage is unavailable", "")
+		}
+		input, readErr := executor.storage.ReadSource(ctx, key)
+		if readErr != nil {
+			return executor.markProviderFailure(ctx, prepared.execution.ID, models.AIExecutionFailed, "Supplemental source image is unavailable", "")
+		}
+		inputs = append(inputs, input)
+	}
+	defer func() {
+		for i := range inputs {
+			clearByteSlice(inputs[i].Bytes)
+		}
+	}()
 
 	credential, err := executor.credentials.DecryptActiveCredential(ctx)
 	defer clearBytes(credential.APIKey)
@@ -83,6 +101,7 @@ func (executor *TextExecutor) Execute(ctx context.Context, leased LeasedItem) er
 	}
 	response, providerErr := executor.provider.Generate(ctx, credential.APIKey, TextRequest{
 		Prompt: prepared.prompt,
+		Inputs: inputs,
 		Metadata: map[string]string{
 			"job_id":       prepared.jobPublicID,
 			"job_item_id":  prepared.itemPublicID,
@@ -108,6 +127,7 @@ func (executor *TextExecutor) Execute(ctx context.Context, leased LeasedItem) er
 	prepared.execution.OpenAIRequestID = response.RequestID
 	prepared.execution.Model = response.Model
 	prepared.execution.InputTextTokens = response.Usage.InputTextTokens
+	prepared.execution.InputImageTokens = response.Usage.InputImageTokens
 	prepared.execution.OutputTextTokens = response.Usage.OutputTextTokens
 	return executor.finalize(ctx, prepared.execution, response.OutputJSON)
 }
@@ -117,6 +137,7 @@ type preparedTextExecution struct {
 	prompt         CompiledTextPrompt
 	jobPublicID    string
 	itemPublicID   string
+	sourceKeys     []string
 	completed      bool
 	recoverStored  bool
 	needsAttention bool
@@ -144,11 +165,15 @@ func (executor *TextExecutor) prepare(ctx context.Context, leased LeasedItem) (p
 		if err != nil {
 			return invalidExecutionInput("text prompt compilation failed")
 		}
+		sourceKeys, err := textInformationSourceKeys(tx, job, snapshot)
+		if err != nil {
+			return err
+		}
 
 		var existing models.AIExecution
 		err = tx.Where("ai_job_item_id = ?", item.ID).Order("attempt_number DESC, id DESC").First(&existing).Error
 		if err == nil {
-			prepared = preparedTextExecution{execution: existing, prompt: prompt, jobPublicID: job.PublicID, itemPublicID: item.PublicID}
+			prepared = preparedTextExecution{execution: existing, prompt: prompt, jobPublicID: job.PublicID, itemPublicID: item.PublicID, sourceKeys: sourceKeys}
 			if existing.CompiledPromptSHA256 != prompt.SHA256 {
 				return invalidExecutionInput("compiled prompt changed during recovery")
 			}
@@ -172,7 +197,7 @@ func (executor *TextExecutor) prepare(ctx context.Context, leased LeasedItem) (p
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		} else {
-			requestConfig, marshalErr := json.Marshal(map[string]any{"model": executor.config.Model, "reasoning_effort": executor.config.ReasoningEffort, "candidate_count": prompt.CandidateCount, "schema_name": prompt.SchemaName, "store": false})
+			requestConfig, marshalErr := json.Marshal(map[string]any{"model": executor.config.Model, "reasoning_effort": executor.config.ReasoningEffort, "candidate_count": prompt.CandidateCount, "schema_name": prompt.SchemaName, "input_image_count": len(sourceKeys), "store": false})
 			if marshalErr != nil {
 				return marshalErr
 			}
@@ -188,7 +213,7 @@ func (executor *TextExecutor) prepare(ctx context.Context, leased LeasedItem) (p
 			if createErr := tx.Create(&existing).Error; createErr != nil {
 				return createErr
 			}
-			prepared = preparedTextExecution{execution: existing, prompt: prompt, jobPublicID: job.PublicID, itemPublicID: item.PublicID}
+			prepared = preparedTextExecution{execution: existing, prompt: prompt, jobPublicID: job.PublicID, itemPublicID: item.PublicID, sourceKeys: sourceKeys}
 		}
 		return nil
 	})
@@ -197,6 +222,35 @@ func (executor *TextExecutor) prepare(ctx context.Context, leased LeasedItem) (p
 		return prepared, errors.Join(ErrExecutionNeedsAttention, persistErr)
 	}
 	return prepared, err
+}
+
+func textInformationSourceKeys(tx *gorm.DB, job models.AIJob, snapshot ProductSnapshotV1) ([]string, error) {
+	ids := make([]string, 0)
+	for _, asset := range snapshot.SelectedAssets {
+		if asset.SourceType == AssetSourceProductInformation || asset.View.PresetKey == "supplemental_info" {
+			ids = append(ids, asset.PublicID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var assets []models.Asset
+	if err := tx.Where("public_id IN ? AND sk_uid = ? AND review_status = ?", ids, job.SKUID, "approved").Find(&assets).Error; err != nil || len(assets) != len(ids) {
+		return nil, invalidExecutionInput("supplemental source asset is unavailable")
+	}
+	byID := make(map[string]models.Asset, len(assets))
+	for _, asset := range assets {
+		byID[asset.PublicID] = asset
+	}
+	keys := make([]string, 0, len(ids))
+	for _, id := range ids {
+		asset, ok := byID[id]
+		if !ok {
+			return nil, invalidExecutionInput("supplemental source asset mismatch")
+		}
+		keys = append(keys, asset.ObjectKey)
+	}
+	return keys, nil
 }
 
 func (executor *TextExecutor) dispatch(ctx context.Context, leased LeasedItem, prepared preparedTextExecution, credential ActiveOpenAICredential) error {
@@ -222,7 +276,7 @@ func (executor *TextExecutor) dispatch(ctx context.Context, leased LeasedItem, p
 		if executionUpdate.RowsAffected != 1 {
 			return ErrExecutionNeedsAttention
 		}
-		metadata, err := json.Marshal(map[string]any{"model": executor.config.Model, "key_fingerprint": credential.KeyFingerprint, "attempt_number": prepared.execution.AttemptNumber})
+		metadata, err := json.Marshal(map[string]any{"model": executor.config.Model, "key_fingerprint": credential.KeyFingerprint, "attempt_number": prepared.execution.AttemptNumber, "input_image_count": len(prepared.sourceKeys)})
 		if err != nil {
 			return err
 		}
@@ -285,7 +339,7 @@ func (executor *TextExecutor) captureProviderResponse(ctx context.Context, execu
 		}
 		result := tx.Model(&execution).Where("status IN ?", []models.AIExecutionStatus{models.AIExecutionCallingOpenAI, models.AIExecutionNeedsAttention}).Updates(map[string]any{
 			"status": models.AIExecutionStoring, "provider_output_json": []byte(response.OutputJSON), "open_ai_response_id": response.ResponseID,
-			"open_ai_request_id": response.RequestID, "model": response.Model, "input_text_tokens": response.Usage.InputTextTokens, "output_text_tokens": response.Usage.OutputTextTokens,
+			"open_ai_request_id": response.RequestID, "model": response.Model, "input_text_tokens": response.Usage.InputTextTokens, "input_image_tokens": response.Usage.InputImageTokens, "output_text_tokens": response.Usage.OutputTextTokens,
 			"reasoning_tokens": response.Usage.ReasoningTokens, "total_tokens": response.Usage.TotalTokens,
 		})
 		if result.Error != nil {
@@ -332,12 +386,12 @@ func (executor *TextExecutor) finalize(ctx context.Context, execution models.AIE
 				return err
 			}
 		}
-		ledger := models.AIUsageLedger{AIExecutionID: current.ID, Model: current.Model, InputTextTokens: current.InputTextTokens, OutputTextTokens: current.OutputTextTokens, ReasoningTokens: current.ReasoningTokens, TotalTokens: current.TotalTokens, Currency: "USD", OpenAIRequestID: current.OpenAIRequestID}
+		ledger := models.AIUsageLedger{AIExecutionID: current.ID, Model: current.Model, InputTextTokens: current.InputTextTokens, InputImageTokens: current.InputImageTokens, OutputTextTokens: current.OutputTextTokens, ReasoningTokens: current.ReasoningTokens, TotalTokens: current.TotalTokens, Currency: "USD", OpenAIRequestID: current.OpenAIRequestID}
 		if err := tx.Create(&ledger).Error; err != nil {
 			return err
 		}
 		now := executor.clock.Now()
-		metadata, err := json.Marshal(map[string]any{"model": current.Model, "candidate_count": len(envelope.Candidates), "openai_request_id": current.OpenAIRequestID, "openai_response_id": current.OpenAIResponseID, "usage": map[string]int64{"input_text_tokens": current.InputTextTokens, "output_text_tokens": current.OutputTextTokens, "reasoning_tokens": current.ReasoningTokens, "total_tokens": current.TotalTokens}})
+		metadata, err := json.Marshal(map[string]any{"model": current.Model, "candidate_count": len(envelope.Candidates), "openai_request_id": current.OpenAIRequestID, "openai_response_id": current.OpenAIResponseID, "usage": map[string]int64{"input_text_tokens": current.InputTextTokens, "input_image_tokens": current.InputImageTokens, "output_text_tokens": current.OutputTextTokens, "reasoning_tokens": current.ReasoningTokens, "total_tokens": current.TotalTokens}})
 		if err != nil {
 			return err
 		}
@@ -364,8 +418,8 @@ func (executor *TextExecutor) finalize(ctx context.Context, execution models.AIE
 
 func validExecutorTextResponse(response TextResponse, prompt CompiledTextPrompt) bool {
 	usage := response.Usage
-	return response.ResponseID != "" && response.Model != "" && usage.InputTextTokens >= 0 && usage.OutputTextTokens >= 0 && usage.TotalTokens >= 0 && usage.ReasoningTokens >= 0 && usage.ReasoningTokens <= usage.OutputTextTokens &&
-		usage.TotalTokens == usage.InputTextTokens+usage.OutputTextTokens && validateTextCandidates(response.OutputJSON, prompt) == nil
+	return response.ResponseID != "" && response.Model != "" && usage.InputTextTokens >= 0 && usage.InputImageTokens >= 0 && usage.OutputTextTokens >= 0 && usage.TotalTokens >= 0 && usage.ReasoningTokens >= 0 && usage.ReasoningTokens <= usage.OutputTextTokens &&
+		usage.TotalTokens == usage.InputTextTokens+usage.InputImageTokens+usage.OutputTextTokens && validateTextCandidates(response.OutputJSON, prompt) == nil
 }
 
 func (executor *TextExecutor) markProviderFailure(ctx context.Context, executionID uint, status models.AIExecutionStatus, safeError, requestID string) error {

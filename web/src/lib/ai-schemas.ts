@@ -22,6 +22,11 @@ const imageSlot = baseSlot.extend({
   size: z.enum(["1024x1024", "1536x1024", "1024x1536"]),
   quality: z.enum(["low", "medium", "high"]),
   candidate_count: z.coerce.number().int().min(1).max(4),
+  style: z.string().trim().min(1).max(80),
+  allowed_styles: z.array(z.string().trim().min(1).max(80)).min(1, "requiredStyle").max(20, "tooManyStyles"),
+}).superRefine((slot, context) => {
+  if (new Set(slot.allowed_styles).size !== slot.allowed_styles.length) context.addIssue({ code: "custom", message: "duplicateStyle", path: ["allowed_styles"] });
+  if (!slot.allowed_styles.includes(slot.style)) context.addIssue({ code: "custom", message: "defaultStyleNotAllowed", path: ["style"] });
 });
 
 const titleSlot = baseSlot.extend({

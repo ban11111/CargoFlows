@@ -10,6 +10,7 @@ type ViewInput struct {
 	InstructionZH  string
 	InstructionEN  string
 	Required       bool
+	AllowMultiple  bool
 	CameraPosition Vector3
 	ImageUp        Vector3
 	Target         Vector3
@@ -68,6 +69,15 @@ var presetCatalog = map[string]ViewInput{
 		InstructionEN: "Center the complete package front and keep branding and labels legible.",
 		Required:      false, CameraPosition: Vector3{0, 0, 1}, ImageUp: Vector3{1, 0, 0}, Target: Vector3{0, 0, 0},
 		Composition: models.Composition{FrameOccupancy: 0.85, AspectRatio: "1:1", AllowRotationCorrection: true, AllowMirror: false},
+	},
+	"supplemental_info": {
+		Role: models.SOPViewCapture, Kind: models.SOPViewDetail,
+		NameZH: "补充信息图片", NameEN: "Supplemental Product Information",
+		InstructionZH: "清晰上传产品相关资料，可包含厂家卖点、包装文案、规格标签或说明书页面；每张图尽量只包含一个页面或主题。",
+		InstructionEN: "Upload clear product-related information such as manufacturer selling points, packaging copy, specification labels, or manual pages; keep each image focused on one page or topic.",
+		Required:      false, AllowMultiple: true,
+		CameraPosition: Vector3{0, 0, 1}, ImageUp: Vector3{1, 0, 0}, Target: Vector3{0, 0, 0},
+		Composition: models.Composition{FrameOccupancy: 0.95, AspectRatio: "4:5", AllowRotationCorrection: true, AllowMirror: false},
 	},
 }
 

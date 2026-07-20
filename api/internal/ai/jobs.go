@@ -20,6 +20,11 @@ import (
 
 const ProductSnapshotSchemaV1 = "cargoflow_product_generation_v1"
 
+const (
+	AssetSourceProductVisual      = "product_visual"
+	AssetSourceProductInformation = "product_information"
+)
+
 var (
 	ErrJobNotFound                    = errors.New("AI job not found")
 	ErrSKUNotFound                    = errors.New("SKU not found")
@@ -107,6 +112,7 @@ type SOPViewFacts struct {
 	Name                    LocalizedNameFacts `json:"name"`
 	Instruction             LocalizedNameFacts `json:"instruction"`
 	Required                bool               `json:"required"`
+	AllowMultiple           bool               `json:"allow_multiple"`
 	CameraPositionDirection VectorFacts        `json:"camera_position_direction"`
 	ImageUpDirection        VectorFacts        `json:"image_up_direction"`
 	Target                  VectorFacts        `json:"target"`
@@ -126,6 +132,7 @@ type SOPFacts struct {
 
 type AssetFacts struct {
 	PublicID   string         `json:"public_id"`
+	SourceType string         `json:"source_type"`
 	MIMEType   string         `json:"mime_type"`
 	Width      int            `json:"width"`
 	Height     int            `json:"height"`
@@ -291,6 +298,12 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 			return fmt.Errorf("create AI job: %w", err)
 		}
 		items := make([]models.AIJobItem, 0, len(selectedSlots))
+		informationAssetIDs := make([]string, 0)
+		for _, asset := range assets {
+			if asset.SOPView.PresetKey == "supplemental_info" {
+				informationAssetIDs = append(informationAssetIDs, asset.PublicID)
+			}
+		}
 		for _, slot := range selectedSlots {
 			if slot.Kind == models.AIContentSlotImage && len(resolvedCanvases) > 0 {
 				continue
@@ -303,6 +316,8 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 			ids := []string{}
 			if slot.Kind == models.AIContentSlotImage {
 				ids = assetIDs
+			} else {
+				ids = informationAssetIDs
 			}
 			idsJSON, err := json.Marshal(ids)
 			if err != nil {
@@ -614,14 +629,19 @@ func loadEligibleAssets(tx *gorm.DB, skuID uint, requested []string) ([]models.A
 
 func validateImageSlotAssets(slots []models.AIContentSlot, assets []models.Asset) error {
 	availableViews := make(map[string]struct{}, len(assets))
+	visualCount := 0
 	for _, asset := range assets {
+		if asset.SOPView.PresetKey == "supplemental_info" {
+			continue
+		}
+		visualCount++
 		availableViews[asset.SOPView.PresetKey] = struct{}{}
 	}
 	for _, slot := range slots {
 		if slot.Kind != models.AIContentSlotImage {
 			continue
 		}
-		if len(assets) == 0 {
+		if visualCount == 0 {
 			return ErrAssetNotEligible
 		}
 		var constraints map[string]json.RawMessage
@@ -903,12 +923,16 @@ func makeProductSnapshot(sku models.SKU, sop models.SOPVersion, captureSOPPublic
 	}
 	views := make([]SOPViewFacts, 0, len(sop.Views))
 	for _, view := range sop.Views {
-		views = append(views, SOPViewFacts{PublicID: view.PublicID, Sequence: view.Sequence, Role: view.Role, ViewKind: view.ViewKind, PresetKey: view.PresetKey, Name: LocalizedNameFacts{ZH: view.NameZH, EN: view.NameEN}, Instruction: LocalizedNameFacts{ZH: view.InstructionZH, EN: view.InstructionEN}, Required: view.Required, CameraPositionDirection: VectorFacts{X: view.CameraPositionX, Y: view.CameraPositionY, Z: view.CameraPositionZ}, ImageUpDirection: VectorFacts{X: view.ImageUpX, Y: view.ImageUpY, Z: view.ImageUpZ}, Target: VectorFacts{X: view.TargetX, Y: view.TargetY, Z: view.TargetZ}, Composition: view.Composition})
+		views = append(views, SOPViewFacts{PublicID: view.PublicID, Sequence: view.Sequence, Role: view.Role, ViewKind: view.ViewKind, PresetKey: view.PresetKey, Name: LocalizedNameFacts{ZH: view.NameZH, EN: view.NameEN}, Instruction: LocalizedNameFacts{ZH: view.InstructionZH, EN: view.InstructionEN}, Required: view.Required, AllowMultiple: view.AllowMultiple, CameraPositionDirection: VectorFacts{X: view.CameraPositionX, Y: view.CameraPositionY, Z: view.CameraPositionZ}, ImageUpDirection: VectorFacts{X: view.ImageUpX, Y: view.ImageUpY, Z: view.ImageUpZ}, Target: VectorFacts{X: view.TargetX, Y: view.TargetY, Z: view.TargetZ}, Composition: view.Composition})
 	}
 	assetFacts := make([]AssetFacts, 0, len(assets))
 	for _, asset := range assets {
 		view := asset.SOPView
-		assetFacts = append(assetFacts, AssetFacts{PublicID: asset.PublicID, MIMEType: asset.MIMEType, Width: asset.Width, Height: asset.Height, ByteCount: asset.ByteCount, SHA256: asset.SHA256, CapturedAt: asset.CapturedAt, View: AssetViewFacts{PublicID: view.PublicID, PresetKey: view.PresetKey, Name: LocalizedNameFacts{ZH: view.NameZH, EN: view.NameEN}, Role: view.Role, ViewKind: view.ViewKind, Instruction: LocalizedNameFacts{ZH: view.InstructionZH, EN: view.InstructionEN}, CameraPositionDirection: VectorFacts{X: view.CameraPositionX, Y: view.CameraPositionY, Z: view.CameraPositionZ}, ImageUpDirection: VectorFacts{X: view.ImageUpX, Y: view.ImageUpY, Z: view.ImageUpZ}, Target: VectorFacts{X: view.TargetX, Y: view.TargetY, Z: view.TargetZ}, Composition: view.Composition}})
+		sourceType := AssetSourceProductVisual
+		if view.PresetKey == "supplemental_info" {
+			sourceType = AssetSourceProductInformation
+		}
+		assetFacts = append(assetFacts, AssetFacts{PublicID: asset.PublicID, SourceType: sourceType, MIMEType: asset.MIMEType, Width: asset.Width, Height: asset.Height, ByteCount: asset.ByteCount, SHA256: asset.SHA256, CapturedAt: asset.CapturedAt, View: AssetViewFacts{PublicID: view.PublicID, PresetKey: view.PresetKey, Name: LocalizedNameFacts{ZH: view.NameZH, EN: view.NameEN}, Role: view.Role, ViewKind: view.ViewKind, Instruction: LocalizedNameFacts{ZH: view.InstructionZH, EN: view.InstructionEN}, CameraPositionDirection: VectorFacts{X: view.CameraPositionX, Y: view.CameraPositionY, Z: view.CameraPositionZ}, ImageUpDirection: VectorFacts{X: view.ImageUpX, Y: view.ImageUpY, Z: view.ImageUpZ}, Target: VectorFacts{X: view.TargetX, Y: view.TargetY, Z: view.TargetZ}, Composition: view.Composition}})
 	}
 	selectedSlots := make([]SlotFacts, 0, len(slots))
 	for _, slot := range slots {

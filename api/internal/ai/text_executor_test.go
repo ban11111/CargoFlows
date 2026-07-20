@@ -158,6 +158,60 @@ func TestTextExecutorPersistsCandidatesUsageAuditAndClearsCredential(t *testing.
 	}
 }
 
+func TestTextExecutorLoadsOnlySupplementalImagesAndRecordsImageTokens(t *testing.T) {
+	db, leased, setting := prepareTextExecutorLease(t, 1)
+	var job models.AIJob
+	if err := db.First(&job).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&models.SOPView{}, &models.Asset{}); err != nil {
+		t.Fatal(err)
+	}
+	supplementalView := models.SOPView{PublicID: "90909090-9090-4090-8090-909090909090", SOPVersionID: 1, Sequence: 2, Role: models.SOPViewCapture, ViewKind: models.SOPViewDetail, PresetKey: "supplemental_info", NameZH: "补充信息图片", NameEN: "Supplemental Product Information", AllowMultiple: true, CameraPositionZ: 1, ImageUpX: 1, Composition: models.Composition{FrameOccupancy: .95, AspectRatio: "4:5"}}
+	if err := db.Create(&supplementalView).Error; err != nil {
+		t.Fatal(err)
+	}
+	supplemental := models.Asset{PublicID: "91919191-9191-4191-8191-919191919191", SKUID: job.SKUID, PhotoSessionID: 1, SOPViewID: supplementalView.ID, ObjectKey: "approved/supplemental.png", OriginalURL: "private://supplemental", ReviewStatus: "approved", CapturedAt: time.Now().UTC()}
+	if err := db.Create(&supplemental).Error; err != nil {
+		t.Fatal(err)
+	}
+	var persistedSupplemental models.Asset
+	if err := db.Where("public_id = ? AND sk_uid = ? AND review_status = ?", supplemental.PublicID, job.SKUID, "approved").First(&persistedSupplemental).Error; err != nil {
+		t.Fatalf("supplemental fixture is not eligible: %v (job sku=%d asset=%#v)", err, job.SKUID, supplemental)
+	}
+	var snapshot ProductSnapshotV1
+	if err := json.Unmarshal(job.InputSnapshotJSON, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	fact := AssetFacts{PublicID: supplemental.PublicID, SourceType: AssetSourceProductInformation, MIMEType: "image/png", CapturedAt: supplemental.CapturedAt, View: AssetViewFacts{PublicID: supplementalView.PublicID, PresetKey: "supplemental_info", Name: LocalizedNameFacts{ZH: supplementalView.NameZH, EN: supplementalView.NameEN}, Role: supplementalView.Role, ViewKind: supplementalView.ViewKind}}
+	snapshot.SelectedAssets = []AssetFacts{fact}
+	snapshotJSON, _ := json.Marshal(snapshot)
+	if err := db.Model(&job).Update("input_snapshot_json", snapshotJSON).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	imageBytes := pngFixture(t, 2, 2)
+	objects := &memoryImageObjectStore{source: map[string]ImageInput{supplemental.ObjectKey: {MIMEType: "image/png", Bytes: imageBytes}}}
+	source := &fakeActiveCredentialSource{credential: ActiveOpenAICredential{SettingID: setting.ID, KeyFingerprint: setting.KeyFingerprint, APIKey: []byte("temporary-fake-api-key")}}
+	provider := textProviderFunc(func(_ context.Context, _ []byte, request TextRequest) (TextResponse, error) {
+		if len(request.Inputs) != 1 || request.Inputs[0].MIMEType != "image/png" || !bytes.Equal(request.Inputs[0].Bytes, imageBytes) {
+			t.Fatalf("provider image inputs = %#v", request.Inputs)
+		}
+		return TextResponse{ResponseID: "resp_images", RequestID: "req_images", Model: "fake-model", OutputJSON: json.RawMessage(`{"candidates":[{"title":"Document sourced title","keywords":[],"source_fields":["asset:91919191-9191-4191-8191-919191919191"]}]}`), Usage: TextUsage{InputTextTokens: 10, InputImageTokens: 5, OutputTextTokens: 4, TotalTokens: 19}}, nil
+	})
+	executor := newTextExecutorWithClock(db, source, provider, TextExecutorConfig{Model: "fake-model", Storage: NewImageStorage(objects)}, fixedClock{now: time.Date(2026, 7, 17, 10, 0, 10, 0, time.UTC)})
+	if err := executor.Execute(t.Context(), leased); err != nil {
+		t.Fatal(err)
+	}
+	var execution models.AIExecution
+	if err := db.First(&execution).Error; err != nil {
+		t.Fatal(err)
+	}
+	if execution.InputImageTokens != 5 || execution.InputTextTokens != 10 || execution.TotalTokens != 19 {
+		t.Fatalf("execution token usage = %#v", execution)
+	}
+}
+
 func TestTextExecutorMarksAmbiguousProviderFailureNeedsAttention(t *testing.T) {
 	db, leased, setting := prepareTextExecutorLease(t, 1)
 	key := []byte("temporary-fake-api-key")

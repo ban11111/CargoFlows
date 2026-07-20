@@ -45,6 +45,7 @@ type sopViewDTO struct {
 	Name            localizedTextDTO    `json:"name"`
 	Instruction     localizedTextDTO    `json:"instruction"`
 	Required        bool                `json:"required"`
+	AllowMultiple   bool                `json:"allow_multiple"`
 	Pose            poseDTO             `json:"pose"`
 	Composition     models.Composition  `json:"composition"`
 	ReferenceImages []referenceImageDTO `json:"reference_images"`
@@ -86,7 +87,7 @@ func versionDTOFromModel(version models.SOPVersion, sopPublicID string) sopVersi
 		}
 		viewDTOs = append(viewDTOs, sopViewDTO{
 			PublicID: view.PublicID, Sequence: view.Sequence, Role: view.Role, ViewKind: view.ViewKind, PresetKey: view.PresetKey,
-			Name: localizedTextDTO{ZHCN: view.NameZH, EN: view.NameEN}, Instruction: localizedTextDTO{ZHCN: view.InstructionZH, EN: view.InstructionEN}, Required: view.Required,
+			Name: localizedTextDTO{ZHCN: view.NameZH, EN: view.NameEN}, Instruction: localizedTextDTO{ZHCN: view.InstructionZH, EN: view.InstructionEN}, Required: view.Required, AllowMultiple: view.AllowMultiple,
 			Pose:        poseDTO{Space: "object", CameraPositionDirection: sop.Vector3{view.CameraPositionX, view.CameraPositionY, view.CameraPositionZ}, ImageUpDirection: sop.Vector3{view.ImageUpX, view.ImageUpY, view.ImageUpZ}, Target: sop.Vector3{view.TargetX, view.TargetY, view.TargetZ}},
 			Composition: view.Composition, ReferenceImages: imageDTOs,
 		})

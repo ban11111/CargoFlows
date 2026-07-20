@@ -98,6 +98,20 @@ func openTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func TestMigrateAddsAllowMultipleWithFalseDefault(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	var defaultValue string
+	if err := db.Raw(`SELECT dflt_value FROM pragma_table_info('sop_views') WHERE name = 'allow_multiple'`).Scan(&defaultValue).Error; err != nil {
+		t.Fatal(err)
+	}
+	if defaultValue != "false" && defaultValue != "0" {
+		t.Fatalf("allow_multiple default = %q, want false", defaultValue)
+	}
+}
+
 func TestMigrateCreatesAIFoundationTables(t *testing.T) {
 	db := openTestDB(t)
 	if err := Migrate(db); err != nil {
@@ -342,7 +356,7 @@ func TestSeedCreatesPublishedPhoneCaseCaptureSOPFromExactPresets(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if view.Role != preset.Role || view.ViewKind != preset.Kind || view.NameZH != preset.NameZH || view.NameEN != preset.NameEN || view.InstructionZH != preset.InstructionZH || view.InstructionEN != preset.InstructionEN || view.Required != preset.Required || view.Composition != preset.Composition {
+		if view.Role != preset.Role || view.ViewKind != preset.Kind || view.NameZH != preset.NameZH || view.NameEN != preset.NameEN || view.InstructionZH != preset.InstructionZH || view.InstructionEN != preset.InstructionEN || view.Required != preset.Required || view.AllowMultiple != preset.AllowMultiple || view.Composition != preset.Composition {
 			t.Fatalf("view %q metadata drifted from preset", key)
 		}
 		if got := []float64{view.CameraPositionX, view.CameraPositionY, view.CameraPositionZ}; !reflect.DeepEqual(got, pose.CameraPosition[:]) {

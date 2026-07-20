@@ -42,14 +42,14 @@ const copy = {
     required: "必拍", locked: "顺序、类型、必拍状态和方向已锁定", standard: "标准视图", detail: "细节视图",
     chineseName: "中文名称", englishName: "English name", chineseInstruction: "中文拍摄说明", englishInstruction: "English instruction",
     camera: "相机位置方向", up: "画面向上方向", target: "目标点", occupancy: "画面占比", ratio: "宽高比",
-    rotate: "允许旋转校正", delete: "删除", save: "保存", moveUp: "上移", moveDown: "下移",
+    rotate: "允许旋转校正", multiple: "允许同一视图上传多张", delete: "删除", save: "保存", moveUp: "上移", moveDown: "下移",
     references: "参考图", addReference: "添加参考图", removeReference: "删除参考图", referenceUp: "参考图上移", referenceDown: "参考图下移",
   },
   en: {
     required: "Required", locked: "Order, kind, required state, and pose are locked", standard: "Standard view", detail: "Detail view",
     chineseName: "Chinese name", englishName: "English name", chineseInstruction: "Chinese instruction", englishInstruction: "English instruction",
     camera: "Camera position direction", up: "Image-up direction", target: "Target", occupancy: "Frame occupancy", ratio: "Aspect ratio",
-    rotate: "Allow rotation correction", delete: "Delete", save: "Save", moveUp: "Move up", moveDown: "Move down",
+    rotate: "Allow rotation correction", multiple: "Allow multiple captures for this view", delete: "Delete", save: "Save", moveUp: "Move up", moveDown: "Move down",
     references: "Reference images", addReference: "Add reference image", removeReference: "Delete reference image", referenceUp: "Move reference image up", referenceDown: "Move reference image down",
   },
 } as const;
@@ -166,6 +166,7 @@ export function SOPViewEditor({
             <Input className="h-11" disabled={allDisabled} id={`${view.public_id}-occupancy`} max="1" min="0.01" onChange={(e) => onChange({ ...view, composition: { ...view.composition, frame_occupancy: Number(e.target.value) } })} step="0.01" type="number" value={view.composition.frame_occupancy} />
           </Field>
           <label className="flex min-h-11 items-center gap-2 self-end rounded-md border border-border px-3 text-sm"><input checked={view.composition.allow_rotation_correction} disabled={allDisabled} onChange={(e) => onChange({ ...view, composition: { ...view.composition, allow_rotation_correction: e.target.checked } })} type="checkbox" />{c.rotate}</label>
+          <label className="flex min-h-11 items-center gap-2 rounded-md border border-border px-3 text-sm"><input checked={view.allow_multiple} disabled={poseLocked} onChange={(e) => onChange({ ...view, allow_multiple: e.target.checked })} type="checkbox" />{c.multiple}</label>
         </div>
 
         <section aria-labelledby={`${view.public_id}-references`} className="rounded-md bg-muted p-3">

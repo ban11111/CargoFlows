@@ -88,6 +88,45 @@ func TestResponsesTextClientAlwaysAppliesConfiguredTimeoutToClonedClient(t *test
 	}
 }
 
+func TestResponsesTextClientBuildsOrderedMultimodalContent(t *testing.T) {
+	client := NewOpenAIResponsesClient("https://api.openai.invalid/v1", nil, OpenAIResponsesConfig{})
+	request := responsesTextRequest(t)
+	request.Inputs = []ImageInput{{MIMEType: "image/png", Bytes: []byte{1, 2, 3}}, {MIMEType: "image/jpeg", Bytes: []byte{4, 5}}}
+	body, err := client.requestBody(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Input []struct {
+			Content []map[string]any `json:"content"`
+		} `json:"input"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	content := payload.Input[0].Content
+	if len(content) != 3 || content[0]["type"] != "input_text" || content[1]["type"] != "input_image" || content[2]["type"] != "input_image" || content[1]["detail"] != "original" {
+		t.Fatalf("multimodal content = %#v", content)
+	}
+	if !strings.HasPrefix(content[1]["image_url"].(string), "data:image/png;base64,") || !strings.HasPrefix(content[2]["image_url"].(string), "data:image/jpeg;base64,") {
+		t.Fatalf("image data URLs = %#v", content)
+	}
+}
+
+func TestResponsesTextClientSeparatesImageTokensFromInputUsage(t *testing.T) {
+	body := `{"id":"resp_images","status":"completed","model":"gpt-5.6-terra","output":[{"type":"message","content":[{"type":"output_text","text":"{\"candidates\":[{\"title\":\"Document sourced title\",\"keywords\":[],\"source_fields\":[\"asset:91919191-9191-4191-8191-919191919191\"]}]}"}]}],"usage":{"input_tokens":105,"input_tokens_details":{"image_tokens":25},"output_tokens":10,"total_tokens":115,"output_tokens_details":{"reasoning_tokens":0}}}`
+	response := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
+	prompt := responsesTextRequest(t).Prompt
+	prompt.CandidateCount = 1
+	result, err := decodeOpenAITextResponse(response, "req_images", prompt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Usage.InputTextTokens != 80 || result.Usage.InputImageTokens != 25 || result.Usage.TotalTokens != 115 {
+		t.Fatalf("usage = %#v", result.Usage)
+	}
+}
+
 func TestResponsesTextClientRetriesOnlySafeProviderStatuses(t *testing.T) {
 	tests := []struct {
 		name         string
