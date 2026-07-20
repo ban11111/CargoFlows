@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.cargoflow.web-dev</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/opt/node@24/bin/node</string>
+    <string>/Users/zhengbaiyi/work/misc/CargoFlow/web/node_modules/next/dist/bin/next</string>
+    <string>dev</string>
+    <string>-p</string>
+    <string>3005</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/zhengbaiyi/work/misc/CargoFlow/web</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>/Users/zhengbaiyi</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/opt/node@24/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+  <key>ExitTimeOut</key>
+  <integer>20</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/zhengbaiyi/work/misc/CargoFlow/tmp/web-launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/zhengbaiyi/work/misc/CargoFlow/tmp/web-launchd.err.log</string>
+</dict>
+</plist>

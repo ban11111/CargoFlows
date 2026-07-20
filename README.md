@@ -34,7 +34,7 @@ Web login: `http://localhost:3005/login`
 
 iOS login: use the same email and password after the API is running.
 
-Run the Web console:
+Run the Web console once in the foreground:
 
 ```bash
 cd web
@@ -47,6 +47,121 @@ Open:
 ```text
 http://localhost:3005
 ```
+
+### Current development runtime
+
+The current remote-development workstation uses a hybrid runtime:
+
+- Docker Compose runs MySQL, MinIO, the Go API, migrations, and the AI worker.
+- A user-level launchd agent runs the Next.js development server on port `3005`.
+- A system-level `cloudflared` daemon publishes the Web server at
+  `https://dev.cargoflows.cc`.
+- The browser and iOS client reach the API through the same-origin Web BFF at
+  `/api/proxy/*`; the Go API remains bound to localhost port `8080`.
+
+Start or rebuild the backend stack with:
+
+```bash
+docker compose up -d --build mysql minio api worker
+```
+
+The root `.env` contains local runtime settings consumed by Compose. Never add
+an OpenAI API key, Cloudflare Tunnel token, or plaintext administrator credential
+to that file. OpenAI credentials must be configured through the administrator UI
+and remain encrypted in the database.
+
+### launchd-managed Web development server
+
+The checked-in, workstation-specific launchd definition is:
+
+```text
+scripts/launchd/com.cargoflow.web-dev.plist
+```
+
+It runs the locally installed Next.js CLI directly with Node 24, uses `web/` as
+its working directory, listens on port `3005`, starts when the user logs in, and
+uses `KeepAlive` to restart after either a clean or abnormal exit. It is installed
+at:
+
+```text
+/Users/zhengbaiyi/Library/LaunchAgents/com.cargoflow.web-dev.plist
+```
+
+Install or reload it after changing the plist:
+
+```bash
+plutil -lint scripts/launchd/com.cargoflow.web-dev.plist
+launchctl bootout gui/$(id -u)/com.cargoflow.web-dev 2>/dev/null || true
+install -d -m 755 /Users/zhengbaiyi/Library/LaunchAgents
+install -m 644 scripts/launchd/com.cargoflow.web-dev.plist \
+  /Users/zhengbaiyi/Library/LaunchAgents/com.cargoflow.web-dev.plist
+launchctl bootstrap gui/$(id -u) \
+  /Users/zhengbaiyi/Library/LaunchAgents/com.cargoflow.web-dev.plist
+```
+
+Operational commands:
+
+```bash
+# Status
+launchctl print gui/$(id -u)/com.cargoflow.web-dev
+
+# Restart immediately
+launchctl kickstart -k gui/$(id -u)/com.cargoflow.web-dev
+
+# Follow Next.js output and errors
+tail -f tmp/web-launchd.out.log
+tail -f tmp/web-launchd.err.log
+
+# Disable and unload
+launchctl bootout gui/$(id -u)/com.cargoflow.web-dev
+```
+
+This is a LaunchAgent, so it starts after the macOS user logs in. If the site
+must be available immediately after a reboot and before login, promote it to a
+root-installed LaunchDaemon with an explicit unprivileged `UserName`; do not run
+the Node process as root. If Homebrew upgrades or removes the versioned Node path,
+update `ProgramArguments` in the plist and reload it.
+
+### Cloudflare remote-development tunnel
+
+The named Cloudflare Tunnel is a system launchd daemon:
+
+```text
+Label:  com.cloudflare.cloudflared
+Origin: http://127.0.0.1:3005
+Public: https://dev.cargoflows.cc
+Logs:   /Library/Logs/com.cloudflare.cloudflared.err.log
+```
+
+The Tunnel token is stored outside the repository. Never copy it into README,
+`.env`, source code, shell history, logs, or chat.
+
+Use these checks when the public domain returns `502 Bad Gateway`:
+
+```bash
+# 1. Is the Next.js origin running?
+curl -I http://127.0.0.1:3005/
+
+# 2. Is the Go backend healthy?
+curl http://127.0.0.1:8080/healthz
+
+# 3. Is the public route healthy?
+curl -I https://dev.cargoflows.cc/
+```
+
+Interpretation and recovery:
+
+- Local Web fails, API succeeds: restart
+  `gui/$(id -u)/com.cargoflow.web-dev`.
+- Local Web succeeds, public URL fails: inspect the cloudflared log, then run
+  `sudo launchctl kickstart -k system/com.cloudflare.cloudflared`.
+- Local Web and API both fail: inspect `docker compose ps`, then restore the
+  backend stack and Web agent independently.
+- The Mac has no Internet connection: the outbound Tunnel cannot serve traffic;
+  cloudflared retries automatically after connectivity and DNS recover.
+
+Cloudflare returning 502 is not by itself evidence that the Go backend failed.
+It commonly means the Tunnel cannot connect to the Web origin on port `3005`.
 
 ### AI worker modes
 
@@ -84,13 +199,14 @@ export AI_WORKER_POLL_INTERVAL=1s
 go run ./cmd/worker
 ```
 
-The worker records zero-usage dry-run executions locally. To execute title and
-SEO-description slots through OpenAI, first configure a newly rotated project
+The worker records zero-usage dry-run executions locally. To execute text and
+image slots through OpenAI, first configure a newly rotated project
 API key from the administrator OpenAI settings page, then start the worker with
 `AI_WORKER_DRY_RUN=false` in a terminal that has the same
 `CARGOFLOW_SECRETS_MASTER_KEY`. Never place an OpenAI key in shell commands,
-environment files, source code, logs, or chat. Real image slots are rejected
-without a provider call until image execution is implemented.
+environment files, source code, logs, or chat. Image jobs can create multiple
+independently configured canvases; each canvas selects one or more published
+image requirements, and a requirement may be reused across canvases.
 
 All normal AI jobs use that single administrator-managed credential. The API
 encrypts it in the database, never returns the plaintext, and the worker decrypts
@@ -113,7 +229,7 @@ cd ../web
 
 The Go integration test sends a real Responses-format request to a local fake
 provider and verifies request sanitization, candidate persistence, token audit,
-credential clearing, and zero provider calls for image slots. The Playwright
+credential clearing, and provider-call controls. The Playwright
 harness starts a clean MySQL/API/live worker/fake-provider stack, configures the
 fake credential through the administrator page, and exercises the real Web,
 authentication, API, encrypted credential, queue, provider, persistence, edit,
@@ -171,9 +287,9 @@ Build a downloadable iOS Simulator package:
 ```
 
 The package is written to `web/public/downloads/` and served by the landing page download button.
-The iOS development build currently reaches the API through the active Cloudflare Web tunnel at
+The iOS development build currently reaches the API through the named Cloudflare Web tunnel at
 `https://dev.cargoflows.cc/api/proxy/`. Update
-`CARGOFLOW_API_BASE_URL` in `ios/project.yml` when the quick-tunnel URL changes.
+`CARGOFLOW_API_BASE_URL` in `ios/project.yml` if the named development hostname changes.
 
 The Web proxy also rewrites signed loopback MinIO upload tickets to
 `/api/storage/...`. This lets browsers and iPhones upload through the same Cloudflare hostname
