@@ -344,6 +344,10 @@ struct SOPCaptureView: View {
     @State private var isSourcePickerPresented = false
     @State private var uploadingViewID: String?
     @State private var operationFailure: CaptureOperationFailure?
+    @State private var historicalAssets: [AssetReviewItem] = []
+    @State private var isHistoryLoading = true
+    @State private var historyLoadFailed = false
+    @State private var historyLoadGeneration = 0
 
     private var views: [SOPView] {
         captureState.version?.views.sorted(by: { $0.sequence < $1.sequence }) ?? []
@@ -386,6 +390,7 @@ struct SOPCaptureView: View {
                 }
             }
             .task { await loadCandidates() }
+            .task { await loadHistory() }
             .task(id: captureState.selectedVersionID) {
                 guard captureState.selectedVersionID != nil else { return }
                 await loadSelectedVersion()
@@ -488,6 +493,49 @@ struct SOPCaptureView: View {
                     Text(language.t("view.checklist"))
                 } footer: {
                     Text(language.t("capture.required.footer"))
+                }
+
+                historySection
+            }
+        }
+        .refreshable {
+            await loadCandidates()
+            await loadHistory()
+        }
+    }
+
+    @ViewBuilder
+    private var historySection: some View {
+        Section(language.t("capture.history")) {
+            if isHistoryLoading && historicalAssets.isEmpty {
+                loadingRow(key: "capture.history.loading")
+            } else if historyLoadFailed && historicalAssets.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label(language.t("capture.history.failed"), systemImage: "exclamationmark.triangle")
+                    Button(language.t("capture.history.retry")) { Task { await loadHistory() } }
+                        .buttonStyle(.bordered)
+                        .frame(minHeight: 44)
+                }
+                .padding(.vertical, 8)
+            } else if historicalAssets.isEmpty {
+                Text(language.t("capture.history.empty"))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach(historicalAssets) { asset in
+                    let matchingView = views.first(where: {
+                        $0.id == asset.sopViewID || $0.presetKey == asset.sopViewKey
+                    })
+                    AssetHistoryRow(
+                        asset: asset,
+                        canRetake: matchingView != nil && uploadingViewID == nil,
+                        language: language
+                    ) {
+                        guard let matchingView else { return }
+                        selectedView = matchingView
+                        isSourcePickerPresented = true
+                    }
                 }
             }
         }
@@ -602,6 +650,27 @@ struct SOPCaptureView: View {
     }
 
     @MainActor
+    private func loadHistory() async {
+        historyLoadGeneration += 1
+        let generation = historyLoadGeneration
+        isHistoryLoading = true
+        historyLoadFailed = false
+        defer {
+            if generation == historyLoadGeneration { isHistoryLoading = false }
+        }
+        do {
+            let assets = try await APIClient.shared.listAssets(skuID: sku.id).data
+            guard !Task.isCancelled, generation == historyLoadGeneration else { return }
+            historicalAssets = assets
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled, generation == historyLoadGeneration else { return }
+            historyLoadFailed = true
+        }
+    }
+
+    @MainActor
     private func upload(_ image: UIImage, for view: SOPView) async {
         guard captureState.version?.views.contains(where: { $0.id == view.id }) == true,
               let imageData = captureUploadJPEGData(from: image) else {
@@ -633,6 +702,7 @@ struct SOPCaptureView: View {
                 fileName: fileName
             )
             captureState.recordCapture(viewID: view.id, image: image)
+            await loadHistory()
         } catch is CancellationError {
             return
         } catch {
@@ -678,6 +748,126 @@ func shotRowAccessibilityLabel(
     ]
     .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     .joined(separator: ", ")
+}
+
+private struct AssetHistoryRow: View {
+    let asset: AssetReviewItem
+    let canRetake: Bool
+    let language: LanguageStore
+    let onRetake: () -> Void
+
+    private var isRejected: Bool { asset.reviewStatus == "rejected" }
+
+    private var statusKey: String {
+        switch asset.reviewStatus {
+        case "approved": return "capture.review.approved"
+        case "rejected": return "capture.review.rejected"
+        default: return "capture.review.pending"
+        }
+    }
+
+    private var statusIcon: String {
+        switch asset.reviewStatus {
+        case "approved": return "checkmark.circle.fill"
+        case "rejected": return "xmark.octagon.fill"
+        default: return "clock.fill"
+        }
+    }
+
+    private var statusColor: Color {
+        switch asset.reviewStatus {
+        case "approved": return .green
+        case "rejected": return .red
+        default: return .orange
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                AuthenticatedAssetThumbnail(mediaURL: asset.mediaURL, label: language.t("capture.history.image"))
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(asset.sopViewName.value(for: language.language))
+                        .font(.headline)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Label(language.t(statusKey), systemImage: statusIcon)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(statusColor)
+                    Text(asset.capturedAt.formatted(date: .abbreviated, time: .shortened))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(asset.photoSessionCode)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if isRejected {
+                Label(language.t("capture.review.rejected.help"), systemImage: "arrow.triangle.2.circlepath")
+                    .font(.subheadline)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if canRetake {
+                    Button(action: onRetake) {
+                        Label(language.t("capture.retake"), systemImage: "camera.fill")
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.borderedProminent)
+                } else {
+                    Text(language.t("capture.retake.unavailable"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(.vertical, 6)
+    }
+}
+
+private struct AuthenticatedAssetThumbnail: View {
+    let mediaURL: String
+    let label: String
+
+    @State private var image: UIImage?
+    @State private var loadFailed = false
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else if loadFailed {
+                Image(systemName: "photo.badge.exclamationmark")
+                    .foregroundStyle(.secondary)
+            } else {
+                ProgressView()
+            }
+        }
+        .frame(width: 88, height: 88)
+        .background(Color.secondary.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .accessibilityLabel(label)
+        .task(id: mediaURL) {
+            image = nil
+            loadFailed = false
+            do {
+                let data = try await APIClient.shared.loadAssetMedia(mediaURL)
+                guard !Task.isCancelled, let loadedImage = UIImage(data: data) else {
+                    if !Task.isCancelled { loadFailed = true }
+                    return
+                }
+                image = loadedImage
+            } catch is CancellationError {
+                return
+            } catch {
+                loadFailed = true
+            }
+        }
+    }
 }
 
 private struct CaptureViewRow: View {

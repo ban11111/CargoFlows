@@ -118,6 +118,33 @@ final class SOPAPIClientTests: XCTestCase {
         XCTAssertEqual(receipt.photoSessionID, "session-id")
     }
 
+    func testListsSKUHistoryAndLoadsAuthenticatedMedia() async throws {
+        URLProtocolStub.handler = { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-token")
+            switch request.url?.path {
+            case "/api/v1/assets/review":
+                XCTAssertEqual(request.url?.query, "sku_id=sku-id")
+                return Self.response(request, body: #"{"data":[{"public_id":"asset-id","sku_id":"sku-id","media_url":"/api/v1/assets/asset-id/media","review_status":"rejected","captured_at":"2026-07-16T00:00:00Z","sop_view_id":"view-id","sop_view_key":"reference_front","sop_view_name":{"zh-CN":"正面","en":"Front"},"photo_session_code":"PS-1"}]}"#)
+            case "/api/v1/assets/asset-id/media":
+                return Self.response(request, body: "image-bytes")
+            default:
+                XCTFail("Unexpected request: \(request.url?.absoluteString ?? "nil")")
+                return Self.response(request, status: 404, body: "{}")
+            }
+        }
+        let client = makeClient()
+        client.token = "test-token"
+
+        let history = try await client.listAssets(skuID: "sku-id")
+        let asset = try XCTUnwrap(history.data.first)
+        XCTAssertEqual(asset.reviewStatus, "rejected")
+        XCTAssertEqual(asset.sopViewID, "view-id")
+        XCTAssertEqual(asset.sopViewKey, "reference_front")
+        XCTAssertEqual(asset.sopViewName.value(for: .zh), "正面")
+        let media = try await client.loadAssetMedia(asset.mediaURL)
+        XCTAssertEqual(media, Data("image-bytes".utf8))
+    }
+
     private func makeClient() -> APIClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [URLProtocolStub.self]

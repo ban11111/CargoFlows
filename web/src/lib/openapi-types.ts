@@ -1861,6 +1861,10 @@ export interface components {
             review_status: "pending" | "approved" | "rejected";
             /** Format: date-time */
             captured_at: string;
+            /** Format: uuid */
+            sop_view_id: string;
+            /** @description Stable key used to match the equivalent view in a newer SOP version. */
+            sop_view_key: string;
             sop_view_name: components["schemas"]["LocalizedText"];
             photo_session_code: string;
         };
@@ -3293,6 +3297,8 @@ export interface operations {
         parameters: {
             query?: {
                 status?: "pending" | "approved" | "rejected";
+                /** @description Limit results to one SKU. */
+                sku_id?: string;
             };
             header?: never;
             path?: never;

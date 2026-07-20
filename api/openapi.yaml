@@ -545,6 +545,7 @@ paths:
       operationId: listAssetsForReview
       parameters:
         - { in: query, name: status, schema: { type: string, enum: [pending, approved, rejected] } }
+        - { in: query, name: sku_id, schema: { type: string, format: uuid }, description: Limit results to one SKU. }
       responses:
         '200': { description: Review assets, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/AssetReviewItem' } } } } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -1777,13 +1778,15 @@ components:
     AssetReviewItem:
       type: object
       additionalProperties: false
-      required: [public_id, sku_id, media_url, review_status, captured_at, sop_view_name, photo_session_code]
+      required: [public_id, sku_id, media_url, review_status, captured_at, sop_view_id, sop_view_key, sop_view_name, photo_session_code]
       properties:
         public_id: { type: string, format: uuid }
         sku_id: { type: string, format: uuid }
         media_url: { type: string, description: Authenticated same-origin media endpoint. }
         review_status: { type: string, enum: [pending, approved, rejected] }
         captured_at: { type: string, format: date-time }
+        sop_view_id: { type: string, format: uuid }
+        sop_view_key: { type: string, description: Stable key used to match the equivalent view in a newer SOP version. }
         sop_view_name: { $ref: '#/components/schemas/LocalizedText' }
         photo_session_code: { type: string }
     Tag:

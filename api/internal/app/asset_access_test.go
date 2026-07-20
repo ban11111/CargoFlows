@@ -67,6 +67,31 @@ func TestAssetReviewRoutesEnforceRoleAndOwnership(t *testing.T) {
 	}
 }
 
+func TestAssetReviewListFiltersByPublicSKUID(t *testing.T) {
+	fixture := newAssetAccessFixture(t)
+	var sku models.SKU
+	if err := fixture.db.First(&sku, fixture.assetA.SKUID).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	filtered := fixture.request(t, fixture.operator, http.MethodGet, "/api/v1/assets/review?sku_id="+sku.PublicID, "")
+	if filtered.Code != http.StatusOK || !strings.Contains(filtered.Body.String(), fixture.assetA.PublicID) || !strings.Contains(filtered.Body.String(), fixture.assetB.PublicID) {
+		t.Fatalf("filtered assets = %d %s", filtered.Code, filtered.Body.String())
+	}
+	if !strings.Contains(filtered.Body.String(), `"sop_view_id"`) || !strings.Contains(filtered.Body.String(), `"sop_view_key":"reference_front"`) {
+		t.Fatalf("filtered assets omit stable SOP view identity: %s", filtered.Body.String())
+	}
+	missing := fixture.request(t, fixture.operator, http.MethodGet, "/api/v1/assets/review?sku_id="+uuid.NewString(), "")
+	if missing.Code != http.StatusOK || strings.Contains(missing.Body.String(), fixture.assetA.PublicID) || strings.Contains(missing.Body.String(), fixture.assetB.PublicID) {
+		t.Fatalf("missing SKU filter = %d %s", missing.Code, missing.Body.String())
+	}
+
+	invalid := fixture.request(t, fixture.operator, http.MethodGet, "/api/v1/assets/review?sku_id=not-a-uuid", "")
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid sku filter = %d %s, want 400", invalid.Code, invalid.Body.String())
+	}
+}
+
 func TestReviewAssetUsesStrictValidatedTransactionalInput(t *testing.T) {
 	fixture := newAssetAccessFixture(t)
 	path := "/api/v1/assets/" + fixture.assetA.PublicID + "/review"

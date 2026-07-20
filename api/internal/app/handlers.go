@@ -897,6 +897,13 @@ func respondCaptureError(c *gin.Context, err error) {
 func (s *Server) listAssetsForReview(c *gin.Context) {
 	var assets []models.Asset
 	query := scopeAssetsForUser(s.db.Model(&models.Asset{}), currentUser(c)).Preload("SKU.Product.CatalogCategory").Preload("SKU.Tags").Preload("SOPView").Preload("PhotoSession").Order("assets.created_at DESC")
+	if skuPublicID := c.Query("sku_id"); skuPublicID != "" {
+		if !isUUID(skuPublicID) {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": "sku_id must be a UUID"})
+			return
+		}
+		query = query.Joins("JOIN skus ON skus.id = assets.sk_uid").Where("skus.public_id = ?", skuPublicID)
+	}
 	if status := c.Query("status"); status != "" {
 		query = query.Where("review_status = ?", status)
 	}
@@ -909,6 +916,8 @@ func (s *Server) listAssetsForReview(c *gin.Context) {
 		items = append(items, assetReviewItem{
 			PublicID: asset.PublicID, SKUID: asset.SKU.PublicID, MediaURL: "/api/v1/assets/" + asset.PublicID + "/media",
 			ReviewStatus: asset.ReviewStatus, CapturedAt: asset.CapturedAt,
+			SOPViewID:        asset.SOPView.PublicID,
+			SOPViewKey:       asset.SOPView.PresetKey,
 			SOPViewName:      localizedViewName{ZHCN: asset.SOPView.NameZH, EN: asset.SOPView.NameEN},
 			PhotoSessionCode: asset.PhotoSession.Code,
 		})
@@ -922,6 +931,8 @@ type assetReviewItem struct {
 	MediaURL         string            `json:"media_url"`
 	ReviewStatus     string            `json:"review_status"`
 	CapturedAt       time.Time         `json:"captured_at"`
+	SOPViewID        string            `json:"sop_view_id"`
+	SOPViewKey       string            `json:"sop_view_key"`
 	SOPViewName      localizedViewName `json:"sop_view_name"`
 	PhotoSessionCode string            `json:"photo_session_code"`
 }

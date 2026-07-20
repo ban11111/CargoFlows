@@ -398,3 +398,28 @@ struct AssetReceipt: Decodable {
         case capturedAt = "captured_at"
     }
 }
+
+struct AssetReviewItem: Identifiable, Decodable {
+    let publicID: String
+    var id: String { publicID }
+    let skuID: String
+    let mediaURL: String
+    let reviewStatus: String
+    let capturedAt: Date
+    let sopViewID: String
+    let sopViewKey: String
+    let sopViewName: LocalizedText
+    let photoSessionCode: String
+
+    enum CodingKeys: String, CodingKey {
+        case publicID = "public_id"
+        case skuID = "sku_id"
+        case mediaURL = "media_url"
+        case reviewStatus = "review_status"
+        case capturedAt = "captured_at"
+        case sopViewID = "sop_view_id"
+        case sopViewKey = "sop_view_key"
+        case sopViewName = "sop_view_name"
+        case photoSessionCode = "photo_session_code"
+    }
+}

@@ -78,6 +78,20 @@ final class APIClient {
         try await request("photo-sessions", method: "POST", body: PhotoSessionRequest(skuID: skuID, sopVersionID: sopVersionID))
     }
 
+    func listAssets(skuID: String) async throws -> ListResponse<AssetReviewItem> {
+        try await request("assets/review?sku_id=\(encodedPathSegment(skuID))")
+    }
+
+    func loadAssetMedia(_ mediaURL: String) async throws -> Data {
+        let prefix = "/api/v1/"
+        let path = mediaURL.hasPrefix(prefix) ? String(mediaURL.dropFirst(prefix.count)) : mediaURL
+        let request = try makeRequest(path: path, method: "GET", body: Optional<Data>.none)
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else { throw APIError.server(http.statusCode) }
+        return data
+    }
+
     func uploadImage(
         _ imageData: Data,
         sopViewID: String,
