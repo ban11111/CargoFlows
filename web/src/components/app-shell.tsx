@@ -2,6 +2,7 @@
 
 import {
   Bot,
+  Boxes,
   Camera,
   ClipboardCheck,
   FileStack,
@@ -30,6 +31,7 @@ type NavGroup = "navGroupOperations" | "navGroupIntelligence" | "navGroupSystem"
 
 const navItems: Array<{ href: Route; labelKey: MessageKey; icon: typeof Package; group: NavGroup; permission?: "admin" | "super" }> = [
   { href: "/skus", labelKey: "navSku", icon: Package, group: "navGroupOperations" },
+  { href: "/model-families", labelKey: "navModelFamilies", icon: Boxes, group: "navGroupOperations" },
   { href: "/capture", labelKey: "navCapture", icon: Camera, group: "navGroupOperations" },
   { href: "/categories", labelKey: "navCategories", icon: FolderTree, group: "navGroupOperations" },
   { href: "/sop-templates", labelKey: "navSop", icon: ClipboardCheck, group: "navGroupOperations" },
