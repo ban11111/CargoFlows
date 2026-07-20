@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	"cargoflow/api/internal/config"
+	"cargoflows/api/internal/config"
 )
 
 func TestNewObjectStoreRejectsEmptyOrSharedGeneratedBucket(t *testing.T) {
@@ -22,7 +22,7 @@ func TestNewObjectStoreRejectsEmptyOrSharedGeneratedBucket(t *testing.T) {
 
 func TestGeneratedBucketUsesSeparatePrivateDefault(t *testing.T) {
 	t.Setenv("MINIO_AI_BUCKET", "")
-	if cfg := config.Load(); cfg.MinIOAIBucket != "cargoflow-ai-private" {
+	if cfg := config.Load(); cfg.MinIOAIBucket != "cargoflows-ai-private" {
 		t.Fatalf("MINIO_AI_BUCKET default = %q, want private generated-image bucket", cfg.MinIOAIBucket)
 	}
 	if generatedBucketPolicy != "" {

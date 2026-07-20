@@ -94,7 +94,7 @@ export default function SkuDetailPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-3"><Button asChild aria-label={language === "zh" ? "返回 SKU 列表" : "Back to SKUs"} size="icon" variant="secondary"><Link href="/skus"><ArrowLeft className="h-4 w-4" /></Link></Button><div><p className="mb-1 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">CargoFlow · SKU detail</p><h1 className="text-3xl font-bold tracking-tight text-navy sm:text-4xl">{sku.product.name}</h1><p className="mt-1 font-mono text-xs text-muted-foreground">{sku.code}</p></div></div>
+        <div className="flex items-start gap-3"><Button asChild aria-label={language === "zh" ? "返回 SKU 列表" : "Back to SKUs"} size="icon" variant="secondary"><Link href="/skus"><ArrowLeft className="h-4 w-4" /></Link></Button><div><p className="mb-1 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">CargoFlows · SKU detail</p><h1 className="text-3xl font-bold tracking-tight text-navy sm:text-4xl">{sku.product.name}</h1><p className="mt-1 font-mono text-xs text-muted-foreground">{sku.code}</p></div></div>
         <div className="flex flex-wrap gap-2"><Button onClick={() => setEditing((current) => !current)} variant="secondary"><Pencil className="h-4 w-4" />{language === "zh" ? "编辑资料" : "Edit details"}</Button><Button disabled={remove.isPending} onClick={() => { if (window.confirm(language === "zh" ? "删除这个 SKU？已有业务记录时系统会拒绝删除。" : "Delete this SKU? The system will refuse if it has business history.")) remove.mutate(); }} variant="danger"><Trash2 className="h-4 w-4" />{language === "zh" ? "删除 SKU" : "Delete SKU"}</Button></div>
       </div>
 

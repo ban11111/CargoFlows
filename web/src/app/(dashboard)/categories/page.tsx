@@ -62,7 +62,7 @@ export default function CategoriesPage() {
   return (
     <div className="space-y-6">
       <div>
-        <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">CargoFlow · Taxonomy</p>
+        <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">CargoFlows · Taxonomy</p>
         <h1 className="text-3xl font-bold tracking-tight text-navy sm:text-4xl">{t("categoryManage")}</h1>
         <p className="mt-2 text-sm text-muted-foreground">{t("categoryManageDesc")}</p>
       </div>

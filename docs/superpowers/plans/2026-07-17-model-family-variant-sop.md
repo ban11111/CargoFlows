@@ -56,7 +56,7 @@ func TestVariantIdentityDefaults(t *testing.T) {
 
 - [ ] **Step 2: Run RED**
 
-Run: `cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test ./internal/models ./internal/database -run 'ModelFamily|VariantIdentity|DifferenceRegion' -count=1`  
+Run: `cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test ./internal/models ./internal/database -run 'ModelFamily|VariantIdentity|DifferenceRegion' -count=1`
 Expected: FAIL because the model-family types do not exist.
 
 - [ ] **Step 3: Implement schema and database constraints**
@@ -114,7 +114,7 @@ Add opaque `PublicID` UUID columns to `SKU` and `Asset`, generated in `BeforeCre
 
 Add all new models to `migrateSchema`. Do not add backfill or legacy compatibility branches.
 
-Run: `cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test ./internal/models ./internal/database ./internal/app -run 'ModelFamily|VariantIdentity|DifferenceRegion|AssetMetadata|Migrate' -count=1`  
+Run: `cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test ./internal/models ./internal/database ./internal/app -run 'ModelFamily|VariantIdentity|DifferenceRegion|AssetMetadata|Migrate' -count=1`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -153,7 +153,7 @@ if !errors.Is(err, sop.ErrSKUAlreadyInModelFamily) { t.Fatalf("error = %v", err)
 
 - [ ] **Step 2: Run RED**
 
-Run: `cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test -race ./internal/sop -run 'ModelFamily' -count=1`  
+Run: `cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test -race ./internal/sop -run 'ModelFamily' -count=1`
 Expected: FAIL because `ModelFamilyService` is undefined.
 
 - [ ] **Step 3: Implement lifecycle service**
@@ -185,7 +185,7 @@ Assert viewer/photographer mutation denial, malformed UUID rejection, safe confl
 
 - [ ] **Step 5: Run GREEN, regenerate types, and commit**
 
-Run: `cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test -race ./internal/sop ./internal/app -run 'ModelFamily' -count=1 && cd ../web && pnpm generate:api && pnpm typecheck`  
+Run: `cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test -race ./internal/sop ./internal/app -run 'ModelFamily' -count=1 && cd ../web && pnpm generate:api && pnpm typecheck`
 Expected: PASS.
 
 ```bash
@@ -218,7 +218,7 @@ if !slices.Contains(issueCodes(issues), "exact_region_view_required") { t.Fatalf
 
 - [ ] **Step 2: Run RED**
 
-Run: `cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test ./internal/sop -run 'VariantManifest|DifferenceRegion' -count=1`  
+Run: `cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test ./internal/sop -run 'VariantManifest|DifferenceRegion' -count=1`
 Expected: FAIL because manifest lifecycle methods do not exist.
 
 - [ ] **Step 3: Implement strict identity document validation**
@@ -258,7 +258,7 @@ Only admin/operator may mutate or publish. Photographers may read the resolved c
 
 - [ ] **Step 5: Run GREEN and commit**
 
-Run: `cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test ./internal/sop ./internal/app -run 'VariantManifest|DifferenceRegion' -count=1 && cd ../web && pnpm generate:api && pnpm typecheck`  
+Run: `cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test ./internal/sop ./internal/app -run 'VariantManifest|DifferenceRegion' -count=1 && cd ../web && pnpm generate:api && pnpm typecheck`
 Expected: PASS.
 
 ```bash
@@ -297,7 +297,7 @@ if got := resolved.View("right_ports").Provenance.Source; got != "variant_requir
 
 - [ ] **Step 2: Run RED**
 
-Run: `cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test ./internal/sop -run 'FamilySOP|ResolveSOP' -count=1`  
+Run: `cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test ./internal/sop -run 'FamilySOP|ResolveSOP' -count=1`
 Expected: FAIL because family SOP models and resolver are missing.
 
 - [ ] **Step 3: Implement family SOP lifecycle and pure resolver**
@@ -322,7 +322,7 @@ Update photo-session service tests so creating a session for a family SKU locks 
 
 Add create/copy/update/validate/publish/read endpoints under `/api/v1/model-families/{family_id}/capture-sop` and `/api/v1/model-family-sop-versions/{version_id}` with the existing manager-role pattern.
 
-Run: `cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test ./internal/sop ./internal/app ./internal/database -run 'FamilySOP|ResolveSOP|PhotoSession' -count=1 && cd ../web && pnpm generate:api && pnpm typecheck`  
+Run: `cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test ./internal/sop ./internal/app ./internal/database -run 'FamilySOP|ResolveSOP|PhotoSession' -count=1 && cd ../web && pnpm generate:api && pnpm typecheck`
 Expected: PASS.
 
 ```bash
@@ -360,7 +360,7 @@ if slices.Contains(matrix.Reference("family-side").AllowedAttributes, "color") {
 
 - [ ] **Step 2: Run RED**
 
-Run: `cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test ./internal/sop ./internal/ai -run 'ReferenceGrant|VariantEvidence' -count=1`  
+Run: `cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test ./internal/sop ./internal/ai -run 'ReferenceGrant|VariantEvidence' -count=1`
 Expected: FAIL because grants and evidence builder are undefined.
 
 - [ ] **Step 3: Implement reference grants and evidence matrix**
@@ -390,7 +390,7 @@ Admin/operator may grant/revoke; photographer/viewer may read only. Preflight re
 
 - [ ] **Step 5: Run GREEN and commit**
 
-Run: `cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test -race ./internal/sop ./internal/ai ./internal/app -run 'ReferenceGrant|VariantEvidence|ImagePreflight' -count=1 && cd ../web && pnpm generate:api && pnpm typecheck`  
+Run: `cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test -race ./internal/sop ./internal/ai ./internal/app -run 'ReferenceGrant|VariantEvidence|ImagePreflight' -count=1 && cd ../web && pnpm generate:api && pnpm typecheck`
 Expected: PASS.
 
 ```bash
@@ -421,12 +421,12 @@ Prove image jobs require and freeze V2 family evidence, text-only jobs can proce
 
 - [ ] **Step 2: Run RED**
 
-Run: `cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test -race ./internal/ai -run 'ProductSnapshotV2|VariantSnapshot|MixedVariantJob' -count=1`  
+Run: `cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test -race ./internal/ai -run 'ProductSnapshotV2|VariantSnapshot|MixedVariantJob' -count=1`
 Expected: FAIL because V2 snapshot creation is missing.
 
 - [ ] **Step 3: Implement V2 snapshot creation**
 
-Use `ProductSnapshotSchemaV2 = "cargoflow_product_generation_v2"`. Within one transaction, lock target SKU, active membership, family, published category/family SOP versions, published manifest version, exact regions, selected target assets, and active reference grants. Build the evidence matrix before inserting the job.
+Use `ProductSnapshotSchemaV2 = "cargoflows_product_generation_v2"`. Within one transaction, lock target SKU, active membership, family, published category/family SOP versions, published manifest version, exact regions, selected target assets, and active reference grants. Build the evidence matrix before inserting the job.
 
 Text-only jobs include published family invariants and target identity facts but leave image evidence empty. Update the text prompt compiler and executor to consume V2, use target identity plus explicitly published invariants only, and exclude sibling image/reference appearance. Because legacy AI jobs are outside the contract, workers reject V1 jobs with a safe unsupported-snapshot error instead of maintaining dual compiler paths. Image preflight failures return stable user-correctable errors and insert no job/provider execution.
 
@@ -436,7 +436,7 @@ Replace generic `source_1` descriptors with evidence descriptors containing publ
 
 - [ ] **Step 5: Run GREEN and commit**
 
-Run: `cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test -race ./internal/ai -run 'ProductSnapshotV2|VariantSnapshot|MixedVariantJob|CompileImagePrompt' -count=3`  
+Run: `cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test -race ./internal/ai -run 'ProductSnapshotV2|VariantSnapshot|MixedVariantJob|CompileImagePrompt' -count=3`
 Expected: PASS.
 
 ```bash
@@ -476,7 +476,7 @@ if descriptor.SourceSHA256 == descriptor.OutputSHA256 { t.Fatal("derivative hash
 
 - [ ] **Step 2: Run RED**
 
-Run: `cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test ./internal/ai -run 'ReferenceDerivative' -count=1`  
+Run: `cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test ./internal/ai -run 'ReferenceDerivative' -count=1`
 Expected: FAIL because the derivative service is missing.
 
 - [ ] **Step 3: Implement deterministic transforms**
@@ -493,7 +493,7 @@ Use disposable MinIO to assert worker-authenticated read/write succeeds and anon
 
 - [ ] **Step 5: Run GREEN and commit**
 
-Run: `cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test ./internal/ai -run 'ReferenceDerivative|ImageStorage' -count=1 && cd .. && docker compose config --quiet && git diff --check`  
+Run: `cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test ./internal/ai -run 'ReferenceDerivative|ImageStorage' -count=1 && cd .. && docker compose config --quiet && git diff --check`
 Expected: PASS.
 
 ```bash
@@ -520,7 +520,7 @@ Assert label/image interleaving, target authority wording, no sibling original b
 
 - [ ] **Step 2: Run RED**
 
-Run: `cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test -race ./internal/ai -run 'VariantImageExecutor|RoleLabelledImage|ImageTurnQueue' -count=1`  
+Run: `cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test -race ./internal/ai -run 'VariantImageExecutor|RoleLabelledImage|ImageTurnQueue' -count=1`
 Expected: FAIL because role-labelled inputs and derivative loading are not wired.
 
 - [ ] **Step 3: Interleave trusted labels and input images**
@@ -534,7 +534,7 @@ content = append(content,
 )
 ```
 
-Role labels are compiled by CargoFlow from frozen evidence, never copied from user text. Reject empty, duplicate, reordered, or mismatched descriptors before sending.
+Role labels are compiled by CargoFlows from frozen evidence, never copied from user text. Reject empty, duplicate, reordered, or mismatched descriptors before sending.
 
 - [ ] **Step 4: Wire executor and audit metadata**
 
@@ -542,7 +542,7 @@ Load target originals from private/internal storage, create or reuse reference d
 
 - [ ] **Step 5: Run race/recovery GREEN and commit**
 
-Run: `cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test -race ./internal/ai -run 'VariantImageExecutor|RoleLabelledImage|ImageTurnQueue|Lease|Recovery' -count=5`  
+Run: `cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test -race ./internal/ai -run 'VariantImageExecutor|RoleLabelledImage|ImageTurnQueue|Lease|Recovery' -count=5`
 Expected: PASS.
 
 ```bash
@@ -575,7 +575,7 @@ Cover cross-Product member search, one-family conflict, draft/published badges, 
 
 - [ ] **Step 2: Run RED**
 
-Run: `cd web && pnpm test -- 'src/app/(dashboard)/model-families' src/components/model-families`  
+Run: `cd web && pnpm test -- 'src/app/(dashboard)/model-families' src/components/model-families`
 Expected: FAIL because components do not exist.
 
 - [ ] **Step 3: Implement family and manifest workbench**
@@ -588,7 +588,7 @@ Before image-job submission, show target identity coverage and reference roles. 
 
 - [ ] **Step 5: Run Web verification and commit**
 
-Run: `cd web && pnpm test && pnpm typecheck && pnpm lint && pnpm exec next build --webpack`  
+Run: `cd web && pnpm test && pnpm typecheck && pnpm lint && pnpm exec next build --webpack`
 Expected: all checks pass.
 
 ```bash
@@ -627,8 +627,8 @@ Run:
 
 ```bash
 cd api
-GOCACHE=/private/tmp/cargoflow-go-cache go test -race ./... -count=1
-GOCACHE=/private/tmp/cargoflow-go-cache go vet ./...
+GOCACHE=/private/tmp/cargoflows-go-cache go test -race ./... -count=1
+GOCACHE=/private/tmp/cargoflows-go-cache go vet ./...
 cd ../web
 pnpm test
 pnpm typecheck

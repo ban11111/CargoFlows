@@ -3,19 +3,19 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.cargoflow.web-dev</string>
+  <string>com.cargoflows.web-dev</string>
 
   <key>ProgramArguments</key>
   <array>
     <string>/opt/homebrew/opt/node@24/bin/node</string>
-    <string>/Users/zhengbaiyi/work/misc/CargoFlow/web/node_modules/next/dist/bin/next</string>
+    <string>/Users/zhengbaiyi/work/misc/CargoFlows/web/node_modules/next/dist/bin/next</string>
     <string>dev</string>
     <string>-p</string>
     <string>3005</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/Users/zhengbaiyi/work/misc/CargoFlow/web</string>
+  <string>/Users/zhengbaiyi/work/misc/CargoFlows/web</string>
 
   <key>EnvironmentVariables</key>
   <dict>
@@ -35,8 +35,8 @@
   <integer>20</integer>
 
   <key>StandardOutPath</key>
-  <string>/Users/zhengbaiyi/work/misc/CargoFlow/tmp/web-launchd.out.log</string>
+  <string>/Users/zhengbaiyi/work/misc/CargoFlows/tmp/web-launchd.out.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/zhengbaiyi/work/misc/CargoFlow/tmp/web-launchd.err.log</string>
+  <string>/Users/zhengbaiyi/work/misc/CargoFlows/tmp/web-launchd.err.log</string>
 </dict>
 </plist>

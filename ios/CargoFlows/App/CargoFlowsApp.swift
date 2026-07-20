@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct CargoFlowApp: App {
+struct CargoFlowsApp: App {
     @StateObject private var session = SessionStore()
     @StateObject private var language = LanguageStore()
 

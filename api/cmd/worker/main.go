@@ -12,11 +12,11 @@ import (
 	"syscall"
 	"time"
 
-	"cargoflow/api/internal/ai"
-	"cargoflow/api/internal/app"
-	"cargoflow/api/internal/config"
-	"cargoflow/api/internal/database"
-	"cargoflow/api/internal/secrets"
+	"cargoflows/api/internal/ai"
+	"cargoflows/api/internal/app"
+	"cargoflows/api/internal/config"
+	"cargoflows/api/internal/database"
+	"cargoflows/api/internal/secrets"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -69,11 +69,11 @@ func buildExecutor(cfg config.Config, db *gorm.DB) (ai.ItemExecutor, error) {
 	}
 	encoded := strings.TrimSpace(cfg.SecretsMasterKey)
 	if encoded == "" {
-		return nil, fmt.Errorf("CARGOFLOW_SECRETS_MASTER_KEY is required when AI_WORKER_DRY_RUN=false")
+		return nil, fmt.Errorf("CARGOFLOWS_SECRETS_MASTER_KEY is required when AI_WORKER_DRY_RUN=false")
 	}
 	masterKey, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil || len(masterKey) != 32 {
-		return nil, fmt.Errorf("CARGOFLOW_SECRETS_MASTER_KEY must be base64 for exactly 32 bytes")
+		return nil, fmt.Errorf("CARGOFLOWS_SECRETS_MASTER_KEY must be base64 for exactly 32 bytes")
 	}
 	box, err := secrets.NewAESGCM(masterKey)
 	for index := range masterKey {

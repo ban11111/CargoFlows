@@ -5,7 +5,7 @@
 
 ## Goal
 
-Allow CargoFlow to reuse capture instructions and structural image references across products in the same model family while preventing a reference variant's color, texture, labels, ports, controls, accessories, or packaging from leaking into the target SKU's generated content.
+Allow CargoFlows to reuse capture instructions and structural image references across products in the same model family while preventing a reference variant's color, texture, labels, ports, controls, accessories, or packaging from leaking into the target SKU's generated content.
 
 The first supported workflow assumes that every target SKU has at least one approved identity-anchor image. Images from another SKU may supplement structure and viewpoint evidence, but may never replace target-variant identity evidence.
 
@@ -117,7 +117,7 @@ The resolver preserves per-layer provenance and emits a deterministic `ResolvedS
 
 ## Evidence Matrix and Preflight
 
-Before creating any billable image turn, CargoFlow builds a property-to-evidence matrix:
+Before creating any billable image turn, CargoFlows builds a property-to-evidence matrix:
 
 | Property | Required evidence |
 | --- | --- |

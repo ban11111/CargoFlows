@@ -30,7 +30,7 @@ Post-review remediation: included in the follow-up public-identity contract comm
 Command:
 
 ```sh
-cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test ./internal/models ./internal/database -run 'ModelFamily|VariantIdentity|DifferenceRegion' -count=1
+cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test ./internal/models ./internal/database -run 'ModelFamily|VariantIdentity|DifferenceRegion' -count=1
 ```
 
 Result: failed as intended before implementation with undefined `VariantIdentityManifestVersion`, `VariantManifestDraft`, `ModelFamily`, `ModelFamilyMember`, `VariantIdentityManifest`, `VariantDifferenceRegion`, `VariantDifferenceRegionEvidenceAsset`, and SKU/Asset `PublicID`/`BeforeCreate` members.
@@ -38,7 +38,7 @@ Result: failed as intended before implementation with undefined `VariantIdentity
 Upload metadata RED command:
 
 ```sh
-cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test ./internal/app -run 'AssetMetadata|MismatchedDeclaredContentType' -count=1
+cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test ./internal/app -run 'AssetMetadata|MismatchedDeclaredContentType' -count=1
 ```
 
 Result: failed as intended before handler changes: completed assets had empty metadata and a PNG uploaded under an `image/jpeg` ticket was accepted with HTTP 201.
@@ -46,7 +46,7 @@ Result: failed as intended before handler changes: completed assets had empty me
 Metadata immutability RED command:
 
 ```sh
-cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test ./internal/database -run 'AssetMetadataIsImmutable' -count=1
+cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test ./internal/database -run 'AssetMetadataIsImmutable' -count=1
 ```
 
 Result: failed as intended before `gorm:"<-:create"` protections: a `Save` changed MIME type, dimensions, byte count, and SHA-256.
@@ -56,7 +56,7 @@ Result: failed as intended before `gorm:"<-:create"` protections: a `Save` chang
 Focused GREEN:
 
 ```sh
-cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test ./internal/models ./internal/database ./internal/app -run 'ModelFamily|VariantIdentity|DifferenceRegion|AssetMetadata|Migrate' -count=1
+cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test ./internal/models ./internal/database ./internal/app -run 'ModelFamily|VariantIdentity|DifferenceRegion|AssetMetadata|Migrate' -count=1
 ```
 
 Result: PASS for models, database, and app packages.
@@ -64,7 +64,7 @@ Result: PASS for models, database, and app packages.
 Focused declared-type regression:
 
 ```sh
-cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test ./internal/app -run 'MismatchedDeclaredContentType' -count=1
+cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test ./internal/app -run 'MismatchedDeclaredContentType' -count=1
 ```
 
 Result: PASS.
@@ -72,8 +72,8 @@ Result: PASS.
 Full verification (run outside the sandbox because existing `httptest` suites need loopback socket binding):
 
 ```sh
-cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test ./... -count=1
-cd api && GOCACHE=/private/tmp/cargoflow-go-cache go vet ./...
+cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test ./... -count=1
+cd api && GOCACHE=/private/tmp/cargoflows-go-cache go vet ./...
 cd api && git diff --check
 ```
 
@@ -104,14 +104,14 @@ The Important review findings were addressed atomically across the API, persiste
 Post-review RED evidence included failures showing that numeric SKU routes were accepted, AI requests still required numeric IDs, upload responses exposed object locators, media responses lacked safe headers, and UUID platform-content routes failed. The following focused GREEN command now passes:
 
 ```sh
-cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test ./internal/ai ./internal/app ./internal/models ./internal/database -run 'TestCompileImagePromptGolden|TestCreateJobSnapshotsOnlyWhitelistedFactsAndSelectedSlots|TestCreateJobRejectsInvalidTemplateSlotsAndAssetsWithoutWriting|TestAIJobEndpointsUseTypedArraysUUIDsAndSafeDTOs|TestSKURoutesUsePublicUUIDAndSafeDTOs|TestAssetMediaRequiresAuthenticationAndSetsSafeHeaders|TestOpenAPI|TestEveryNewPublicIDHookRejectsCallerSuppliedNonUUIDs' -count=1
+cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test ./internal/ai ./internal/app ./internal/models ./internal/database -run 'TestCompileImagePromptGolden|TestCreateJobSnapshotsOnlyWhitelistedFactsAndSelectedSlots|TestCreateJobRejectsInvalidTemplateSlotsAndAssetsWithoutWriting|TestAIJobEndpointsUseTypedArraysUUIDsAndSafeDTOs|TestSKURoutesUsePublicUUIDAndSafeDTOs|TestAssetMediaRequiresAuthenticationAndSetsSafeHeaders|TestOpenAPI|TestEveryNewPublicIDHookRejectsCallerSuppliedNonUUIDs' -count=1
 ```
 
 Final post-review verification:
 
 ```sh
-cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test ./... -count=1
-cd api && GOCACHE=/private/tmp/cargoflow-go-cache go vet ./...
+cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test ./... -count=1
+cd api && GOCACHE=/private/tmp/cargoflows-go-cache go vet ./...
 cd web && pnpm test
 cd web && pnpm run lint
 cd web && pnpm run typecheck
@@ -136,7 +136,7 @@ Because the source bucket is now private, SOP reference thumbnails also use an a
 Security RED evidence:
 
 ```sh
-cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test ./internal/app ./internal/database ./internal/models -run 'TestAssetReviewRoutesEnforceRoleAndOwnership|TestReviewAssetUsesStrictValidatedTransactionalInput|TestHTTPRouteParamsRejectNonCanonicalAndNilUUIDs|TestGeneratedBucketUsesSeparatePrivateDefault|TestModelFamilyAndVariantIdentityConstraints|TestVariantIdentityJSONFieldsSerializeAsJSONValues' -count=1
+cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test ./internal/app ./internal/database ./internal/models -run 'TestAssetReviewRoutesEnforceRoleAndOwnership|TestReviewAssetUsesStrictValidatedTransactionalInput|TestHTTPRouteParamsRejectNonCanonicalAndNilUUIDs|TestGeneratedBucketUsesSeparatePrivateDefault|TestModelFamilyAndVariantIdentityConstraints|TestVariantIdentityJSONFieldsSerializeAsJSONValues' -count=1
 ```
 
 Result before implementation: the source policy was public; photographer A received photographer B's assets; viewer/photographer review operations were accepted; unknown review fields/statuses and audit failures were accepted; noncanonical/nil UUIDs passed; arbitrary guard values inserted; and JSON fields serialized as base64.
@@ -144,9 +144,9 @@ Result before implementation: the source policy was public; photographer A recei
 Final verification:
 
 ```sh
-cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test ./... -count=1
-cd api && GOCACHE=/private/tmp/cargoflow-go-cache go vet ./...
-cd api && GOCACHE=/private/tmp/cargoflow-go-cache MINIO_INTEGRATION_ENDPOINT=127.0.0.1:9000 MINIO_INTEGRATION_ACCESS_KEY=cargoflow MINIO_INTEGRATION_SECRET_KEY=cargoflow123 go test ./internal/app -run TestGeneratedBucketPrivateMinIOIntegration -count=1 -v
+cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test ./... -count=1
+cd api && GOCACHE=/private/tmp/cargoflows-go-cache go vet ./...
+cd api && GOCACHE=/private/tmp/cargoflows-go-cache MINIO_INTEGRATION_ENDPOINT=127.0.0.1:9000 MINIO_INTEGRATION_ACCESS_KEY=cargoflows MINIO_INTEGRATION_SECRET_KEY=cargoflows123 go test ./internal/app -run TestGeneratedBucketPrivateMinIOIntegration -count=1 -v
 cd web && pnpm test
 cd web && pnpm run lint
 cd web && pnpm run typecheck
@@ -169,9 +169,9 @@ Regression coverage includes both handler-level asset/SOP reference tests and a 
 Final verification:
 
 ```sh
-cd api && GOCACHE=/private/tmp/cargoflow-go-cache go test ./... -count=1
-cd api && GOCACHE=/private/tmp/cargoflow-go-cache go vet ./...
-cd api && MINIO_INTEGRATION_ENDPOINT=127.0.0.1:9000 MINIO_INTEGRATION_ACCESS_KEY=cargoflow MINIO_INTEGRATION_SECRET_KEY=cargoflow123 GOCACHE=/private/tmp/cargoflow-go-cache go test ./internal/app -run TestGeneratedBucketPrivateMinIOIntegration -count=1 -v
+cd api && GOCACHE=/private/tmp/cargoflows-go-cache go test ./... -count=1
+cd api && GOCACHE=/private/tmp/cargoflows-go-cache go vet ./...
+cd api && MINIO_INTEGRATION_ENDPOINT=127.0.0.1:9000 MINIO_INTEGRATION_ACCESS_KEY=cargoflows MINIO_INTEGRATION_SECRET_KEY=cargoflows123 GOCACHE=/private/tmp/cargoflows-go-cache go test ./internal/app -run TestGeneratedBucketPrivateMinIOIntegration -count=1 -v
 cd web && pnpm run generate:api && pnpm test && pnpm lint && pnpm typecheck
 git diff --check
 ```

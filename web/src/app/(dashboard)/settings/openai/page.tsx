@@ -152,7 +152,7 @@ export default function OpenAISettingsPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <header className="border-b border-border pb-6">
-        <p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-primary"><LockKeyhole className="h-4 w-4" />CargoFlow · OpenAI</p>
+        <p className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-primary"><LockKeyhole className="h-4 w-4" />CargoFlows · OpenAI</p>
         <h1 className="text-3xl font-bold tracking-tight text-navy sm:text-4xl">{t("openAISettingsTitle")}</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">{t("openAISettingsDescription")}</p>
       </header>

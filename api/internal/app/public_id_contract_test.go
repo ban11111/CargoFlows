@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/models"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -21,7 +21,7 @@ func TestSKURoutesUsePublicUUIDAndSafeDTOs(t *testing.T) {
 	if err := db.Create(&category).Error; err != nil {
 		t.Fatal(err)
 	}
-	product := models.Product{CategoryID: category.ID, Name: "Public product", Brand: "CargoFlow", Category: category.Name}
+	product := models.Product{CategoryID: category.ID, Name: "Public product", Brand: "CargoFlows", Category: category.Name}
 	if err := db.Create(&product).Error; err != nil {
 		t.Fatal(err)
 	}

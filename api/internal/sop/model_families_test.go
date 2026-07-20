@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/models"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -39,7 +39,7 @@ func seedModelFamilySKU(t *testing.T, db *gorm.DB, code string) models.SKU {
 
 func createModelFamily(t *testing.T, service *ModelFamilyService, code string, actor uint) models.ModelFamily {
 	t.Helper()
-	family, err := service.Create(t.Context(), CreateModelFamilyInput{Brand: "CargoFlow", NameZH: "同款产品", NameEN: "Same model", ModelCode: code, CommonStructure: []byte(`{"schema":"model_family_common_structure_v1","invariants":["housing"]}`), VariationDimensions: []string{"color", "ports"}, CreatedByID: actor})
+	family, err := service.Create(t.Context(), CreateModelFamilyInput{Brand: "CargoFlows", NameZH: "同款产品", NameEN: "Same model", ModelCode: code, CommonStructure: []byte(`{"schema":"model_family_common_structure_v1","invariants":["housing"]}`), VariationDimensions: []string{"color", "ports"}, CreatedByID: actor})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestModelFamilyServiceAllowsSKUsFromDifferentProductsAndRejectsDuplicateMod
 	if _, err := service.AddMember(t.Context(), family.PublicID, second.PublicID, 1); err != nil {
 		t.Fatalf("cross-product membership failed: %v", err)
 	}
-	_, err := service.Create(t.Context(), CreateModelFamilyInput{Brand: "CargoFlow", NameZH: "重复型号", NameEN: "Duplicate model", ModelCode: family.ModelCode, CommonStructure: []byte(`{"schema":"model_family_common_structure_v1","invariants":["housing"]}`), VariationDimensions: []string{"color"}, CreatedByID: 1})
+	_, err := service.Create(t.Context(), CreateModelFamilyInput{Brand: "CargoFlows", NameZH: "重复型号", NameEN: "Duplicate model", ModelCode: family.ModelCode, CommonStructure: []byte(`{"schema":"model_family_common_structure_v1","invariants":["housing"]}`), VariationDimensions: []string{"color"}, CreatedByID: 1})
 	if !errors.Is(err, ErrModelCodeTaken) {
 		t.Fatalf("duplicate model code error = %v", err)
 	}
@@ -107,11 +107,11 @@ func TestModelFamilyServiceAllowsSKUsFromDifferentProductsAndRejectsDuplicateMod
 func TestModelFamilyServiceValidatesSchemaAndArchivedMutation(t *testing.T) {
 	db := modelFamilyTestDB(t)
 	service := NewModelFamilyService(db)
-	_, err := service.Create(t.Context(), CreateModelFamilyInput{Brand: "CargoFlow", NameZH: "同款", NameEN: "Same", ModelCode: "BAD", CommonStructure: []byte(`{"schema":"wrong"}`), VariationDimensions: []string{"unknown"}, CreatedByID: 1})
+	_, err := service.Create(t.Context(), CreateModelFamilyInput{Brand: "CargoFlows", NameZH: "同款", NameEN: "Same", ModelCode: "BAD", CommonStructure: []byte(`{"schema":"wrong"}`), VariationDimensions: []string{"unknown"}, CreatedByID: 1})
 	if !errors.Is(err, ErrModelFamilyInvalid) {
 		t.Fatalf("invalid input error = %v", err)
 	}
-	_, err = service.Create(t.Context(), CreateModelFamilyInput{Brand: "CargoFlow", NameZH: "同款", NameEN: "Same", ModelCode: "BAD-UNKNOWN", CommonStructure: []byte(`{"schema":"model_family_common_structure_v1","invariants":["housing"],"untrusted":true}`), VariationDimensions: []string{"color"}, CreatedByID: 1})
+	_, err = service.Create(t.Context(), CreateModelFamilyInput{Brand: "CargoFlows", NameZH: "同款", NameEN: "Same", ModelCode: "BAD-UNKNOWN", CommonStructure: []byte(`{"schema":"model_family_common_structure_v1","invariants":["housing"],"untrusted":true}`), VariationDimensions: []string{"color"}, CreatedByID: 1})
 	if !errors.Is(err, ErrModelFamilyInvalid) {
 		t.Fatalf("unknown common-structure field error = %v", err)
 	}

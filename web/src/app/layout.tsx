@@ -5,8 +5,8 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "CargoFlow · Operations Control",
-    template: "%s · CargoFlow",
+    default: "CargoFlows · Operations Control",
+    template: "%s · CargoFlows",
   },
   description: "Catalog, inventory, capture SOP, asset review, and AI content operations in one flow.",
 };

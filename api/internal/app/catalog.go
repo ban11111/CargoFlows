@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/models"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )

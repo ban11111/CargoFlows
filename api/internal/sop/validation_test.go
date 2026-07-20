@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/models"
 )
 
 func TestValidateVersionReportsAllErrors(t *testing.T) {

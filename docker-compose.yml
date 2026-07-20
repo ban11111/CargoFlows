@@ -1,10 +1,12 @@
+name: cargoflows
+
 services:
   mysql:
     image: mysql:8.4
     environment:
-      MYSQL_DATABASE: cargoflow
-      MYSQL_USER: cargoflow
-      MYSQL_PASSWORD: cargoflow
+      MYSQL_DATABASE: cargoflows
+      MYSQL_USER: cargoflows
+      MYSQL_PASSWORD: cargoflows
       MYSQL_ROOT_PASSWORD: root
     ports:
       - "127.0.0.1:${MYSQL_PORT:-3306}:3306"
@@ -20,8 +22,8 @@ services:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: cargoflow
-      MINIO_ROOT_PASSWORD: cargoflow123
+      MINIO_ROOT_USER: cargoflows
+      MINIO_ROOT_PASSWORD: cargoflows123
     ports:
       - "127.0.0.1:${MINIO_PORT:-9000}:9000"
       - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
@@ -31,9 +33,9 @@ services:
   migrate:
     build:
       context: ./api
-    entrypoint: ["/app/cargoflow-migrate"]
+    entrypoint: ["/app/cargoflows-migrate"]
     environment:
-      DB_DSN: cargoflow:cargoflow@tcp(mysql:3306)/cargoflow?charset=utf8mb4&parseTime=True&loc=Local
+      DB_DSN: cargoflows:cargoflows@tcp(mysql:3306)/cargoflows?charset=utf8mb4&parseTime=True&loc=Local
       APP_ENV: development
     depends_on:
       mysql:
@@ -44,16 +46,16 @@ services:
       context: ./api
     environment:
       API_PORT: 8080
-      DB_DSN: cargoflow:cargoflow@tcp(mysql:3306)/cargoflow?charset=utf8mb4&parseTime=True&loc=Local
+      DB_DSN: cargoflows:cargoflows@tcp(mysql:3306)/cargoflows?charset=utf8mb4&parseTime=True&loc=Local
       JWT_SECRET: dev-secret-change-me
       APP_ENV: development
       MINIO_ENDPOINT: minio:9000
       MINIO_PUBLIC_ENDPOINT: 127.0.0.1:9000
-      MINIO_ROOT_USER: cargoflow
-      MINIO_ROOT_PASSWORD: cargoflow123
-      MINIO_BUCKET: cargoflow
-      MINIO_AI_BUCKET: cargoflow-ai-private
-      CARGOFLOW_SECRETS_MASTER_KEY: ${CARGOFLOW_SECRETS_MASTER_KEY:-}
+      MINIO_ROOT_USER: cargoflows
+      MINIO_ROOT_PASSWORD: cargoflows123
+      MINIO_BUCKET: cargoflows
+      MINIO_AI_BUCKET: cargoflows-ai-private
+      CARGOFLOWS_SECRETS_MASTER_KEY: ${CARGOFLOWS_SECRETS_MASTER_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
     ports:
       - "127.0.0.1:${API_HOST_PORT:-8080}:8080"
@@ -66,19 +68,19 @@ services:
   worker:
     build:
       context: ./api
-    entrypoint: ["/app/cargoflow-worker"]
+    entrypoint: ["/app/cargoflows-worker"]
     environment:
-      DB_DSN: cargoflow:cargoflow@tcp(mysql:3306)/cargoflow?charset=utf8mb4&parseTime=True&loc=Local
+      DB_DSN: cargoflows:cargoflows@tcp(mysql:3306)/cargoflows?charset=utf8mb4&parseTime=True&loc=Local
       APP_ENV: development
       AI_WORKER_DRY_RUN: ${AI_WORKER_DRY_RUN:-true}
       AI_WORKER_POLL_INTERVAL: 1s
       MINIO_ENDPOINT: minio:9000
       MINIO_PUBLIC_ENDPOINT: 127.0.0.1:9000
-      MINIO_ROOT_USER: cargoflow
-      MINIO_ROOT_PASSWORD: cargoflow123
-      MINIO_BUCKET: cargoflow
-      MINIO_AI_BUCKET: cargoflow-ai-private
-      CARGOFLOW_SECRETS_MASTER_KEY: ${CARGOFLOW_SECRETS_MASTER_KEY:-}
+      MINIO_ROOT_USER: cargoflows
+      MINIO_ROOT_PASSWORD: cargoflows123
+      MINIO_BUCKET: cargoflows
+      MINIO_AI_BUCKET: cargoflows-ai-private
+      CARGOFLOWS_SECRETS_MASTER_KEY: ${CARGOFLOWS_SECRETS_MASTER_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       OPENAI_TEXT_MODEL: ${OPENAI_TEXT_MODEL:-gpt-5.6-terra}
       OPENAI_REASONING_EFFORT: ${OPENAI_REASONING_EFFORT:-low}
@@ -91,7 +93,7 @@ services:
     profiles: ["smoke"]
     build:
       context: ./api
-    entrypoint: ["/app/cargoflow-openai-smoke"]
+    entrypoint: ["/app/cargoflows-openai-smoke"]
     environment:
       OPENAI_SMOKE_TEST: ${OPENAI_SMOKE_TEST:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -102,7 +104,7 @@ services:
     profiles: ["ai-e2e"]
     build:
       context: ./api
-    entrypoint: ["/app/cargoflow-fake-openai"]
+    entrypoint: ["/app/cargoflows-fake-openai"]
     ports:
       - "127.0.0.1:${FAKE_OPENAI_PORT:-8099}:8099"
 

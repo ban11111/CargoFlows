@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/models"
 	"gorm.io/gorm"
 )
 

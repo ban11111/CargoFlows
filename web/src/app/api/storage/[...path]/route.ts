@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { storageUpstreamURL } from "@/lib/storage-upload";
 
 const MINIO_UPLOAD_BASE_URL = process.env.MINIO_UPLOAD_BASE_URL ?? "http://127.0.0.1:9000";
-const MINIO_SOURCE_BUCKET = process.env.MINIO_SOURCE_BUCKET ?? "cargoflow";
+const MINIO_SOURCE_BUCKET = process.env.MINIO_SOURCE_BUCKET ?? "cargoflows";
 
 export const dynamic = "force-dynamic";
 

@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/models"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"

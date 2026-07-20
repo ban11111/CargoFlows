@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/models"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )

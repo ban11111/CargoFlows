@@ -1,32 +1,32 @@
-name: CargoFlow
+name: CargoFlows
 options:
-  bundleIdPrefix: com.cargoflow
+  bundleIdPrefix: com.cargoflows
   deploymentTarget:
     iOS: "17.0"
 settings:
   base:
     SWIFT_VERSION: "6.0"
 targets:
-  CargoFlow:
+  CargoFlows:
     type: application
     platform: iOS
     sources:
-      - CargoFlow
+      - CargoFlows
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.cargoflow.app
-        INFOPLIST_FILE: CargoFlow/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.cargoflows.app
+        INFOPLIST_FILE: CargoFlows/Info.plist
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: XDUSZQ42JP
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
-        CARGOFLOW_API_BASE_URL: "https://dev.cargoflows.cc/api/proxy/"
+        CARGOFLOWS_API_BASE_URL: "https://dev.cargoflows.cc/api/proxy/"
     info:
-      path: CargoFlow/Info.plist
+      path: CargoFlows/Info.plist
       properties:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
-        NSCameraUsageDescription: CargoFlow needs camera access to capture required product views.
+        NSCameraUsageDescription: CargoFlows needs camera access to capture required product views.
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -38,23 +38,23 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        CargoFlowAPIBaseURL: $(CARGOFLOW_API_BASE_URL)
-  CargoFlowTests:
+        CargoFlowsAPIBaseURL: $(CARGOFLOWS_API_BASE_URL)
+  CargoFlowsTests:
     type: bundle.unit-test
     platform: iOS
     sources:
-      - CargoFlowTests
+      - CargoFlowsTests
     dependencies:
-      - target: CargoFlow
+      - target: CargoFlows
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
 
 schemes:
-  CargoFlow:
+  CargoFlows:
     build:
       targets:
-        CargoFlow: all
+        CargoFlows: all
     test:
       targets:
-        - CargoFlowTests
+        - CargoFlowsTests

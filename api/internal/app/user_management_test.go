@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/models"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"

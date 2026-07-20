@@ -23,7 +23,7 @@ func TestLoadUsesDefaults(t *testing.T) {
 }
 
 func TestLoadReadsAIConfiguration(t *testing.T) {
-	t.Setenv("CARGOFLOW_SECRETS_MASTER_KEY", "c2VjcmV0c2VjcmV0c2VjcmV0c2VjcmV0MTIzNDU2Nzg=")
+	t.Setenv("CARGOFLOWS_SECRETS_MASTER_KEY", "c2VjcmV0c2VjcmV0c2VjcmV0c2VjcmV0MTIzNDU2Nzg=")
 	t.Setenv("OPENAI_BASE_URL", "https://example.test/v1")
 	t.Setenv("AI_WORKER_DRY_RUN", "true")
 	cfg := Load()
@@ -66,7 +66,7 @@ func TestLoadUsesAndReadsOpenAIImageDefaults(t *testing.T) {
 
 func TestLoadUsesAndReadsPrivateGeneratedImageBucket(t *testing.T) {
 	t.Setenv("MINIO_AI_BUCKET", "")
-	if cfg := Load(); cfg.MinIOAIBucket != "cargoflow-ai-private" {
+	if cfg := Load(); cfg.MinIOAIBucket != "cargoflows-ai-private" {
 		t.Fatalf("unexpected generated-image bucket default: %#v", cfg)
 	}
 	t.Setenv("MINIO_AI_BUCKET", "private-test-images")

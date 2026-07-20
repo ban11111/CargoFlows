@@ -218,7 +218,7 @@ export default function NewAIJobPage() {
   return <div className="mx-auto max-w-5xl space-y-6">
     <div className="flex items-start gap-3">
       <Button asChild aria-label={t("backToAIJobs")} className="min-h-11 min-w-11" size="icon" variant="ghost"><Link href="/ai-jobs"><ArrowLeft className="h-4 w-4" /></Link></Button>
-      <div><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">CargoFlow · New route</p><h1 className="text-3xl font-bold tracking-tight text-navy sm:text-4xl">{t("aiJobWizardTitle")}</h1><p className="mt-2 text-sm text-muted-foreground">{t("aiJobWizardDesc")}</p></div>
+      <div><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">CargoFlows · New route</p><h1 className="text-3xl font-bold tracking-tight text-navy sm:text-4xl">{t("aiJobWizardTitle")}</h1><p className="mt-2 text-sm text-muted-foreground">{t("aiJobWizardDesc")}</p></div>
     </div>
 
     <nav aria-label={zh ? "任务创建进度" : "Job creation progress"} className="overflow-x-auto rounded-xl border border-border bg-card p-2 shadow-[var(--shadow-sm)]">

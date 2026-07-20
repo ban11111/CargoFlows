@@ -34,7 +34,7 @@ export function LandingPage({ publicAppUrl }: { publicAppUrl: string }) {
             <span />
             <span />
           </span>
-          <span>CargoFlow</span>
+          <span>CargoFlows</span>
         </Link>
         <nav className={styles.nav} aria-label={t("landingNavigationLabel")}>
           <Link className={styles.adminLink} href="/login">
@@ -164,7 +164,7 @@ export function LandingPage({ publicAppUrl }: { publicAppUrl: string }) {
       </main>
 
       <footer className={styles.footer}>
-        <p>© 2026 CargoFlow</p>
+        <p>© 2026 CargoFlows</p>
         <a href={publicAppUrl} target="_blank" rel="noreferrer">
           <Cloud aria-hidden="true" size={15} />
           {t("landingCloudflareConnected")}

@@ -33,7 +33,7 @@ func TestSmokePrintsOnlyProviderIdentifiersAndUsage(t *testing.T) {
 			t.Error("missing fake bearer credential")
 		}
 		w.Header().Set("x-request-id", "req_smoke")
-		_, _ = io.WriteString(w, `{"id":"resp_smoke","status":"completed","model":"fake-model","output":[{"type":"message","content":[{"type":"output_text","text":"{\"candidates\":[{\"title\":\"CargoFlow Test Protective Phone Case SMOKE-CASE-001\",\"keywords\":[\"phone case\"],\"source_fields\":[\"product.name\",\"sku.code\"]}]}"}]}],"usage":{"input_tokens":20,"output_tokens":10,"total_tokens":30,"output_tokens_details":{"reasoning_tokens":2}}}`)
+		_, _ = io.WriteString(w, `{"id":"resp_smoke","status":"completed","model":"fake-model","output":[{"type":"message","content":[{"type":"output_text","text":"{\"candidates\":[{\"title\":\"CargoFlows Test Protective Phone Case SMOKE-CASE-001\",\"keywords\":[\"phone case\"],\"source_fields\":[\"product.name\",\"sku.code\"]}]}"}]}],"usage":{"input_tokens":20,"output_tokens":10,"total_tokens":30,"output_tokens_details":{"reasoning_tokens":2}}}`)
 	}))
 	t.Cleanup(server.Close)
 	values := map[string]string{
@@ -49,7 +49,7 @@ func TestSmokePrintsOnlyProviderIdentifiersAndUsage(t *testing.T) {
 			t.Fatalf("output %q missing %q", text, expected)
 		}
 	}
-	for _, forbidden := range []string{fakeKey, "CargoFlow Test", "SMOKE-CASE-001", "candidates", "instructions"} {
+	for _, forbidden := range []string{fakeKey, "CargoFlows Test", "SMOKE-CASE-001", "candidates", "instructions"} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("smoke output leaked %q: %q", forbidden, text)
 		}
@@ -64,7 +64,7 @@ func TestSmokeRejectsNonOfficialProviderAndUnsafeOutputMetadata(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("x-request-id", "req_safe")
-		_, _ = io.WriteString(w, `{"id":"resp_safe","status":"completed","model":"fake-model\ninjected","output":[{"type":"message","content":[{"type":"output_text","text":"{\"candidates\":[{\"title\":\"CargoFlow Test Protective Phone Case SMOKE-CASE-001\",\"keywords\":[],\"source_fields\":[\"product.name\"]}]}"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2,"output_tokens_details":{"reasoning_tokens":0}}}`)
+		_, _ = io.WriteString(w, `{"id":"resp_safe","status":"completed","model":"fake-model\ninjected","output":[{"type":"message","content":[{"type":"output_text","text":"{\"candidates\":[{\"title\":\"CargoFlows Test Protective Phone Case SMOKE-CASE-001\",\"keywords\":[],\"source_fields\":[\"product.name\"]}]}"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2,"output_tokens_details":{"reasoning_tokens":0}}}`)
 	}))
 	t.Cleanup(server.Close)
 	values["OPENAI_BASE_URL"] = server.URL

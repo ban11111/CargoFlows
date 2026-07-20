@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"cargoflow/api/internal/models"
-	"cargoflow/api/internal/secrets"
+	"cargoflows/api/internal/models"
+	"cargoflows/api/internal/secrets"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )

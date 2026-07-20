@@ -15,10 +15,10 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "6F0F7E8E5D1634671CA667D9"
-               BuildableName = "CargoFlow.app"
-               BlueprintName = "CargoFlow"
-               ReferencedContainer = "container:CargoFlow.xcodeproj">
+               BlueprintIdentifier = "EB758F2E7C78535C54837AE3"
+               BuildableName = "CargoFlows.app"
+               BlueprintName = "CargoFlows"
+               ReferencedContainer = "container:CargoFlows.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -32,10 +32,10 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "6F0F7E8E5D1634671CA667D9"
-            BuildableName = "CargoFlow.app"
-            BlueprintName = "CargoFlow"
-            ReferencedContainer = "container:CargoFlow.xcodeproj">
+            BlueprintIdentifier = "EB758F2E7C78535C54837AE3"
+            BuildableName = "CargoFlows.app"
+            BlueprintName = "CargoFlows"
+            ReferencedContainer = "container:CargoFlows.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
       <Testables>
@@ -44,10 +44,10 @@
             parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "F22552B429C64A4BB749994E"
-               BuildableName = "CargoFlowTests.xctest"
-               BlueprintName = "CargoFlowTests"
-               ReferencedContainer = "container:CargoFlow.xcodeproj">
+               BlueprintIdentifier = "59DE06FEE9FE6357914AD35B"
+               BuildableName = "CargoFlowsTests.xctest"
+               BlueprintName = "CargoFlowsTests"
+               ReferencedContainer = "container:CargoFlows.xcodeproj">
             </BuildableReference>
          </TestableReference>
       </Testables>
@@ -68,10 +68,10 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "6F0F7E8E5D1634671CA667D9"
-            BuildableName = "CargoFlow.app"
-            BlueprintName = "CargoFlow"
-            ReferencedContainer = "container:CargoFlow.xcodeproj">
+            BlueprintIdentifier = "EB758F2E7C78535C54837AE3"
+            BuildableName = "CargoFlows.app"
+            BlueprintName = "CargoFlows"
+            ReferencedContainer = "container:CargoFlows.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -85,10 +85,10 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "6F0F7E8E5D1634671CA667D9"
-            BuildableName = "CargoFlow.app"
-            BlueprintName = "CargoFlow"
-            ReferencedContainer = "container:CargoFlow.xcodeproj">
+            BlueprintIdentifier = "EB758F2E7C78535C54837AE3"
+            BuildableName = "CargoFlows.app"
+            BlueprintName = "CargoFlows"
+            ReferencedContainer = "container:CargoFlows.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

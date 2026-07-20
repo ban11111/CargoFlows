@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"cargoflow/api/internal/ai"
-	"cargoflow/api/internal/config"
+	"cargoflows/api/internal/ai"
+	"cargoflows/api/internal/config"
 	"github.com/minio/minio-go/v7"
 )
 
@@ -33,10 +33,10 @@ func TestGeneratedBucketPrivateMinIOIntegration(t *testing.T) {
 		MinIOBucket: "cf-source-" + bucketSuffix, MinIOAIBucket: "cf-private-" + bucketSuffix,
 	}
 	if cfg.MinIOAccessKey == "" {
-		cfg.MinIOAccessKey = "cargoflow"
+		cfg.MinIOAccessKey = "cargoflows"
 	}
 	if cfg.MinIOSecretKey == "" {
-		cfg.MinIOSecretKey = "cargoflow123"
+		cfg.MinIOSecretKey = "cargoflows123"
 	}
 	store, err := newObjectStore(cfg)
 	if err != nil {

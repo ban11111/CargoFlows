@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"cargoflow/api/internal/ai"
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/ai"
+	"cargoflows/api/internal/models"
 )
 
 var errSmokeDisabled = errors.New("OpenAI smoke test is disabled; set OPENAI_SMOKE_TEST=1 explicitly")
@@ -86,7 +86,7 @@ func smokePrompt() (ai.CompiledTextPrompt, error) {
 	}
 	snapshot := ai.ProductSnapshotV1{
 		Schema: ai.ProductSnapshotSchemaV1, Locale: "en-SG", TargetPlatform: "lazada",
-		Product:             ai.ProductFacts{Name: "Protective phone case", Brand: "CargoFlow Test", Category: ai.CategoryFacts{NameZH: "手机壳", NameEN: "Phone cases"}},
+		Product:             ai.ProductFacts{Name: "Protective phone case", Brand: "CargoFlows Test", Category: ai.CategoryFacts{NameZH: "手机壳", NameEN: "Phone cases"}},
 		SKU:                 ai.SKUFacts{Code: "SMOKE-CASE-001", Color: "clear"},
 		SOP:                 ai.SOPFacts{PublicID: "10000000-0000-4000-8000-000000000006", VersionPublicID: "10000000-0000-4000-8000-000000000007", VersionNumber: 1, SchemaVersion: "v1", CoordinateSystem: "pcs_object_v1"},
 		Template:            ai.TemplateFacts{TemplatePublicID: "10000000-0000-4000-8000-000000000003", VersionPublicID: "10000000-0000-4000-8000-000000000004", VersionNumber: 1, PlatformPrompt: "Create accurate Lazada product content.", SelectedSlots: []ai.SlotFacts{slot}},

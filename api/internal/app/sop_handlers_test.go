@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"cargoflow/api/internal/config"
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/config"
+	"cargoflows/api/internal/models"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"gorm.io/gorm"

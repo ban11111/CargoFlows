@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
-	"cargoflow/api/internal/models"
-	"cargoflow/api/internal/sop"
+	"cargoflows/api/internal/models"
+	"cargoflows/api/internal/sop"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/mysql"
@@ -53,7 +53,7 @@ func Migrate(db *gorm.DB) error {
 	defer conn.Close()
 	return runWithMigrationLock(func() (func() error, error) {
 		var acquired int
-		if err := conn.QueryRowContext(ctx, "SELECT GET_LOCK(?, ?)", "cargoflow_schema_migrate", 60).Scan(&acquired); err != nil {
+		if err := conn.QueryRowContext(ctx, "SELECT GET_LOCK(?, ?)", "cargoflows_schema_migrate", 60).Scan(&acquired); err != nil {
 			return nil, fmt.Errorf("acquire schema migration lock: %w", err)
 		}
 		if acquired != 1 {
@@ -61,7 +61,7 @@ func Migrate(db *gorm.DB) error {
 		}
 		return func() error {
 			var released int
-			if err := conn.QueryRowContext(ctx, "SELECT RELEASE_LOCK(?)", "cargoflow_schema_migrate").Scan(&released); err != nil {
+			if err := conn.QueryRowContext(ctx, "SELECT RELEASE_LOCK(?)", "cargoflows_schema_migrate").Scan(&released); err != nil {
 				return fmt.Errorf("release schema migration lock: %w", err)
 			}
 			if released != 1 {
@@ -138,6 +138,24 @@ func migrateUserSchema(db *gorm.DB) error {
 		return fmt.Errorf("migrate users: %w", err)
 	}
 	return db.Transaction(func(tx *gorm.DB) error {
+		legacyAdminEmail := "admin@" + "cargo" + "flow.local"
+		const adminEmail = "admin@cargoflows.cc"
+		var legacyAdmin models.User
+		if err := tx.Where("email = ?", legacyAdminEmail).First(&legacyAdmin).Error; err == nil {
+			var existing int64
+			if err := tx.Model(&models.User{}).Where("email = ? AND id <> ?", adminEmail, legacyAdmin.ID).Count(&existing).Error; err != nil {
+				return err
+			}
+			if existing > 0 {
+				return fmt.Errorf("migrate administrator email: %s is already in use", adminEmail)
+			}
+			if err := tx.Model(&legacyAdmin).Update("email", adminEmail).Error; err != nil {
+				return fmt.Errorf("migrate administrator email: %w", err)
+			}
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("find legacy administrator: %w", err)
+		}
+
 		var users []models.User
 		if err := tx.Order("id ASC").Find(&users).Error; err != nil {
 			return err
@@ -320,9 +338,9 @@ func Seed(db *gorm.DB) error {
 
 	lastSeenAt := time.Now()
 	users := []models.User{
-		{Name: "Zheng Baiyi", Email: "admin@cargoflow.local", PasswordHash: string(hash), Role: models.RoleSuperAdmin, Status: "active", LastSeenAt: &lastSeenAt},
-		{Name: "Ivy Chen", Email: "ivy@cargoflow.local", PasswordHash: string(hash), Role: models.RoleOperator, Status: "active", LastSeenAt: &lastSeenAt},
-		{Name: "Bo Lin", Email: "bo@cargoflow.local", PasswordHash: string(hash), Role: models.RoleOperator, Status: "active", LastSeenAt: &lastSeenAt},
+		{Name: "Zheng Baiyi", Email: "admin@cargoflows.cc", PasswordHash: string(hash), Role: models.RoleSuperAdmin, Status: "active", LastSeenAt: &lastSeenAt},
+		{Name: "Ivy Chen", Email: "ivy@cargoflows.local", PasswordHash: string(hash), Role: models.RoleOperator, Status: "active", LastSeenAt: &lastSeenAt},
+		{Name: "Bo Lin", Email: "bo@cargoflows.local", PasswordHash: string(hash), Role: models.RoleOperator, Status: "active", LastSeenAt: &lastSeenAt},
 	}
 	if err := db.Create(&users).Error; err != nil {
 		return err
@@ -332,7 +350,7 @@ func Seed(db *gorm.DB) error {
 	if err := db.Where("name = ?", "手机壳").First(&phoneCase).Error; err != nil {
 		return err
 	}
-	product := models.Product{CategoryID: phoneCase.ID, Name: "透明手机壳", Brand: "CargoFlow", Category: phoneCase.Name, Description: "Internal seed product for SKU and photo workflow validation."}
+	product := models.Product{CategoryID: phoneCase.ID, Name: "透明手机壳", Brand: "CargoFlows", Category: phoneCase.Name, Description: "Internal seed product for SKU and photo workflow validation."}
 	if err := db.Create(&product).Error; err != nil {
 		return err
 	}

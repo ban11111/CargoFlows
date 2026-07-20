@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"cargoflow/api/internal/ai"
-	"cargoflow/api/internal/config"
+	"cargoflows/api/internal/ai"
+	"cargoflows/api/internal/config"
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"

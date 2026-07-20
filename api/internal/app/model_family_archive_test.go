@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"testing"
 
-	"cargoflow/api/internal/models"
-	"cargoflow/api/internal/sop"
+	"cargoflows/api/internal/models"
+	"cargoflows/api/internal/sop"
 )
 
 func TestArchivedModelFamilyPatchIsRejectedWithoutNewAudit(t *testing.T) {
@@ -15,7 +15,7 @@ func TestArchivedModelFamilyPatchIsRejectedWithoutNewAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := sop.NewModelFamilyService(db)
-	family, err := service.Create(t.Context(), sop.CreateModelFamilyInput{Brand: "CargoFlow", NameZH: "归档测试", NameEN: "Archive test", ModelCode: "MODEL-ARCHIVE-HTTP", CommonStructure: []byte(`{"schema":"model_family_common_structure_v1","invariants":["housing"]}`), VariationDimensions: []string{"color"}, CreatedByID: admin.ID})
+	family, err := service.Create(t.Context(), sop.CreateModelFamilyInput{Brand: "CargoFlows", NameZH: "归档测试", NameEN: "Archive test", ModelCode: "MODEL-ARCHIVE-HTTP", CommonStructure: []byte(`{"schema":"model_family_common_structure_v1","invariants":["housing"]}`), VariationDimensions: []string{"color"}, CreatedByID: admin.ID})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/models"
 )
 
 func TestSOPServiceCreateRejectsMissingCategoryWithoutWrites(t *testing.T) {

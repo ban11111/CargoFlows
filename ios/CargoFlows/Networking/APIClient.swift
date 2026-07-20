@@ -36,7 +36,7 @@ final class APIClient {
     }
 
     private static func configuredBaseURL(bundle: Bundle = .main) -> URL {
-        if let configuredValue = bundle.object(forInfoDictionaryKey: "CargoFlowAPIBaseURL") as? String {
+        if let configuredValue = bundle.object(forInfoDictionaryKey: "CargoFlowsAPIBaseURL") as? String {
             let normalizedValue = configuredValue.hasSuffix("/") ? configuredValue : "\(configuredValue)/"
             if let configuredURL = URL(string: normalizedValue),
                let scheme = configuredURL.scheme,

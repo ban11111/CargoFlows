@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"cargoflow/api/internal/models"
-	"cargoflow/api/internal/sop"
+	"cargoflows/api/internal/models"
+	"cargoflows/api/internal/sop"
 )
 
 func TestModelFamilyRoutesEnforceRolesAndExposeOnlyPublicIDs(t *testing.T) {
@@ -37,7 +37,7 @@ func TestModelFamilyRoutesEnforceRolesAndExposeOnlyPublicIDs(t *testing.T) {
 	defer viewerServer.Close()
 	photographerServer, photographerToken := authenticatedSOPRouter(t, db, photographer)
 	defer photographerServer.Close()
-	body := `{"brand":"CargoFlow","name_zh":"测试型号","name_en":"Test model","model_code":"HTTP-MODEL","common_structure":{"schema":"model_family_common_structure_v1","invariants":["housing"]},"variation_dimensions":["color"]}`
+	body := `{"brand":"CargoFlows","name_zh":"测试型号","name_en":"Test model","model_code":"HTTP-MODEL","common_structure":{"schema":"model_family_common_structure_v1","invariants":["housing"]},"variation_dimensions":["color"]}`
 	for _, token := range []string{viewerToken, photographerToken, operatorToken} {
 		response := sopRequest(t, server, token, http.MethodPost, "/api/v1/model-families", body)
 		defer response.Body.Close()
@@ -122,7 +122,7 @@ func TestVariantIdentityRoutesEnforceMutationRolesAndPublishReadOnlyFacts(t *tes
 	if err := db.Create(&target).Error; err != nil {
 		t.Fatal(err)
 	}
-	family, err := sop.NewModelFamilyService(db).Create(t.Context(), sop.CreateModelFamilyInput{Brand: "CargoFlow", NameZH: "同款", NameEN: "Same", ModelCode: "VARIANT-HTTP", CommonStructure: json.RawMessage(`{"schema":"model_family_common_structure_v1","invariants":["housing"]}`), VariationDimensions: []string{"color"}, CreatedByID: admin.ID})
+	family, err := sop.NewModelFamilyService(db).Create(t.Context(), sop.CreateModelFamilyInput{Brand: "CargoFlows", NameZH: "同款", NameEN: "Same", ModelCode: "VARIANT-HTTP", CommonStructure: json.RawMessage(`{"schema":"model_family_common_structure_v1","invariants":["housing"]}`), VariationDimensions: []string{"color"}, CreatedByID: admin.ID})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -85,7 +85,7 @@ export default function SkusPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">CargoFlow · Catalog</p><h1 className="text-3xl font-bold tracking-tight text-navy sm:text-4xl">{t("skuManage")}</h1><p className="mt-2 text-sm text-muted-foreground">{t("skuManageDesc")}</p></div>
+        <div><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">CargoFlows · Catalog</p><h1 className="text-3xl font-bold tracking-tight text-navy sm:text-4xl">{t("skuManage")}</h1><p className="mt-2 text-sm text-muted-foreground">{t("skuManageDesc")}</p></div>
         <Button asChild className="min-h-11"><Link href="/skus/new"><Plus className="h-4 w-4" />{t("newSku")}</Link></Button>
       </div>
       <div className="grid gap-3 md:grid-cols-3">

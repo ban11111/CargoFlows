@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"cargoflow/api/internal/ai"
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/ai"
+	"cargoflows/api/internal/models"
 )
 
 type openAISettingRequest struct {

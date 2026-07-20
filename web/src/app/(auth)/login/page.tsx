@@ -17,7 +17,7 @@ export default function LoginPage() {
           <div className="mb-12 flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-navy text-white"><Ship className="h-5 w-5" /></span>
-              <div><p className="font-bold tracking-tight">CargoFlow</p><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">Operations deck</p></div>
+              <div><p className="font-bold tracking-tight">CargoFlows</p><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">Operations deck</p></div>
             </div>
             <LanguageToggle />
           </div>
@@ -30,7 +30,7 @@ export default function LoginPage() {
               <LoginForm />
             </Suspense>
           </div>
-          <p className="mt-10 text-xs text-muted-foreground">© 2026 CargoFlow · {zh ? "为运营团队而设计" : "Built for operations teams"}</p>
+          <p className="mt-10 text-xs text-muted-foreground">© 2026 CargoFlows · {zh ? "为运营团队而设计" : "Built for operations teams"}</p>
         </div>
       </section>
 

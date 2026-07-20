@@ -58,11 +58,11 @@
 
 ### iOS
 
-- `ios/CargoFlow/Models/DTOs.swift`: UUID SOP/version/View/session DTOs and localized helpers.
-- `ios/CargoFlow/Networking/APIClient.swift`: published-version and UUID upload requests.
-- `ios/CargoFlow/Views/SOPCaptureView.swift`: version selection and exact View checklist.
-- `ios/CargoFlow/App/LanguageStore.swift`: bilingual SOP-selection and validation labels.
-- `ios/CargoFlowTests/SOPDTOTests.swift`: decoding and localization tests.
+- `ios/CargoFlows/Models/DTOs.swift`: UUID SOP/version/View/session DTOs and localized helpers.
+- `ios/CargoFlows/Networking/APIClient.swift`: published-version and UUID upload requests.
+- `ios/CargoFlows/Views/SOPCaptureView.swift`: version selection and exact View checklist.
+- `ios/CargoFlows/App/LanguageStore.swift`: bilingual SOP-selection and validation labels.
+- `ios/CargoFlowsTests/SOPDTOTests.swift`: decoding and localization tests.
 - `ios/project.yml`: add the XCTest target.
 
 ---
@@ -223,8 +223,8 @@ package app
 
 import (
     "testing"
-    "cargoflow/api/internal/database"
-    "cargoflow/api/internal/models"
+    "cargoflows/api/internal/database"
+    "cargoflows/api/internal/models"
     "gorm.io/driver/sqlite"
     "gorm.io/gorm"
 )
@@ -957,10 +957,10 @@ git commit -m "feat(web): add versioned SOP editor"
 ### Task 9: iOS UUID DTOs and API Client
 
 **Files:**
-- Modify: `ios/CargoFlow/Models/DTOs.swift`
-- Modify: `ios/CargoFlow/Networking/APIClient.swift`
+- Modify: `ios/CargoFlows/Models/DTOs.swift`
+- Modify: `ios/CargoFlows/Networking/APIClient.swift`
 - Modify: `ios/project.yml`
-- Create: `ios/CargoFlowTests/SOPDTOTests.swift`
+- Create: `ios/CargoFlowsTests/SOPDTOTests.swift`
 
 **Interfaces:**
 - Produces: `CaptureSOPSummary`, `SOPVersion`, `SOPView`, `LocalizedText`, `Vector3DTO`, `CompositionDTO`
@@ -972,29 +972,29 @@ git commit -m "feat(web): add versioned SOP editor"
 Add this target to `project.yml`:
 
 ```yaml
-  CargoFlowTests:
+  CargoFlowsTests:
     type: bundle.unit-test
     platform: iOS
     sources:
-      - CargoFlowTests
+      - CargoFlowsTests
     dependencies:
-      - target: CargoFlow
+      - target: CargoFlows
 
 schemes:
-  CargoFlow:
+  CargoFlows:
     build:
       targets:
-        CargoFlow: all
+        CargoFlows: all
     test:
       targets:
-        - CargoFlowTests
+        - CargoFlowsTests
 ```
 
 Write:
 
 ```swift
 import XCTest
-@testable import CargoFlow
+@testable import CargoFlows
 
 final class SOPDTOTests: XCTestCase {
     func testDecodesPackagingFrontAndLocalizesName() throws {
@@ -1009,7 +1009,7 @@ final class SOPDTOTests: XCTestCase {
 
 - [ ] **Step 2: Generate the test project and confirm failure**
 
-Run: `cd ios && xcodegen generate && xcodebuild -project CargoFlow.xcodeproj -scheme CargoFlow -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 16' test`
+Run: `cd ios && xcodegen generate && xcodebuild -project CargoFlows.xcodeproj -scheme CargoFlows -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 16' test`
 
 Expected: FAIL because the new DTO shape does not exist.
 
@@ -1060,23 +1060,23 @@ Percent-encode path UUIDs and send `sop_version_id`, `sop_view_id`, and `photo_s
 
 - [ ] **Step 5: Run iOS tests**
 
-Run: `cd ios && xcodegen generate && xcodebuild -project CargoFlow.xcodeproj -scheme CargoFlow -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 16' test`
+Run: `cd ios && xcodegen generate && xcodebuild -project CargoFlows.xcodeproj -scheme CargoFlows -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 16' test`
 
 Expected: PASS. If the installed simulator has a different model, run `xcrun simctl list devices available` and use one available iOS 17+ simulator; record the exact chosen destination in the task log.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add ios/CargoFlow/Models/DTOs.swift ios/CargoFlow/Networking/APIClient.swift ios/CargoFlowTests/SOPDTOTests.swift ios/project.yml ios/CargoFlow.xcodeproj/project.pbxproj
+git add ios/CargoFlows/Models/DTOs.swift ios/CargoFlows/Networking/APIClient.swift ios/CargoFlowsTests/SOPDTOTests.swift ios/project.yml ios/CargoFlows.xcodeproj/project.pbxproj
 git commit -m "feat(ios): adopt versioned SOP contracts"
 ```
 
 ### Task 10: iOS Published-Version Capture Flow
 
 **Files:**
-- Modify: `ios/CargoFlow/Views/SOPCaptureView.swift`
-- Modify: `ios/CargoFlow/App/LanguageStore.swift`
-- Create: `ios/CargoFlowTests/SOPCaptureLogicTests.swift`
+- Modify: `ios/CargoFlows/Views/SOPCaptureView.swift`
+- Modify: `ios/CargoFlows/App/LanguageStore.swift`
+- Create: `ios/CargoFlowsTests/SOPCaptureLogicTests.swift`
 
 **Interfaces:**
 - Consumes: published summaries/version details and UUID session/upload methods
@@ -1099,7 +1099,7 @@ final class SOPCaptureLogicTests: XCTestCase {
 
 - [ ] **Step 2: Run and confirm helper failure**
 
-Run the same `xcodebuild ... -scheme CargoFlowTests ... test` command from Task 9.
+Run the same `xcodebuild ... -scheme CargoFlowsTests ... test` command from Task 9.
 
 Expected: FAIL because `requiredViewsComplete` is missing.
 
@@ -1115,18 +1115,18 @@ Add matching Chinese/English keys for SOP selection, version number, no publishe
 
 - [ ] **Step 5: Run iOS tests and build**
 
-Run: `cd ios && xcodegen generate && xcodebuild -project CargoFlow.xcodeproj -scheme CargoFlowTests -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 16' test`
+Run: `cd ios && xcodegen generate && xcodebuild -project CargoFlows.xcodeproj -scheme CargoFlowsTests -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 16' test`
 
 Expected: PASS.
 
-Run: `cd ios && xcodebuild -project CargoFlow.xcodeproj -scheme CargoFlow -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' build`
+Run: `cd ios && xcodebuild -project CargoFlows.xcodeproj -scheme CargoFlows -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' build`
 
 Expected: `BUILD SUCCEEDED`.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add ios/CargoFlow/Views/SOPCaptureView.swift ios/CargoFlow/App/LanguageStore.swift ios/CargoFlowTests/SOPCaptureLogicTests.swift ios/CargoFlow.xcodeproj/project.pbxproj
+git add ios/CargoFlows/Views/SOPCaptureView.swift ios/CargoFlows/App/LanguageStore.swift ios/CargoFlowsTests/SOPCaptureLogicTests.swift ios/CargoFlows.xcodeproj/project.pbxproj
 git commit -m "feat(ios): capture against published SOP versions"
 ```
 
@@ -1201,7 +1201,7 @@ Run: `git status --short`
 Expected: no whitespace errors; only planned files are changed.
 
 ```bash
-git add README.md api/openapi.yaml web/src/lib/openapi-types.ts ios/CargoFlow.xcodeproj/project.pbxproj
+git add README.md api/openapi.yaml web/src/lib/openapi-types.ts ios/CargoFlows.xcodeproj/project.pbxproj
 git commit -m "docs: document versioned capture SOP workflow"
 ```
 

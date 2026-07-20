@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"cargoflow/api/internal/ai"
-	"cargoflow/api/internal/models"
-	"cargoflow/api/internal/sop"
+	"cargoflows/api/internal/ai"
+	"cargoflows/api/internal/models"
+	"cargoflows/api/internal/sop"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"

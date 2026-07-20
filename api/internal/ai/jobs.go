@@ -12,13 +12,13 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/models"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-const ProductSnapshotSchemaV1 = "cargoflow_product_generation_v1"
+const ProductSnapshotSchemaV1 = "cargoflows_product_generation_v1"
 
 const (
 	AssetSourceProductVisual      = "product_visual"

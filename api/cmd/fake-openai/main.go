@@ -71,16 +71,16 @@ func (provider *fakeProvider) responses(response http.ResponseWriter, request *h
 	count := candidateCount(body.Text.Format.Schema)
 	var candidates []map[string]any
 	for index := 1; index <= count; index++ {
-		if body.Text.Format.Name == "cargoflow_product_title" {
+		if body.Text.Format.Name == "cargoflows_product_title" {
 			candidates = append(candidates, map[string]any{
-				"title":    fmt.Sprintf("CargoFlow 透明手机壳 CF-CASE-CLR-IP17 候选 %d", index),
+				"title":    fmt.Sprintf("CargoFlows 透明手机壳 CF-CASE-CLR-IP17 候选 %d", index),
 				"keywords": []string{"透明手机壳"}, "source_fields": []string{"product.name", "sku.code"},
 			})
 		} else {
 			candidates = append(candidates, map[string]any{
-				"short_description": "CargoFlow 透明手机壳，适用于 CF-CASE-CLR-IP17。",
+				"short_description": "CargoFlows 透明手机壳，适用于 CF-CASE-CLR-IP17。",
 				"selling_points":    []string{"透明外观", "对应指定 SKU"},
-				"long_description":  "CargoFlow 透明手机壳，商品编号 CF-CASE-CLR-IP17。内容仅依据已提供的商品资料生成。",
+				"long_description":  "CargoFlows 透明手机壳，商品编号 CF-CASE-CLR-IP17。内容仅依据已提供的商品资料生成。",
 				"search_keywords":   []string{"透明手机壳"}, "source_fields": []string{"product.name", "sku.code"},
 			})
 		}

@@ -4,8 +4,8 @@ import (
 	"sort"
 	"time"
 
-	"cargoflow/api/internal/models"
-	"cargoflow/api/internal/sop"
+	"cargoflows/api/internal/models"
+	"cargoflows/api/internal/sop"
 )
 
 type localizedTextDTO struct {

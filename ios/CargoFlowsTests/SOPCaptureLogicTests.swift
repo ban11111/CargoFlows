@@ -1,6 +1,6 @@
 import XCTest
 import UIKit
-@testable import CargoFlow
+@testable import CargoFlows
 
 @MainActor
 final class SOPCaptureLogicTests: XCTestCase {

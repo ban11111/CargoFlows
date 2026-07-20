@@ -3,7 +3,7 @@ package database
 import (
 	"testing"
 
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/models"
 )
 
 func TestMigrateCreatesAIImageHistoryTables(t *testing.T) {

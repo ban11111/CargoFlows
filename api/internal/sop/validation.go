@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/models"
 )
 
 type LocalizedMessage struct {

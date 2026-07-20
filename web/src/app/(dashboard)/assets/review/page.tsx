@@ -105,7 +105,7 @@ export default function AssetReviewPage() {
   return (
     <div className="space-y-6">
       <div>
-        <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">CargoFlow · Quality gate</p>
+        <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">CargoFlows · Quality gate</p>
         <h1 className="text-3xl font-bold tracking-tight text-navy sm:text-4xl">{t("assetReview")}</h1>
         <p className="mt-2 text-sm text-muted-foreground">{t("categoryHierarchyDesc")}</p>
       </div>

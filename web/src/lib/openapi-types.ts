@@ -1327,7 +1327,7 @@ export interface components {
             /** @enum {string} */
             status: "queued" | "running" | "partial" | "completed" | "failed" | "cancelled";
             /** @enum {string} */
-            snapshot_schema: "cargoflow_product_generation_v1";
+            snapshot_schema: "cargoflows_product_generation_v1";
             input_snapshot: components["schemas"]["ProductSnapshotV1"];
             /** Format: date-time */
             started_at: string | null;
@@ -1586,7 +1586,7 @@ export interface components {
         };
         ProductSnapshotV1: {
             /** @enum {string} */
-            schema: "cargoflow_product_generation_v1";
+            schema: "cargoflows_product_generation_v1";
             locale: string;
             target_platform: string;
             product: components["schemas"]["AISnapshotProduct"];

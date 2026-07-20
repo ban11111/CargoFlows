@@ -3,8 +3,8 @@ package app
 import (
 	"testing"
 
-	"cargoflow/api/internal/database"
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/database"
+	"cargoflows/api/internal/models"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )

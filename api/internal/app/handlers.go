@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"cargoflow/api/internal/ai"
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/ai"
+	"cargoflows/api/internal/models"
 	"github.com/gin-gonic/gin"
 	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/golang-jwt/jwt/v5"

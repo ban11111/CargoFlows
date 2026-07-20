@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/models"
 )
 
 func responsesImageRequest(t *testing.T, operation models.AIExecutionOperation) ImageRequest {

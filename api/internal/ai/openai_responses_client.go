@@ -15,7 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/models"
 )
 
 const maxResponsesBodyBytes = 4 << 20
@@ -268,12 +268,12 @@ func validateTextCandidates(outputJSON []byte, prompt CompiledTextPrompt) error 
 	}
 	for _, raw := range *envelope.Candidates {
 		switch prompt.SchemaName {
-		case "cargoflow_product_title":
+		case "cargoflows_product_title":
 			var candidate titleTextCandidate
 			if strictJSONDecode(raw, &candidate) != nil || candidate.Title == nil || candidate.Keywords == nil || candidate.SourceFields == nil || !withinTextBounds(*candidate.Title, bounds["title"]) || !validateTitleCandidateRules(candidate, rules, requiredValues) {
 				return ErrTextProviderInvalidResponse
 			}
-		case "cargoflow_product_seo":
+		case "cargoflows_product_seo":
 			var candidate seoTextCandidate
 			if strictJSONDecode(raw, &candidate) != nil || candidate.ShortDescription == nil || candidate.SellingPoints == nil || candidate.LongDescription == nil || candidate.SearchKeywords == nil || candidate.SourceFields == nil ||
 				!withinTextBounds(*candidate.ShortDescription, bounds["short_description"]) || !withinTextBounds(*candidate.LongDescription, bounds["long_description"]) || !validateSEOCandidateRules(candidate, rules, requiredValues) {
@@ -298,7 +298,7 @@ func textPromptValidationRules(prompt CompiledTextPrompt) (textConstraintRules, 
 		return textConstraintRules{}, nil, err
 	}
 	kind := models.AIContentSlotSEODescription
-	if prompt.SchemaName == "cargoflow_product_title" {
+	if prompt.SchemaName == "cargoflows_product_title" {
 		kind = models.AIContentSlotTitle
 	}
 	rules, err := parseTextConstraintRules(input.Slot.Constraints, kind)

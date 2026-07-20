@@ -7,8 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"cargoflow/api/internal/config"
-	"cargoflow/api/internal/database"
+	"cargoflows/api/internal/config"
+	"cargoflows/api/internal/database"
 )
 
 func main() {

@@ -1,4 +1,4 @@
-module cargoflow/api
+module cargoflows/api
 
 go 1.25
 

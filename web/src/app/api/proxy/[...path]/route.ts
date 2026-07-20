@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { proxyUploadURL, publicRequestOrigin } from "@/lib/storage-upload";
 
 const API_BASE_URL = process.env.API_BASE_URL ?? "http://localhost:8080";
-const MINIO_SOURCE_BUCKET = process.env.MINIO_SOURCE_BUCKET ?? "cargoflow";
+const MINIO_SOURCE_BUCKET = process.env.MINIO_SOURCE_BUCKET ?? "cargoflows";
 
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params;

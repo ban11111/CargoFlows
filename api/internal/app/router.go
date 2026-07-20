@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"cargoflow/api/internal/ai"
-	"cargoflow/api/internal/config"
-	"cargoflow/api/internal/models"
-	"cargoflow/api/internal/secrets"
+	"cargoflows/api/internal/ai"
+	"cargoflows/api/internal/config"
+	"cargoflows/api/internal/models"
+	"cargoflows/api/internal/secrets"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"gorm.io/gorm"
@@ -202,7 +202,7 @@ func newAIDependencies(cfg config.Config, db *gorm.DB) (AIDependencies, error) {
 	}
 	box, err := secrets.NewAESGCM(key)
 	if err != nil {
-		return AIDependencies{}, fmt.Errorf("configure CARGOFLOW_SECRETS_MASTER_KEY: %w", err)
+		return AIDependencies{}, fmt.Errorf("configure CARGOFLOWS_SECRETS_MASTER_KEY: %w", err)
 	}
 	deps.ProviderSettings = ai.NewProviderSettingsService(db, box, ai.NewHTTPProviderVerifier(cfg.OpenAIBaseURL, nil))
 	return deps, nil
@@ -212,16 +212,16 @@ func validateSecretsMasterKey(cfg config.Config) ([]byte, error) {
 	encoded := strings.TrimSpace(cfg.SecretsMasterKey)
 	if encoded == "" {
 		if cfg.AppEnv == "production" {
-			return nil, fmt.Errorf("CARGOFLOW_SECRETS_MASTER_KEY is required in production")
+			return nil, fmt.Errorf("CARGOFLOWS_SECRETS_MASTER_KEY is required in production")
 		}
 		return nil, nil
 	}
 	key, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		return nil, fmt.Errorf("decode CARGOFLOW_SECRETS_MASTER_KEY: %w", err)
+		return nil, fmt.Errorf("decode CARGOFLOWS_SECRETS_MASTER_KEY: %w", err)
 	}
 	if len(key) != 32 {
-		return nil, fmt.Errorf("CARGOFLOW_SECRETS_MASTER_KEY must decode to 32 bytes")
+		return nil, fmt.Errorf("CARGOFLOWS_SECRETS_MASTER_KEY must decode to 32 bytes")
 	}
 	return key, nil
 }

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"cargoflow/api/internal/models"
-	"cargoflow/api/internal/sop"
+	"cargoflows/api/internal/models"
+	"cargoflows/api/internal/sop"
 	"gorm.io/gorm"
 )
 

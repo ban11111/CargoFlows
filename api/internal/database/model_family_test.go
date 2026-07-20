@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/models"
 )
 
 func TestMigrateCreatesModelFamilyIdentityTables(t *testing.T) {

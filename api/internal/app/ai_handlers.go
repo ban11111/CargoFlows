@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"cargoflow/api/internal/ai"
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/ai"
+	"cargoflows/api/internal/models"
 	"github.com/gin-gonic/gin"
 )
 

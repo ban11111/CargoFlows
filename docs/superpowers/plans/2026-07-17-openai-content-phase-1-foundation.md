@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the secure, versioned, asynchronous foundation for CargoFlow's Web-only OpenAI content workflow, ending with an auditable dry-run job that never sends product content to OpenAI.
+**Goal:** Build the secure, versioned, asynchronous foundation for CargoFlows's Web-only OpenAI content workflow, ending with an auditable dry-run job that never sends product content to OpenAI.
 
 **Architecture:** Extend the existing Go modular monolith with focused `secrets` and `ai` packages, admin-only HTTP handlers, GORM models, and a separate MySQL-leasing worker command. Extend the Next.js admin with credential, template, and dry-run job screens; all endpoints remain behind the existing Web BFF and bearer authorization.
 
@@ -14,7 +14,7 @@
 
 - The system uses one shared OpenAI Project API key; only `admin` may configure, validate, rotate, or disable it.
 - Never return or log API-key plaintext, ciphertext, nonce, bearer authorization, signed MinIO URLs, or storage credentials.
-- Encrypt the API key with AES-256-GCM using a 32-byte master key decoded from `CARGOFLOW_SECRETS_MASTER_KEY`; do not provide a production default.
+- Encrypt the API key with AES-256-GCM using a 32-byte master key decoded from `CARGOFLOWS_SECRETS_MASTER_KEY`; do not provide a production default.
 - Templates are bilingual, versioned, and immutable after publication; jobs bind only to published versions.
 - A job represents one exact SKU and only user-selected slots.
 - Phase 1 performs dry-run execution only: it snapshots and audits inputs but does not upload images or send product content to OpenAI.
@@ -180,7 +180,7 @@ git commit -m "feat(api): add authenticated secret encryption"
 
 ```go
 func TestLoadReadsAIConfiguration(t *testing.T) {
-	t.Setenv("CARGOFLOW_SECRETS_MASTER_KEY", "c2VjcmV0c2VjcmV0c2VjcmV0c2VjcmV0MTIzNDU2Nzg=")
+	t.Setenv("CARGOFLOWS_SECRETS_MASTER_KEY", "c2VjcmV0c2VjcmV0c2VjcmV0c2VjcmV0MTIzNDU2Nzg=")
 	t.Setenv("OPENAI_BASE_URL", "https://example.test/v1")
 	t.Setenv("AI_WORKER_DRY_RUN", "true")
 	cfg := Load()
@@ -237,7 +237,7 @@ Also define `AIContentTemplate`, `AIContentTemplateVersion`, `AIContentSlot`, re
 - [ ] **Step 4: Load safe defaults and register every model in `Migrate`**
 
 ```go
-SecretsMasterKey: getEnv("CARGOFLOW_SECRETS_MASTER_KEY", ""),
+SecretsMasterKey: getEnv("CARGOFLOWS_SECRETS_MASTER_KEY", ""),
 OpenAIBaseURL: getEnv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
 AIWorkerDryRun: getEnv("AI_WORKER_DRY_RUN", "false") == "true",
 AIWorkerPollInterval: getDurationEnv("AI_WORKER_POLL_INTERVAL", time.Second),

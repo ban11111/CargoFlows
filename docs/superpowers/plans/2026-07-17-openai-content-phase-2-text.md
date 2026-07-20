@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Upgrade CargoFlow from the Phase 1 dry-run foundation to safe, auditable OpenAI Responses API generation of title and SEO candidates that users can edit, approve, and explicitly apply.
+**Goal:** Upgrade CargoFlows from the Phase 1 dry-run foundation to safe, auditable OpenAI Responses API generation of title and SEO candidates that users can edit, approve, and explicitly apply.
 
 **Architecture:** A one-shot migrator exclusively owns schema changes before API and worker startup. The worker compiles immutable L0-L4 prompts from the existing job snapshot, decrypts the shared key only immediately before a provider call, invokes a provider-neutral Responses client, and atomically stores executions, candidates, usage, and audit data. Generated candidates never overwrite SKU content; authenticated Web actions edit, approve, and apply a candidate into versioned platform content.
 
@@ -12,7 +12,7 @@
 
 - Web only; do not change iOS files.
 - Never use, persist, log, or test with the API key disclosed in chat. Real-provider smoke tests require a newly rotated key supplied through the admin UI or a local ignored environment variable.
-- One shared Project API key remains administrator-only and encrypted with `CARGOFLOW_SECRETS_MASTER_KEY`.
+- One shared Project API key remains administrator-only and encrypted with `CARGOFLOWS_SECRETS_MASTER_KEY`.
 - Default text model is configurable and starts at `gpt-5.6-terra`; reasoning effort is explicit `low`; Responses requests use `store=false`.
 - Model-generated facts are untrusted. The server enforces structured schemas, length limits, forbidden terms, and candidate counts independently.
 - No candidate automatically updates SKU or platform content. Application is an explicit audited action.
@@ -34,7 +34,7 @@
 - Modify: `README.md`
 
 **Interfaces:**
-- Produces: `database.Migrate(ctx context.Context, db *gorm.DB) error` and a one-shot `cargoflow-migrate` command.
+- Produces: `database.Migrate(ctx context.Context, db *gorm.DB) error` and a one-shot `cargoflows-migrate` command.
 - Guarantees: API and worker never run migrations; Compose does not start either until the migrator exits successfully.
 
 - [ ] **Step 1: Write failing identity and ownership tests**
@@ -49,7 +49,7 @@ Expected: FAIL because legacy SOP rows cannot receive the unique index and both 
 
 - [ ] **Step 3: Implement staged backfill and migrator ownership**
 
-Before `AutoMigrate`, inspect existing public-identity tables (`capture_sops`, `sop_versions`, `sop_views`, `sop_view_reference_images`, `photo_sessions`) and backfill null/empty IDs row-by-row with `uuid.NewString()`. On MySQL, hold `GET_LOCK('cargoflow_schema_migrate', 60)` through migration and always release it. Move migration calls into `cmd/migrate`; update Compose to run that command once and gate API/worker startup. Document `go run ./cmd/migrate` before local API/worker startup.
+Before `AutoMigrate`, inspect existing public-identity tables (`capture_sops`, `sop_versions`, `sop_views`, `sop_view_reference_images`, `photo_sessions`) and backfill null/empty IDs row-by-row with `uuid.NewString()`. On MySQL, hold `GET_LOCK('cargoflows_schema_migrate', 60)` through migration and always release it. Move migration calls into `cmd/migrate`; update Compose to run that command once and gate API/worker startup. Document `go run ./cmd/migrate` before local API/worker startup.
 
 - [ ] **Step 4: Run GREEN and existing migration tests**
 

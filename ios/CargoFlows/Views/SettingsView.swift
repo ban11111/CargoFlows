@@ -11,7 +11,7 @@ struct SettingsView: View {
                     HStack(spacing: 14) {
                         CargoBrandMark()
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("CargoFlow").font(.headline)
+                            Text("CargoFlows").font(.headline)
                             Label(language.t("connection.ready"), systemImage: "checkmark.circle.fill")
                                 .font(.caption)
                                 .foregroundStyle(.green)

@@ -8,7 +8,7 @@
 
 ## 1. Purpose
 
-CargoFlow needs a versioned, structured definition for product-photography SOPs. An SOP describes only the product images that a photographer must or may capture. It is not a general workflow engine and does not model cleaning, lighting setup, approval, quality review, or AI generation steps.
+CargoFlows needs a versioned, structured definition for product-photography SOPs. An SOP describes only the product images that a photographer must or may capture. It is not a general workflow engine and does not model cleaning, lighting setup, approval, quality review, or AI generation steps.
 
 The structured data must:
 

@@ -53,7 +53,7 @@ export default function AiJobsPage() {
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
         <div>
-          <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">CargoFlow · Automation</p>
+          <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">CargoFlows · Automation</p>
           <h1 className="text-3xl font-bold tracking-tight text-navy sm:text-4xl">{t("aiJobs")}</h1>
           <p className="mt-2 text-sm text-muted-foreground">{t("aiJobsDesc")}</p>
         </div>

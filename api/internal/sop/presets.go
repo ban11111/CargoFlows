@@ -1,6 +1,6 @@
 package sop
 
-import "cargoflow/api/internal/models"
+import "cargoflows/api/internal/models"
 
 type ViewInput struct {
 	Role           models.SOPViewRole

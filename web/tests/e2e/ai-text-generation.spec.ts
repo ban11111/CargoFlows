@@ -4,7 +4,7 @@ const fakeProviderURL = process.env.FAKE_OPENAI_TEST_URL ?? "http://127.0.0.1:80
 
 async function loginAsAdmin(page: Page) {
   await page.goto("/login");
-  await page.getByLabel("邮箱").fill("admin@cargoflow.local");
+  await page.getByLabel("邮箱").fill("admin@cargoflows.cc");
   await page.getByLabel("密码").fill("password123");
   await page.getByRole("button", { name: "登录" }).click();
   await expect(page).toHaveURL(/\/skus$/);
@@ -52,8 +52,8 @@ test("real API and worker complete fake-provider title review and application", 
 
   await expect(page).toHaveURL(/\/ai-jobs\/[0-9a-f-]+$/);
   const title = page.getByLabel("商品标题");
-  await expect(title).toHaveValue(/CargoFlow 透明手机壳 CF-CASE-CLR-IP17/, { timeout: 45_000 });
-  await title.fill("CargoFlow 超薄透明手机壳 CF-CASE-CLR-IP17");
+  await expect(title).toHaveValue(/CargoFlows 透明手机壳 CF-CASE-CLR-IP17/, { timeout: 45_000 });
+  await title.fill("CargoFlows 超薄透明手机壳 CF-CASE-CLR-IP17");
   const editResponsePromise = page.waitForResponse((response) => response.request().method() === "PATCH" && response.url().includes("/text-results/"));
   await page.getByRole("button", { name: "保存编辑" }).click();
   const editResponse = await editResponsePromise;
@@ -69,6 +69,6 @@ test("real API and worker complete fake-provider title review and application", 
   expect(providerAudit.ok()).toBe(true);
   const audit = await providerAudit.json() as { data: Array<{ path: string; store: boolean; metadata: Record<string, string>; schema_name: string; contains_forbidden: boolean }> };
   expect(audit.data).toHaveLength(1);
-  expect(audit.data[0]).toMatchObject({ path: "/v1/responses", store: false, schema_name: "cargoflow_product_title", contains_forbidden: false });
+  expect(audit.data[0]).toMatchObject({ path: "/v1/responses", store: false, schema_name: "cargoflows_product_title", contains_forbidden: false });
   expect(Object.keys(audit.data[0].metadata).sort()).toEqual(["execution_id", "job_id", "job_item_id"]);
 });

@@ -37,8 +37,8 @@ xcodegen generate
 project_setting() {
   local setting="$1"
   xcodebuild \
-    -project CargoFlow.xcodeproj \
-    -scheme CargoFlow \
+    -project CargoFlows.xcodeproj \
+    -scheme CargoFlows \
     -configuration Release \
     -showBuildSettings 2>/dev/null | awk -v setting="$setting" '$1 == setting && $2 == "=" { print $3; exit }'
 }
@@ -54,8 +54,8 @@ require_distribution_prerequisites() {
     exit 1
   fi
 
-  if [[ ! -d "$IOS_DIR/CargoFlow/Assets.xcassets/AppIcon.appiconset" ]]; then
-    print -u2 "Missing CargoFlow/Assets.xcassets/AppIcon.appiconset. Add a 1024x1024 App Store icon before distribution."
+  if [[ ! -d "$IOS_DIR/CargoFlows/Assets.xcassets/AppIcon.appiconset" ]]; then
+    print -u2 "Missing CargoFlows/Assets.xcassets/AppIcon.appiconset. Add a 1024x1024 App Store icon before distribution."
     exit 1
   fi
 
@@ -69,12 +69,12 @@ require_distribution_prerequisites() {
 case "$MODE" in
   simulator)
     DERIVED_DATA="$BUILD_ROOT/DerivedData-Simulator"
-    APP_PATH="$DERIVED_DATA/Build/Products/Release-iphonesimulator/CargoFlow.app"
-    OUTPUT_PATH="$DOWNLOAD_DIR/CargoFlow-iOS-Simulator.zip"
+    APP_PATH="$DERIVED_DATA/Build/Products/Release-iphonesimulator/CargoFlows.app"
+    OUTPUT_PATH="$DOWNLOAD_DIR/CargoFlows-iOS-Simulator.zip"
 
     xcodebuild \
-      -project CargoFlow.xcodeproj \
-      -scheme CargoFlow \
+      -project CargoFlows.xcodeproj \
+      -scheme CargoFlows \
       -configuration Release \
       -sdk iphonesimulator \
       -destination "generic/platform=iOS Simulator" \
@@ -83,7 +83,7 @@ case "$MODE" in
       build
 
     if [[ ! -d "$APP_PATH" ]]; then
-      print -u2 "Build completed, but CargoFlow.app was not found at $APP_PATH"
+      print -u2 "Build completed, but CargoFlows.app was not found at $APP_PATH"
       exit 1
     fi
 
@@ -95,17 +95,17 @@ case "$MODE" in
 
   archive)
     require_distribution_prerequisites
-    PROJECT_TEAM_ID="${CARGOFLOW_DEVELOPMENT_TEAM:-$(xcodebuild -project CargoFlow.xcodeproj -scheme CargoFlow -configuration Release -showBuildSettings 2>/dev/null | awk '/DEVELOPMENT_TEAM =/ { print $3; exit }')}"
+    PROJECT_TEAM_ID="${CARGOFLOWS_DEVELOPMENT_TEAM:-$(xcodebuild -project CargoFlows.xcodeproj -scheme CargoFlows -configuration Release -showBuildSettings 2>/dev/null | awk '/DEVELOPMENT_TEAM =/ { print $3; exit }')}"
     if [[ -z "$PROJECT_TEAM_ID" ]]; then
-      print -u2 "Set DEVELOPMENT_TEAM in ios/project.yml or CARGOFLOW_DEVELOPMENT_TEAM before creating an IPA."
+      print -u2 "Set DEVELOPMENT_TEAM in ios/project.yml or CARGOFLOWS_DEVELOPMENT_TEAM before creating an IPA."
       exit 1
     fi
 
-    ARCHIVE_PATH="$BUILD_ROOT/CargoFlow.xcarchive"
+    ARCHIVE_PATH="$BUILD_ROOT/CargoFlows.xcarchive"
     EXPORT_PATH="$BUILD_ROOT/Export"
     EXPORT_OPTIONS="$BUILD_ROOT/ExportOptions.plist"
-    OUTPUT_PATH="$DOWNLOAD_DIR/CargoFlow.ipa"
-    EXPORT_METHOD="${CARGOFLOW_EXPORT_METHOD:-debugging}"
+    OUTPUT_PATH="$DOWNLOAD_DIR/CargoFlows.ipa"
+    EXPORT_METHOD="${CARGOFLOWS_EXPORT_METHOD:-debugging}"
 
     plutil -create xml1 "$EXPORT_OPTIONS"
     plutil -insert method -string "$EXPORT_METHOD" "$EXPORT_OPTIONS"
@@ -114,8 +114,8 @@ case "$MODE" in
     plutil -insert destination -string export "$EXPORT_OPTIONS"
 
     xcodebuild \
-      -project CargoFlow.xcodeproj \
-      -scheme CargoFlow \
+      -project CargoFlows.xcodeproj \
+      -scheme CargoFlows \
       -configuration Release \
       -destination "generic/platform=iOS" \
       -archivePath "$ARCHIVE_PATH" \
@@ -144,13 +144,13 @@ case "$MODE" in
 
   testflight)
     require_distribution_prerequisites
-    PROJECT_TEAM_ID="${CARGOFLOW_DEVELOPMENT_TEAM:-$(project_setting DEVELOPMENT_TEAM)}"
+    PROJECT_TEAM_ID="${CARGOFLOWS_DEVELOPMENT_TEAM:-$(project_setting DEVELOPMENT_TEAM)}"
     if [[ -z "$PROJECT_TEAM_ID" ]]; then
-      print -u2 "Set DEVELOPMENT_TEAM in ios/project.yml or CARGOFLOW_DEVELOPMENT_TEAM before uploading to TestFlight."
+      print -u2 "Set DEVELOPMENT_TEAM in ios/project.yml or CARGOFLOWS_DEVELOPMENT_TEAM before uploading to TestFlight."
       exit 1
     fi
 
-    ARCHIVE_PATH="$BUILD_ROOT/CargoFlow-TestFlight.xcarchive"
+    ARCHIVE_PATH="$BUILD_ROOT/CargoFlows-TestFlight.xcarchive"
     EXPORT_PATH="$BUILD_ROOT/TestFlightUpload"
     EXPORT_OPTIONS="$BUILD_ROOT/TestFlightExportOptions.plist"
 
@@ -163,8 +163,8 @@ case "$MODE" in
     plutil -insert uploadSymbols -bool YES "$EXPORT_OPTIONS"
 
     xcodebuild \
-      -project CargoFlow.xcodeproj \
-      -scheme CargoFlow \
+      -project CargoFlows.xcodeproj \
+      -scheme CargoFlows \
       -configuration Release \
       -destination "generic/platform=iOS" \
       -archivePath "$ARCHIVE_PATH" \
@@ -180,7 +180,7 @@ case "$MODE" in
       -exportOptionsPlist "$EXPORT_OPTIONS" \
       -allowProvisioningUpdates
 
-    print "Uploaded CargoFlow to App Store Connect. Wait for processing, then open the TestFlight tab."
+    print "Uploaded CargoFlows to App Store Connect. Wait for processing, then open the TestFlight tab."
     ;;
 
   *)

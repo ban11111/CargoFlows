@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 async function loginAsAdmin(page: Page) {
   await page.goto("/login");
-  await page.getByLabel("邮箱").fill("admin@cargoflow.local");
+  await page.getByLabel("邮箱").fill("admin@cargoflows.cc");
   await page.getByLabel("密码").fill("password123");
   await page.getByRole("button", { name: "登录" }).click();
   await expect(page).toHaveURL(/\/skus$/);

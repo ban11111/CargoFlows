@@ -3,7 +3,7 @@ package sop
 import (
 	"testing"
 
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/models"
 )
 
 func TestPresetCatalog(t *testing.T) {

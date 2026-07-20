@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: CargoFlow API
+  title: CargoFlows API
   version: 1.0.0
 servers:
   - url: /api/v1
@@ -1241,7 +1241,7 @@ components:
         target_platform: { type: string }
         locale: { type: string }
         status: { type: string, enum: [queued, running, partial, completed, failed, cancelled] }
-        snapshot_schema: { type: string, enum: [cargoflow_product_generation_v1] }
+        snapshot_schema: { type: string, enum: [cargoflows_product_generation_v1] }
         input_snapshot: { $ref: '#/components/schemas/ProductSnapshotV1' }
         started_at: { type: string, format: date-time, nullable: true }
         completed_at: { type: string, format: date-time, nullable: true }
@@ -1486,7 +1486,7 @@ components:
       additionalProperties: false
       required: [schema, locale, target_platform, product, sku, sop, template, selected_assets, user_preference, generation_overrides]
       properties:
-        schema: { type: string, enum: [cargoflow_product_generation_v1] }
+        schema: { type: string, enum: [cargoflows_product_generation_v1] }
         locale: { type: string }
         target_platform: { type: string }
         product: { $ref: '#/components/schemas/AISnapshotProduct' }

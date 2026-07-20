@@ -1,9 +1,9 @@
 import XCTest
-@testable import CargoFlow
+@testable import CargoFlows
 
 final class SOPDTOTests: XCTestCase {
     func testDecodesCurrentPublicSKUPayload() throws {
-        let data = Data(#"{"public_id":"11111111-1111-1111-1111-111111111111","code":"CF-001","color":"Navy","size":"M","barcode":"123","stock":8,"low_stock_threshold":3,"platform_title":"CargoFlow Case","selling_points":"Durable","status":"active","created_at":"2026-07-16T00:00:00Z","updated_at":"2026-07-16T00:00:00Z","product":{"category_id":42,"name":"Travel Case","brand":"CargoFlow","category":"Cases","description":"A case","category_record":{"id":42,"name":"箱包","name_en":"Cases","is_system":true,"created_at":"2026-07-16T00:00:00Z","updated_at":"2026-07-16T00:00:00Z"}},"tags":[{"name":"featured"}]}"#.utf8)
+        let data = Data(#"{"public_id":"11111111-1111-1111-1111-111111111111","code":"CF-001","color":"Navy","size":"M","barcode":"123","stock":8,"low_stock_threshold":3,"platform_title":"CargoFlows Case","selling_points":"Durable","status":"active","created_at":"2026-07-16T00:00:00Z","updated_at":"2026-07-16T00:00:00Z","product":{"category_id":42,"name":"Travel Case","brand":"CargoFlows","category":"Cases","description":"A case","category_record":{"id":42,"name":"箱包","name_en":"Cases","is_system":true,"created_at":"2026-07-16T00:00:00Z","updated_at":"2026-07-16T00:00:00Z"}},"tags":[{"name":"featured"}]}"#.utf8)
 
         let sku = try JSONDecoder().decode(SKU.self, from: data)
 

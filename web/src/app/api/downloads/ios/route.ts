@@ -3,8 +3,8 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 
 const packages = [
-  { fileName: "CargoFlow.ipa", contentType: "application/octet-stream" },
-  { fileName: "CargoFlow-iOS-Simulator.zip", contentType: "application/zip" },
+  { fileName: "CargoFlows.ipa", contentType: "application/octet-stream" },
+  { fileName: "CargoFlows-iOS-Simulator.zip", contentType: "application/zip" },
 ] as const;
 
 export const dynamic = "force-dynamic";

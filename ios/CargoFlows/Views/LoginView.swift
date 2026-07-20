@@ -3,7 +3,7 @@ import SwiftUI
 struct LoginView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var language: LanguageStore
-    @State private var email = "admin@cargoflow.local"
+    @State private var email = "admin@cargoflows.cc"
     @State private var password = "password123"
     @State private var isSubmitting = false
 

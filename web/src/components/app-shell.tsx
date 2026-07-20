@@ -105,7 +105,7 @@ function Brand() {
         <Ship className="h-5 w-5" />
       </span>
       <span>
-        <span className="block text-[17px] font-bold tracking-tight text-white">CargoFlow</span>
+        <span className="block text-[17px] font-bold tracking-tight text-white">CargoFlows</span>
         <span className="block text-[10px] font-semibold uppercase tracking-[0.22em] text-white/45">Operations deck</span>
       </span>
     </Link>

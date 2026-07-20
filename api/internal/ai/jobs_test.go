@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/models"
 	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -46,7 +46,7 @@ func seedAIJobFixture(t *testing.T) (*gorm.DB, aiJobFixture) {
 	if err := db.Create(&category).Error; err != nil {
 		t.Fatal(err)
 	}
-	product := models.Product{CategoryID: category.ID, Name: "透明手机壳", Brand: "CargoFlow", Category: category.Name, Description: "轻薄透明保护壳"}
+	product := models.Product{CategoryID: category.ID, Name: "透明手机壳", Brand: "CargoFlows", Category: category.Name, Description: "轻薄透明保护壳"}
 	if err := db.Create(&product).Error; err != nil {
 		t.Fatal(err)
 	}

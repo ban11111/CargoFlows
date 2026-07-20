@@ -17,9 +17,9 @@ import (
 	"testing"
 	"time"
 
-	"cargoflow/api/internal/ai"
-	"cargoflow/api/internal/config"
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/ai"
+	"cargoflows/api/internal/config"
+	"cargoflows/api/internal/models"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -52,7 +52,7 @@ func (s *fakeAssetStorage) createUploadURL(_ context.Context, objectKey string) 
 }
 
 func (s *fakeAssetStorage) assetURL(objectKey string) string {
-	return "https://assets.example.test/cargoflow/" + objectKey
+	return "https://assets.example.test/cargoflows/" + objectKey
 }
 
 func (s *fakeAssetStorage) objectExists(_ context.Context, objectKey string) (bool, error) {

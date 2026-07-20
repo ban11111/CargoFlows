@@ -15,11 +15,11 @@ import (
 	"testing"
 	"time"
 
-	"cargoflow/api/internal/ai"
-	"cargoflow/api/internal/config"
-	"cargoflow/api/internal/database"
-	"cargoflow/api/internal/models"
-	"cargoflow/api/internal/secrets"
+	"cargoflows/api/internal/ai"
+	"cargoflows/api/internal/config"
+	"cargoflows/api/internal/database"
+	"cargoflows/api/internal/models"
+	"cargoflows/api/internal/secrets"
 	"github.com/gin-gonic/gin"
 	"github.com/goccy/go-yaml"
 	"github.com/golang-jwt/jwt/v5"
@@ -346,7 +346,7 @@ func TestAIRouterConstructorsValidateProductionMasterKey(t *testing.T) {
 			t.Run(name+"/"+tc.name, func(t *testing.T) {
 				cfg := base
 				cfg.SecretsMasterKey = tc.key
-				assertPanicsContaining(t, "CARGOFLOW_SECRETS_MASTER_KEY", func() { construct(cfg) })
+				assertPanicsContaining(t, "CARGOFLOWS_SECRETS_MASTER_KEY", func() { construct(cfg) })
 			})
 		}
 	}
@@ -440,7 +440,7 @@ func TestAIJobEndpointsUseTypedArraysUUIDsAndSafeDTOs(t *testing.T) {
 	if err := db.Create(&category).Error; err != nil {
 		t.Fatal(err)
 	}
-	product := models.Product{CategoryID: category.ID, Name: "Bottle", Brand: "CargoFlow", Category: category.Name, Description: "A bottle"}
+	product := models.Product{CategoryID: category.ID, Name: "Bottle", Brand: "CargoFlows", Category: category.Name, Description: "A bottle"}
 	if err := db.Create(&product).Error; err != nil {
 		t.Fatal(err)
 	}

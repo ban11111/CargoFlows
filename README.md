@@ -1,6 +1,6 @@
-# CargoFlow
+# CargoFlows
 
-CargoFlow is an internal SKU inventory, product-content, product-capture SOP, and AI asset workflow system.
+CargoFlows is an internal SKU inventory, product-content, product-capture SOP, and AI asset workflow system.
 
 ## Modules
 
@@ -27,7 +27,7 @@ docker compose up --build mysql minio api
 The API seeds a shared development account for both the Web admin and iOS app on first boot:
 
 ```text
-admin@cargoflow.local / password123
+admin@cargoflows.cc / password123
 ```
 
 Web login: `http://localhost:3005/login`
@@ -75,7 +75,7 @@ and remain encrypted in the database.
 The checked-in, workstation-specific launchd definition is:
 
 ```text
-scripts/launchd/com.cargoflow.web-dev.plist
+scripts/launchd/com.cargoflows.web-dev.plist
 ```
 
 It runs the locally installed Next.js CLI directly with Node 24, uses `web/` as
@@ -84,36 +84,36 @@ uses `KeepAlive` to restart after either a clean or abnormal exit. It is install
 at:
 
 ```text
-/Users/zhengbaiyi/Library/LaunchAgents/com.cargoflow.web-dev.plist
+/Users/zhengbaiyi/Library/LaunchAgents/com.cargoflows.web-dev.plist
 ```
 
 Install or reload it after changing the plist:
 
 ```bash
-plutil -lint scripts/launchd/com.cargoflow.web-dev.plist
-launchctl bootout gui/$(id -u)/com.cargoflow.web-dev 2>/dev/null || true
+plutil -lint scripts/launchd/com.cargoflows.web-dev.plist
+launchctl bootout gui/$(id -u)/com.cargoflows.web-dev 2>/dev/null || true
 install -d -m 755 /Users/zhengbaiyi/Library/LaunchAgents
-install -m 644 scripts/launchd/com.cargoflow.web-dev.plist \
-  /Users/zhengbaiyi/Library/LaunchAgents/com.cargoflow.web-dev.plist
+install -m 644 scripts/launchd/com.cargoflows.web-dev.plist \
+  /Users/zhengbaiyi/Library/LaunchAgents/com.cargoflows.web-dev.plist
 launchctl bootstrap gui/$(id -u) \
-  /Users/zhengbaiyi/Library/LaunchAgents/com.cargoflow.web-dev.plist
+  /Users/zhengbaiyi/Library/LaunchAgents/com.cargoflows.web-dev.plist
 ```
 
 Operational commands:
 
 ```bash
 # Status
-launchctl print gui/$(id -u)/com.cargoflow.web-dev
+launchctl print gui/$(id -u)/com.cargoflows.web-dev
 
 # Restart immediately
-launchctl kickstart -k gui/$(id -u)/com.cargoflow.web-dev
+launchctl kickstart -k gui/$(id -u)/com.cargoflows.web-dev
 
 # Follow Next.js output and errors
 tail -f tmp/web-launchd.out.log
 tail -f tmp/web-launchd.err.log
 
 # Disable and unload
-launchctl bootout gui/$(id -u)/com.cargoflow.web-dev
+launchctl bootout gui/$(id -u)/com.cargoflows.web-dev
 ```
 
 This is a LaunchAgent, so it starts after the macOS user logs in. If the site
@@ -152,7 +152,7 @@ curl -I https://dev.cargoflows.cc/
 Interpretation and recovery:
 
 - Local Web fails, API succeeds: restart
-  `gui/$(id -u)/com.cargoflow.web-dev`.
+  `gui/$(id -u)/com.cargoflows.web-dev`.
 - Local Web succeeds, public URL fails: inspect the cloudflared log, then run
   `sudo launchctl kickstart -k system/com.cloudflare.cloudflared`.
 - Local Web and API both fail: inspect `docker compose ps`, then restore the
@@ -172,7 +172,7 @@ Generate a fresh 32-byte local encryption master key in the API terminal. This
 command assigns the base64 value to the environment without printing it:
 
 ```bash
-export CARGOFLOW_SECRETS_MASTER_KEY="$(openssl rand -base64 32)"
+export CARGOFLOWS_SECRETS_MASTER_KEY="$(openssl rand -base64 32)"
 ```
 
 The master key protects any credential configured later through the admin UI.
@@ -203,7 +203,7 @@ The worker records zero-usage dry-run executions locally. To execute text and
 image slots through OpenAI, first configure a newly rotated project
 API key from the super administrator OpenAI settings page, then start the worker with
 `AI_WORKER_DRY_RUN=false` in a terminal that has the same
-`CARGOFLOW_SECRETS_MASTER_KEY`. Never place an OpenAI key in shell commands,
+`CARGOFLOWS_SECRETS_MASTER_KEY`. Never place an OpenAI key in shell commands,
 environment files, source code, logs, or chat. Image jobs can create multiple
 independently configured canvases; each canvas selects one or more published
 image requirements, and a requirement may be reused across canvases.
@@ -277,7 +277,7 @@ For iOS:
 ```bash
 cd ios
 xcodegen generate
-open CargoFlow.xcodeproj
+open CargoFlows.xcodeproj
 ```
 
 Build a downloadable iOS Simulator package:
@@ -289,7 +289,7 @@ Build a downloadable iOS Simulator package:
 The package is written to `web/public/downloads/` and served by the landing page download button.
 The iOS development build currently reaches the API through the named Cloudflare Web tunnel at
 `https://dev.cargoflows.cc/api/proxy/`. Update
-`CARGOFLOW_API_BASE_URL` in `ios/project.yml` if the named development hostname changes.
+`CARGOFLOWS_API_BASE_URL` in `ios/project.yml` if the named development hostname changes.
 
 The Web proxy also rewrites signed loopback MinIO upload tickets to
 `/api/storage/...`. This lets browsers and iPhones upload through the same Cloudflare hostname
@@ -303,12 +303,12 @@ To export a signed development IPA, configure an Apple Developer signing identit
 ```
 
 Automatic signing is persisted in `ios/project.yml`. Set
-`CARGOFLOW_DEVELOPMENT_TEAM=YOUR_TEAM_ID` only when overriding the configured team. The landing
+`CARGOFLOWS_DEVELOPMENT_TEAM=YOUR_TEAM_ID` only when overriding the configured team. The landing
 page serves the signed IPA first, with the Simulator zip as a fallback when no IPA is present.
 
 ### TestFlight distribution
 
-The iOS target uses Bundle ID `com.cargoflow.app`, marketing version `0.1.0`, and build number
+The iOS target uses Bundle ID `com.cargoflows.app`, marketing version `0.1.0`, and build number
 `1`. Increase `CURRENT_PROJECT_VERSION` in `ios/project.yml` for every new successful delivery.
 The generated Xcode project should never be the only place where version or signing settings are
 changed because `xcodegen generate` overwrites it.
@@ -327,7 +327,7 @@ method. It does not publish a public App Store release. After Apple finishes pro
 complete export-compliance and beta test information in App Store Connect and assign the build to
 an internal TestFlight group. See `ios/README.md` for the complete checklist.
 
-If XcodeGen is not installed, create a new iOS App project in Xcode and add files from `ios/CargoFlow/`.
+If XcodeGen is not installed, create a new iOS App project in Xcode and add files from `ios/CargoFlows/`.
 
 ## Product-Capture SOP Model
 
@@ -355,8 +355,8 @@ This release is a greenfield structured-data design. Development and deployment 
 Use these development-only credentials at `http://localhost:9001`:
 
 ```text
-Username: cargoflow
-Password: cargoflow123
+Username: cargoflows
+Password: cargoflows123
 ```
 
 The Web BFF calls the Go API through `/api/proxy/*`; the iOS app calls `http://127.0.0.1:8080/api/v1` by default.

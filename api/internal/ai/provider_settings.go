@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"cargoflow/api/internal/models"
-	"cargoflow/api/internal/secrets"
+	"cargoflows/api/internal/models"
+	"cargoflows/api/internal/secrets"
 	"gorm.io/gorm"
 )
 

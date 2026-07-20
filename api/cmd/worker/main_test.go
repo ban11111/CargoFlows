@@ -5,7 +5,7 @@ import (
 	"encoding/base64"
 	"testing"
 
-	"cargoflow/api/internal/config"
+	"cargoflows/api/internal/config"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )

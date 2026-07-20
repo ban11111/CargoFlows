@@ -45,7 +45,7 @@ interface UploadItem {
 
 const copy = {
   zh: {
-    eyebrow: "CargoFlow · Capture deck",
+    eyebrow: "CargoFlows · Capture deck",
     title: "素材采集",
     description: "选择一个 SKU，按照已发布 SOP 逐项拍摄。完成的图片会直接进入素材审核。",
     setup: "设置拍摄任务",
@@ -87,7 +87,7 @@ const copy = {
     upload_failed: "上传未完成。请检查网络后重试。",
   },
   en: {
-    eyebrow: "CargoFlow · Capture deck",
+    eyebrow: "CargoFlows · Capture deck",
     title: "Asset capture",
     description: "Choose a SKU and work through its published SOP. Completed images go straight to asset review.",
     setup: "Set up capture",

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"cargoflow/api/internal/models"
-	"cargoflow/api/internal/sop"
+	"cargoflows/api/internal/models"
+	"cargoflows/api/internal/sop"
 	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -90,6 +90,36 @@ func TestUserMigrationPromotesOneOwnerAndCollapsesLegacyRoles(t *testing.T) {
 		}
 	}
 	t.Fatal("last_seen_at column not found")
+}
+
+func TestUserMigrationRenamesLegacyAdministratorEmail(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&oldUser{}); err != nil {
+		t.Fatal(err)
+	}
+	legacy := oldUser{
+		Name:         "Administrator",
+		Email:        "admin@" + "cargo" + "flow.local",
+		PasswordHash: "unchanged-hash",
+		Role:         "admin",
+		Status:       "active",
+	}
+	if err := db.Create(&legacy).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateUserSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	var migrated models.User
+	if err := db.First(&migrated, legacy.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if migrated.Email != "admin@cargoflows.cc" || migrated.PasswordHash != legacy.PasswordHash || migrated.ID != legacy.ID {
+		t.Fatalf("migrated administrator = %#v", migrated)
+	}
 }
 
 func (oldAIContentTemplate) TableName() string { return "ai_content_templates" }

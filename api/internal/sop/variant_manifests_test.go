@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/models"
 	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -32,13 +32,13 @@ func variantManifestTestDB(t *testing.T) *gorm.DB {
 
 func validVariantIdentityJSON(t *testing.T) json.RawMessage {
 	t.Helper()
-	return json.RawMessage(`{"schema":"variant_identity_v1","colors":[{"key":"body","name":"Midnight blue","value":"#123ABC"}],"material":"aluminum","finish":"matte","texture":"smooth","labels":[{"key":"front_logo","text":"CargoFlow","region_key":"logo"}],"ports":[{"key":"usb_c","description":"USB-C charging port","region_key":"right_ports"}],"controls":[],"accessories":["charging cable"],"packaging":[],"other":[],"must_prove_with_target_assets":["body","logo","right_ports"]}`)
+	return json.RawMessage(`{"schema":"variant_identity_v1","colors":[{"key":"body","name":"Midnight blue","value":"#123ABC"}],"material":"aluminum","finish":"matte","texture":"smooth","labels":[{"key":"front_logo","text":"CargoFlows","region_key":"logo"}],"ports":[{"key":"usb_c","description":"USB-C charging port","region_key":"right_ports"}],"controls":[],"accessories":["charging cable"],"packaging":[],"other":[],"must_prove_with_target_assets":["body","logo","right_ports"]}`)
 }
 
 func createVariantManifestFamily(t *testing.T, db *gorm.DB, variationDimensions []string) (models.ModelFamily, models.SKU, models.SKU) {
 	t.Helper()
 	service := NewModelFamilyService(db)
-	family, err := service.Create(t.Context(), CreateModelFamilyInput{Brand: "CargoFlow", NameZH: "同款", NameEN: "Same", ModelCode: "MANIFEST-" + t.Name(), CommonStructure: json.RawMessage(`{"schema":"model_family_common_structure_v1","invariants":["housing"]}`), VariationDimensions: variationDimensions, CreatedByID: 1})
+	family, err := service.Create(t.Context(), CreateModelFamilyInput{Brand: "CargoFlows", NameZH: "同款", NameEN: "Same", ModelCode: "MANIFEST-" + t.Name(), CommonStructure: json.RawMessage(`{"schema":"model_family_common_structure_v1","invariants":["housing"]}`), VariationDimensions: variationDimensions, CreatedByID: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestVariantManifestReGroupingPreservesHistoryAndSelectsCurrentFamilyOnly(t 
 	}
 
 	families := NewModelFamilyService(db)
-	familyB, err := families.Create(t.Context(), CreateModelFamilyInput{Brand: "CargoFlow", NameZH: "新同款", NameEN: "New family", ModelCode: "REGROUP-" + t.Name(), CommonStructure: json.RawMessage(`{"schema":"model_family_common_structure_v1","invariants":["housing"]}`), VariationDimensions: []string{"color", "material", "finish", "texture", "labels", "ports", "accessories"}, CreatedByID: 10})
+	familyB, err := families.Create(t.Context(), CreateModelFamilyInput{Brand: "CargoFlows", NameZH: "新同款", NameEN: "New family", ModelCode: "REGROUP-" + t.Name(), CommonStructure: json.RawMessage(`{"schema":"model_family_common_structure_v1","invariants":["housing"]}`), VariationDimensions: []string{"color", "material", "finish", "texture", "labels", "ports", "accessories"}, CreatedByID: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +227,7 @@ func TestVariantManifestRequiresAllIdentityKeysAndNormalizesArrayFacts(t *testin
 	if _, err := service.CreateDraft(t.Context(), target.PublicID, CreateVariantManifestDraftInput{Identity: missingControls, ActorID: 9}); !errors.Is(err, ErrVariantManifestInvalid) {
 		t.Fatalf("missing required key error = %v", err)
 	}
-	nullArrays := json.RawMessage(strings.NewReplacer(`"colors":[{"key":"body","name":"Midnight blue","value":"#123ABC"}]`, `"colors":null`, `"labels":[{"key":"front_logo","text":"CargoFlow","region_key":"logo"}]`, `"labels":null`, `"ports":[{"key":"usb_c","description":"USB-C charging port","region_key":"right_ports"}]`, `"ports":null`, `"controls":[]`, `"controls":null`, `"accessories":["charging cable"]`, `"accessories":null`, `"packaging":[]`, `"packaging":null`, `"other":[]`, `"other":null`, `"must_prove_with_target_assets":["body","logo","right_ports"]`, `"must_prove_with_target_assets":null`).Replace(string(validVariantIdentityJSON(t))))
+	nullArrays := json.RawMessage(strings.NewReplacer(`"colors":[{"key":"body","name":"Midnight blue","value":"#123ABC"}]`, `"colors":null`, `"labels":[{"key":"front_logo","text":"CargoFlows","region_key":"logo"}]`, `"labels":null`, `"ports":[{"key":"usb_c","description":"USB-C charging port","region_key":"right_ports"}]`, `"ports":null`, `"controls":[]`, `"controls":null`, `"accessories":["charging cable"]`, `"accessories":null`, `"packaging":[]`, `"packaging":null`, `"other":[]`, `"other":null`, `"must_prove_with_target_assets":["body","logo","right_ports"]`, `"must_prove_with_target_assets":null`).Replace(string(validVariantIdentityJSON(t))))
 	draft, err := service.CreateDraft(t.Context(), target.PublicID, CreateVariantManifestDraftInput{Identity: nullArrays, ActorID: 9})
 	if err != nil {
 		t.Fatal(err)
@@ -309,7 +309,7 @@ func TestVariantManifestWriteRejectsInterleavedReGroup(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			familyB, err := NewModelFamilyService(db).Create(t.Context(), CreateModelFamilyInput{Brand: "CargoFlow", NameZH: "新同款", NameEN: "New family", ModelCode: "INTERLEAVE-" + operation.name + t.Name(), CommonStructure: json.RawMessage(`{"schema":"model_family_common_structure_v1","invariants":["housing"]}`), VariationDimensions: []string{"color", "material", "finish", "texture", "labels", "ports", "accessories"}, CreatedByID: 10})
+			familyB, err := NewModelFamilyService(db).Create(t.Context(), CreateModelFamilyInput{Brand: "CargoFlows", NameZH: "新同款", NameEN: "New family", ModelCode: "INTERLEAVE-" + operation.name + t.Name(), CommonStructure: json.RawMessage(`{"schema":"model_family_common_structure_v1","invariants":["housing"]}`), VariationDimensions: []string{"color", "material", "finish", "texture", "labels", "ports", "accessories"}, CreatedByID: 10})
 			if err != nil {
 				t.Fatal(err)
 			}

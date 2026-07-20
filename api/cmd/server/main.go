@@ -3,9 +3,9 @@ package main
 import (
 	"log"
 
-	"cargoflow/api/internal/app"
-	"cargoflow/api/internal/config"
-	"cargoflow/api/internal/database"
+	"cargoflows/api/internal/app"
+	"cargoflows/api/internal/config"
+	"cargoflows/api/internal/database"
 )
 
 func main() {

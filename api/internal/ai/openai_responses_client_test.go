@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"cargoflow/api/internal/models"
+	"cargoflows/api/internal/models"
 )
 
 func responsesTextRequest(t *testing.T) TextRequest {
@@ -71,7 +71,7 @@ func TestResponsesTextClientSendsStrictStoredFalseRequestAndParsesAllOutput(t *t
 	}
 	textConfig := captured["text"].(map[string]any)
 	format := textConfig["format"].(map[string]any)
-	if format["type"] != "json_schema" || format["strict"] != true || format["name"] != "cargoflow_product_title" || format["schema"] == nil {
+	if format["type"] != "json_schema" || format["strict"] != true || format["name"] != "cargoflows_product_title" || format["schema"] == nil {
 		t.Fatalf("text format = %#v", format)
 	}
 	metadata := captured["metadata"].(map[string]any)
