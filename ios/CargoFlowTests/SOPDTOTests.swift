@@ -22,7 +22,17 @@ final class SOPDTOTests: XCTestCase {
         XCTAssertEqual(view.displayName(for: .zh), "包装正面")
         XCTAssertEqual(view.displayName(for: .en), "Packaging Front")
         XCTAssertFalse(view.required)
+        XCTAssertFalse(view.allowMultiple)
         XCTAssertEqual(view.pose.cameraPositionDirection, Vector3DTO(x: 0, y: 0, z: 1))
+    }
+
+    func testDecodesSupplementalInformationAsMultiple() throws {
+        let data = Data(#"{"public_id":"22222222-2222-4222-8222-222222222222","sequence":9,"role":"capture","view_kind":"detail","preset_key":"supplemental_info","name":{"zh-CN":"补充信息图片","en":"Supplemental Product Information"},"instruction":{"zh-CN":"上传资料","en":"Upload information"},"required":false,"allow_multiple":true,"pose":{"space":"object","camera_position_direction":[0,0,1],"image_up_direction":[1,0,0],"target":[0,0,0]},"composition":{"frame_occupancy":0.95,"aspect_ratio":"4:5","allow_rotation_correction":true,"allow_mirror":false},"reference_images":[]}"#.utf8)
+
+        let view = try JSONDecoder().decode(SOPView.self, from: data)
+
+        XCTAssertTrue(view.allowMultiple)
+        XCTAssertEqual(view.presetKey, "supplemental_info")
     }
 
     func testLocalizedTextFallsBackToOtherNonemptyLanguage() throws {

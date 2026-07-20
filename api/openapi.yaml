@@ -1265,7 +1265,7 @@ components:
     AISnapshotSOPView:
       type: object
       additionalProperties: false
-      required: [public_id, sequence, role, view_kind, preset_key, name, instruction, required, camera_position_direction, image_up_direction, target, composition]
+      required: [public_id, sequence, role, view_kind, preset_key, name, instruction, required, allow_multiple, camera_position_direction, image_up_direction, target, composition]
       properties:
         public_id: { type: string, format: uuid }
         sequence: { type: integer, minimum: 1 }
@@ -1275,6 +1275,7 @@ components:
         name: { $ref: '#/components/schemas/AISnapshotLocalizedText' }
         instruction: { $ref: '#/components/schemas/AISnapshotLocalizedText' }
         required: { type: boolean }
+        allow_multiple: { type: boolean }
         camera_position_direction: { $ref: '#/components/schemas/AISnapshotVector' }
         image_up_direction: { $ref: '#/components/schemas/AISnapshotVector' }
         target: { $ref: '#/components/schemas/AISnapshotVector' }
@@ -1310,9 +1311,10 @@ components:
     AISnapshotAsset:
       type: object
       additionalProperties: false
-      required: [public_id, mime_type, width, height, byte_count, sha256, captured_at, view]
+      required: [public_id, source_type, mime_type, width, height, byte_count, sha256, captured_at, view]
       properties:
         public_id: { type: string, format: uuid }
+        source_type: { type: string, enum: [product_visual, product_information] }
         mime_type: { type: string, enum: [image/jpeg, image/png, image/webp] }
         width: { type: integer, minimum: 1 }
         height: { type: integer, minimum: 1 }
@@ -1400,7 +1402,7 @@ components:
         created_at: { type: string, format: date-time }
     SOPView:
       type: object
-      required: [public_id, sequence, role, view_kind, name, instruction, required, pose, composition, reference_images]
+      required: [public_id, sequence, role, view_kind, name, instruction, required, allow_multiple, pose, composition, reference_images]
       properties:
         public_id: { type: string, format: uuid }
         sequence: { type: integer, minimum: 1 }
@@ -1410,6 +1412,7 @@ components:
         name: { $ref: '#/components/schemas/LocalizedText' }
         instruction: { $ref: '#/components/schemas/LocalizedText' }
         required: { type: boolean }
+        allow_multiple: { type: boolean, default: false }
         pose: { $ref: '#/components/schemas/Pose' }
         composition: { $ref: '#/components/schemas/Composition' }
         reference_images: { type: array, items: { $ref: '#/components/schemas/ReferenceImage' } }
@@ -1465,6 +1468,7 @@ components:
         name: { $ref: '#/components/schemas/LocalizedText' }
         instruction: { $ref: '#/components/schemas/LocalizedText' }
         required: { type: boolean }
+        allow_multiple: { type: boolean, default: false }
         pose: { $ref: '#/components/schemas/Pose' }
         composition: { $ref: '#/components/schemas/Composition' }
     AddViewRequest:
@@ -1474,7 +1478,7 @@ components:
         - required: [preset_key]
         - required: [custom]
       properties:
-        preset_key: { type: string, enum: [back, left, bottom, right, top, detail_label, packaging_front] }
+        preset_key: { type: string, enum: [back, left, bottom, right, top, detail_label, packaging_front, supplemental_info] }
         custom: { $ref: '#/components/schemas/ViewMutation' }
     CreateCaptureSOPRequest:
       type: object

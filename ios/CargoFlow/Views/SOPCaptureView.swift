@@ -136,6 +136,7 @@ final class SOPCaptureState: ObservableObject {
     @Published private(set) var version: SOPVersion?
     @Published private(set) var capturedViewIDs: Set<String> = []
     @Published private(set) var capturedImages: [String: UIImage] = [:]
+    @Published private(set) var capturedImageLists: [String: [UIImage]] = [:]
     @Published private(set) var isCandidateLoading = true
     @Published private(set) var candidateLoadFailed = false
     @Published private(set) var isVersionLoading = false
@@ -215,7 +216,7 @@ final class SOPCaptureState: ObservableObject {
                 candidateLoadFailed = false
                 return .preservedActiveSession
             }
-            if !capturedViewIDs.isEmpty || !capturedImages.isEmpty {
+            if !capturedViewIDs.isEmpty || !capturedImageLists.isEmpty {
                 if let current = candidates.first(where: { $0.id == selectedVersionID }) {
                     let pinned = SOPVersionCandidate(
                         id: current.id,
@@ -291,9 +292,14 @@ final class SOPCaptureState: ObservableObject {
         return true
     }
 
-    func recordCapture(viewID: String, image: UIImage) {
+    func recordCapture(viewID: String, image: UIImage, allowMultiple: Bool = false) {
         capturedViewIDs.insert(viewID)
         capturedImages[viewID] = image
+        if allowMultiple {
+            capturedImageLists[viewID, default: []].append(image)
+        } else {
+            capturedImageLists[viewID] = [image]
+        }
     }
 
     func resolveSession(
@@ -332,6 +338,7 @@ final class SOPCaptureState: ObservableObject {
         version = nil
         capturedViewIDs = []
         capturedImages = [:]
+        capturedImageLists = [:]
         session = nil
         versionLoadFailed = false
         if versionID == nil { isVersionLoading = false }
@@ -498,7 +505,7 @@ struct SOPCaptureView: View {
                         } label: {
                             CaptureViewRow(
                                 view: view,
-                                image: captureState.capturedImages[view.id],
+                                images: captureState.capturedImageLists[view.id] ?? [],
                                 isUploading: uploadingViewID == view.id,
                                 language: language
                             )
@@ -723,7 +730,7 @@ struct SOPCaptureView: View {
                 photoSessionID: session.id,
                 fileName: fileName
             )
-            captureState.recordCapture(viewID: view.id, image: image)
+            captureState.recordCapture(viewID: view.id, image: image, allowMultiple: view.allowMultiple)
             await loadHistory()
         } catch is CancellationError {
             return
@@ -893,7 +900,7 @@ private struct AuthenticatedAssetThumbnail: View {
 
 private struct CaptureViewRow: View {
     let view: SOPView
-    let image: UIImage?
+    let images: [UIImage]
     let isUploading: Bool
     let language: LanguageStore
 
@@ -904,7 +911,7 @@ private struct CaptureViewRow: View {
 
     private var stateKey: String {
         if isUploading { return "capture.state.uploading" }
-        return image == nil ? "capture.state.pending" : "capture.state.complete"
+        return images.isEmpty ? "capture.state.pending" : "capture.state.complete"
     }
 
     var body: some View {
@@ -926,6 +933,11 @@ private struct CaptureViewRow: View {
                 Text("\(language.t(kindKey)) · \(language.t(view.required ? "required" : "optional"))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if view.allowMultiple, !images.isEmpty {
+                    Text("\(images.count) \(language.t("capture.images"))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Spacer(minLength: 8)
@@ -934,19 +946,25 @@ private struct CaptureViewRow: View {
                 if isUploading {
                     ProgressView()
                         .frame(width: 44, height: 44)
-                } else if let image {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 52, height: 52)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay(alignment: .bottomTrailing) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .symbolRenderingMode(.palette)
-                                .foregroundStyle(.white, .green)
-                                .background(.background, in: Circle())
+                } else if !images.isEmpty {
+                    HStack(spacing: -8) {
+                        ForEach(Array(images.suffix(view.allowMultiple ? 3 : 1).enumerated()), id: \.offset) { index, image in
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 52, height: 52)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(.background, lineWidth: 2))
+                                .zIndex(Double(index))
                         }
-                        .accessibilityHidden(true)
+                    }
+                    .overlay(alignment: .bottomTrailing) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(.white, .green)
+                            .background(.background, in: Circle())
+                    }
+                    .accessibilityHidden(true)
                 } else {
                     Image(systemName: "camera.viewfinder")
                         .frame(width: 52, height: 52)

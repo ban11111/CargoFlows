@@ -225,6 +225,7 @@ struct SOPView: Identifiable, Decodable {
     let name: LocalizedText
     let instruction: LocalizedText
     let required: Bool
+    let allowMultiple: Bool
     let pose: SOPPose
     let composition: CompositionDTO
     let referenceImages: [SOPReferenceImage]
@@ -232,9 +233,26 @@ struct SOPView: Identifiable, Decodable {
     enum CodingKeys: String, CodingKey {
         case publicID = "public_id"
         case sequence, role, name, instruction, required, pose, composition
+        case allowMultiple = "allow_multiple"
         case viewKind = "view_kind"
         case presetKey = "preset_key"
         case referenceImages = "reference_images"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        publicID = try container.decode(String.self, forKey: .publicID)
+        sequence = try container.decode(Int.self, forKey: .sequence)
+        role = try container.decode(String.self, forKey: .role)
+        viewKind = try container.decode(String.self, forKey: .viewKind)
+        presetKey = try container.decodeIfPresent(String.self, forKey: .presetKey)
+        name = try container.decode(LocalizedText.self, forKey: .name)
+        instruction = try container.decode(LocalizedText.self, forKey: .instruction)
+        required = try container.decode(Bool.self, forKey: .required)
+        allowMultiple = try container.decodeIfPresent(Bool.self, forKey: .allowMultiple) ?? false
+        pose = try container.decode(SOPPose.self, forKey: .pose)
+        composition = try container.decode(CompositionDTO.self, forKey: .composition)
+        referenceImages = try container.decodeIfPresent([SOPReferenceImage].self, forKey: .referenceImages) ?? []
     }
 
     func displayName(for language: AppLanguage) -> String { name.value(for: language) }

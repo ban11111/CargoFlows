@@ -87,6 +87,38 @@ func TestCompileImagePromptDistinguishesEditAndRestart(t *testing.T) {
 	}
 }
 
+func TestCompileImagePromptExpandsKnownStyleAndSeparatesInformationSources(t *testing.T) {
+	snapshot, slot := imagePromptFixture()
+	slot.GenerationConfig = json.RawMessage(`{"candidate_count":1,"size":"1024x1024","quality":"high","style":"premium_dark","allowed_styles":["premium_dark"]}`)
+	snapshot.SelectedAssets[1].SourceType = AssetSourceProductInformation
+	snapshot.SelectedAssets[1].View.PresetKey = "supplemental_info"
+
+	compiled, err := CompileImagePrompt(snapshot, slot, ImageTurnInput{Operation: models.AIExecutionGenerate, ThreadPublicID: "thread-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := string(compiled.NormalizedInputJSON)
+	ordered := string(compiled.OrderedInputListJSON)
+	if !strings.Contains(input, `"style":"premium_dark"`) || !strings.Contains(input, `"style_instructions":"Premium photorealistic product photograph`) {
+		t.Fatalf("known style was not expanded: %s", input)
+	}
+	if !strings.Contains(ordered, `"kind":"product_visual"`) || !strings.Contains(ordered, `"kind":"product_information"`) {
+		t.Fatalf("source roles were not separated: %s", ordered)
+	}
+}
+
+func TestImageStyleCatalogContainsStablePresetSet(t *testing.T) {
+	want := []string{"clean_white_background", "soft_studio", "high_key_airy", "warm_neutral", "premium_dark", "luxury_editorial", "minimal_gradient", "bold_color_block", "vibrant_pop", "pastel_soft", "natural_daylight", "cozy_home", "modern_urban", "outdoor_active", "flat_lay", "macro_material", "technical_3d", "isometric_illustration", "clean_infographic", "seasonal_campaign"}
+	if len(ImageStyleCatalog) != len(want) {
+		t.Fatalf("style count = %d, want %d", len(ImageStyleCatalog), len(want))
+	}
+	for _, key := range want {
+		if strings.TrimSpace(ImageStyleCatalog[key]) == "" {
+			t.Errorf("style %q is missing instructions", key)
+		}
+	}
+}
+
 func TestCompileImagePromptRejectsUnsafeOrInvalidInput(t *testing.T) {
 	tests := []struct {
 		name   string

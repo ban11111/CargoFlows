@@ -74,6 +74,7 @@ type SOPView struct {
 	InstructionZH   string                  `gorm:"type:text;not null" json:"-"`
 	InstructionEN   string                  `gorm:"type:text;not null" json:"-"`
 	Required        bool                    `gorm:"not null" json:"required"`
+	AllowMultiple   bool                    `gorm:"not null;default:false" json:"allow_multiple"`
 	CameraPositionX float64                 `gorm:"type:decimal(10,6);not null" json:"-"`
 	CameraPositionY float64                 `gorm:"type:decimal(10,6);not null" json:"-"`
 	CameraPositionZ float64                 `gorm:"type:decimal(10,6);not null" json:"-"`

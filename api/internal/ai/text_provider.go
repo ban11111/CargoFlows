@@ -20,11 +20,13 @@ var (
 
 type TextRequest struct {
 	Prompt   CompiledTextPrompt
+	Inputs   []ImageInput
 	Metadata map[string]string
 }
 
 type TextUsage struct {
 	InputTextTokens  int64
+	InputImageTokens int64
 	OutputTextTokens int64
 	TotalTokens      int64
 	ReasoningTokens  int64

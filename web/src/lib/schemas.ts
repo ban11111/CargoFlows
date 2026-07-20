@@ -96,6 +96,7 @@ export const sopViewSchema = z.object({
   name: requiredLocalizedTextSchema,
   instruction: localizedTextSchema,
   required: z.boolean(),
+  allow_multiple: z.boolean().default(false),
   pose: poseSchema,
   composition: compositionSchema,
   reference_images: z.array(referenceImageSchema),

@@ -420,6 +420,7 @@ func ValidateTemplateVersion(version models.AIContentTemplateVersion, slots []mo
 		}
 		if generation != nil {
 			issues = append(issues, validateGenerationAllowLists(generation, slot.Kind, path+".generation_config")...)
+			issues = append(issues, validateDefaultImageStyle(generation, slot.Kind, path+".generation_config")...)
 			if value, exists := generation["allow_user_extra_prompt"]; exists {
 				if _, ok := value.(bool); !ok {
 					issues = appendIssue(issues, "allow_user_extra_prompt_invalid", path+".generation_config.allow_user_extra_prompt", "User extra prompt permission must be a boolean.")
@@ -442,6 +443,27 @@ func ValidateTemplateVersion(version models.AIContentTemplateVersion, slots []mo
 		}
 	}
 	return issues
+}
+
+func validateDefaultImageStyle(config map[string]any, kind models.AIContentSlotKind, path string) []ValidationIssue {
+	allowedValue, hasAllowed := config["allowed_styles"]
+	if !hasAllowed || kind != models.AIContentSlotImage {
+		return nil
+	}
+	style, ok := config["style"].(string)
+	if !ok || strings.TrimSpace(style) == "" {
+		return []ValidationIssue{{Code: "default_style_not_allowed", Path: path + ".style", Message: "Default style must belong to allowed styles."}}
+	}
+	allowed, ok := allowedValue.([]any)
+	if !ok {
+		return nil
+	}
+	for _, value := range allowed {
+		if candidate, ok := value.(string); ok && candidate == style {
+			return nil
+		}
+	}
+	return []ValidationIssue{{Code: "default_style_not_allowed", Path: path + ".style", Message: "Default style must belong to allowed styles."}}
 }
 
 func validateRequiredViews(config map[string]any, path string) []ValidationIssue {

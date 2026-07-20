@@ -17,6 +17,17 @@ beforeEach(() => {
 });
 
 describe("NewAITemplatePage", () => {
+  it("enables all twenty styles and defaults new image slots to white background", () => {
+    render(<NewAITemplatePage />, { wrapper: Providers });
+    fireEvent.click(screen.getByRole("button", { name: "添加图片" }));
+
+    expect(screen.getByText("已启用 20/20；任务创建时选择一种。")).toBeInTheDocument();
+    expect(screen.getAllByRole("checkbox").filter((control) => (control as HTMLInputElement).checked)).toHaveLength(20);
+    expect(screen.getByLabelText("默认图片风格")).toHaveValue("clean_white_background");
+    expect(screen.getAllByText("白底棚拍")).toHaveLength(2);
+    expect(screen.getByText("纯白背景、柔和落地阴影，适合平台主图。")).toBeInTheDocument();
+  });
+
   it("blocks creation until bilingual names and a valid slot exist", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
     render(<NewAITemplatePage />, { wrapper: Providers });

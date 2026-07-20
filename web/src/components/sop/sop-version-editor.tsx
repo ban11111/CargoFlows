@@ -31,7 +31,7 @@ const labels = {
     nameZh: "SOP 中文名称", nameEn: "SOP English name", descriptionZh: "中文说明", descriptionEn: "English description",
     validationFailed: "请修正以下问题后再发布", validationPassed: "验证通过，正在发布版本。", requestFailed: "请求失败，请检查输入后重试。",
     dirtyNotice: "请先保存所有未保存的修改，再执行发布、排序或新增视图。",
-    preset: { back: "背面", left: "左侧", bottom: "底部", right: "右侧", top: "顶部", detail_label: "标签细节", packaging_front: "包装正面" },
+    preset: { back: "背面", left: "左侧", bottom: "底部", right: "右侧", top: "顶部", detail_label: "标签细节", packaging_front: "包装正面", supplemental_info: "补充信息图片" },
   },
   en: {
     title: "Product capture views", saveMeta: "Save version details", addView: "Add view", publish: "Publish version", copy: "Copy as new version", archive: "Archive version",
@@ -39,7 +39,7 @@ const labels = {
     nameZh: "SOP Chinese name", nameEn: "SOP English name", descriptionZh: "Chinese description", descriptionEn: "English description",
     validationFailed: "Fix the following issues before publishing", validationPassed: "Validation passed. Publishing version.", requestFailed: "Request failed. Check the input and try again.",
     dirtyNotice: "Save every unsaved change before publishing, reordering, or adding views.",
-    preset: { back: "Back", left: "Left", bottom: "Bottom", right: "Right", top: "Top", detail_label: "Label detail", packaging_front: "Packaging front" },
+    preset: { back: "Back", left: "Left", bottom: "Bottom", right: "Right", top: "Top", detail_label: "Label detail", packaging_front: "Packaging front", supplemental_info: "Supplemental information" },
   },
 } as const;
 
@@ -130,10 +130,10 @@ export function SOPVersionEditor({ initialVersion, onVersionChange }: SOPVersion
       setClientErrors(parsed.error.issues.map((issue) => ({ path: `views[${index}].${issue.path.join(".")}`, message: issue.message })));
       return;
     }
-    const { role, view_kind, name, instruction, required, pose, composition } = parsed.data;
+    const { role, view_kind, name, instruction, required, allow_multiple, pose, composition } = parsed.data;
     await run(`view-${view.public_id}`, async () => {
       const confirmed = await apiRequest<SOPVersion>(`/sop-versions/${version.public_id}/views/${view.public_id}`, {
-        method: "PATCH", body: JSON.stringify({ role, view_kind, name, instruction, required, pose, composition }), headers: sopRevisionHeaders(version),
+        method: "PATCH", body: JSON.stringify({ role, view_kind, name, instruction, required, allow_multiple, pose, composition }), headers: sopRevisionHeaders(version),
       });
       const confirmedView = confirmed.views.find((item) => item.public_id === view.public_id);
       if (!confirmedView) throw new Error("saved view missing from response");

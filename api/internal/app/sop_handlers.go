@@ -39,13 +39,14 @@ type requestPose struct {
 }
 
 type viewMutationRequest struct {
-	Role        *models.SOPViewRole   `json:"role"`
-	ViewKind    *models.SOPViewKind   `json:"view_kind"`
-	Name        *localizedTextRequest `json:"name"`
-	Instruction *localizedTextRequest `json:"instruction"`
-	Required    *bool                 `json:"required"`
-	Pose        *requestPose          `json:"pose"`
-	Composition *compositionRequest   `json:"composition"`
+	Role          *models.SOPViewRole   `json:"role"`
+	ViewKind      *models.SOPViewKind   `json:"view_kind"`
+	Name          *localizedTextRequest `json:"name"`
+	Instruction   *localizedTextRequest `json:"instruction"`
+	Required      *bool                 `json:"required"`
+	AllowMultiple *bool                 `json:"allow_multiple"`
+	Pose          *requestPose          `json:"pose"`
+	Composition   *compositionRequest   `json:"composition"`
 }
 
 type addSOPViewRequest struct {
@@ -620,7 +621,11 @@ func viewInputFromRequest(req viewMutationRequest) (sop.ViewInput, error) {
 	if err != nil {
 		return sop.ViewInput{}, err
 	}
-	return sop.ViewInput{Role: *req.Role, Kind: *req.ViewKind, NameZH: name.ZHCN, NameEN: name.EN, InstructionZH: instruction.ZHCN, InstructionEN: instruction.EN, Required: *req.Required, CameraPosition: cameraPosition, ImageUp: imageUp, Target: target, Composition: composition}, nil
+	allowMultiple := false
+	if req.AllowMultiple != nil {
+		allowMultiple = *req.AllowMultiple
+	}
+	return sop.ViewInput{Role: *req.Role, Kind: *req.ViewKind, NameZH: name.ZHCN, NameEN: name.EN, InstructionZH: instruction.ZHCN, InstructionEN: instruction.EN, Required: *req.Required, AllowMultiple: allowMultiple, CameraPosition: cameraPosition, ImageUp: imageUp, Target: target, Composition: composition}, nil
 }
 
 func requiredVector3(value *[]float64, field string) (sop.Vector3, error) {

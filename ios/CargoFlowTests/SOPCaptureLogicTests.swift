@@ -285,6 +285,21 @@ final class SOPCaptureLogicTests: XCTestCase {
         XCTAssertNil(state.session)
     }
 
+    func testSingleViewReplacesWhileMultipleViewAppends() {
+        let state = SOPCaptureState()
+        let first = UIImage()
+        let second = UIImage()
+
+        state.recordCapture(viewID: "single", image: first)
+        state.recordCapture(viewID: "single", image: second)
+        state.recordCapture(viewID: "supplemental", image: first, allowMultiple: true)
+        state.recordCapture(viewID: "supplemental", image: second, allowMultiple: true)
+
+        XCTAssertEqual(state.capturedImageLists["single"]?.count, 1)
+        XCTAssertEqual(state.capturedImageLists["supplemental"]?.count, 2)
+        XCTAssertEqual(state.capturedViewIDs, ["single", "supplemental"])
+    }
+
     func testOlderVersionRequestCannotChangeNewerLoadingOrErrorState() throws {
         let state = SOPCaptureState()
         state.installCandidates([

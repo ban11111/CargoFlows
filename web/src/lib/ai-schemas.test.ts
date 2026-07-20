@@ -30,7 +30,7 @@ describe("aiTemplateDraftSchema", () => {
 
   it("accepts image, title, and SEO slot constraints", () => {
     const base = { name_zh: "中文", name_en: "English", target_platform: "lazada" };
-    expect(aiTemplateDraftSchema.safeParse({ ...base, slots: [{ kind: "image", slot_key: "hero", name_zh: "主图", name_en: "Hero", prompt_fragment: "Create hero", size: "1024x1024", quality: "high", candidate_count: 2 }] }).success).toBe(true);
+    expect(aiTemplateDraftSchema.safeParse({ ...base, slots: [{ kind: "image", slot_key: "hero", name_zh: "主图", name_en: "Hero", prompt_fragment: "Create hero", size: "1024x1024", quality: "high", candidate_count: 2, style: "clean_white_background", allowed_styles: ["clean_white_background"] }] }).success).toBe(true);
     expect(aiTemplateDraftSchema.safeParse({ ...base, slots: [{ kind: "title", slot_key: "title", name_zh: "标题", name_en: "Title", prompt_fragment: "Write title", min_length: 10, max_length: 120 }] }).success).toBe(true);
     expect(aiTemplateDraftSchema.safeParse({ ...base, slots: [{ kind: "seo_description", slot_key: "seo", name_zh: "描述", name_en: "SEO", prompt_fragment: "Write SEO", max_length: 500 }] }).success).toBe(true);
   });

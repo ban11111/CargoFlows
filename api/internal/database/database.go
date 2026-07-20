@@ -310,6 +310,8 @@ func Seed(db *gorm.DB) error {
 	if err := db.Create(&version).Error; err != nil {
 		return err
 	}
+	// Keep the seeded published version immutable in behavior. Administrators can
+	// copy it and add newer presets such as supplemental_info to the draft.
 	for index, key := range []string{"reference_front", "back", "left", "bottom", "right", "top", "detail_label", "packaging_front"} {
 		preset, ok := sop.PresetByKey(key)
 		if !ok {
@@ -323,7 +325,7 @@ func Seed(db *gorm.DB) error {
 			PublicID: uuid.NewString(), SOPVersionID: version.ID, Sequence: index + 1,
 			Role: preset.Role, ViewKind: preset.Kind, PresetKey: key,
 			NameZH: preset.NameZH, NameEN: preset.NameEN, InstructionZH: preset.InstructionZH, InstructionEN: preset.InstructionEN,
-			Required:        preset.Required,
+			Required: preset.Required, AllowMultiple: preset.AllowMultiple,
 			CameraPositionX: pose.CameraPosition[0], CameraPositionY: pose.CameraPosition[1], CameraPositionZ: pose.CameraPosition[2],
 			ImageUpX: pose.ImageUp[0], ImageUpY: pose.ImageUp[1], ImageUpZ: pose.ImageUp[2],
 			TargetX: preset.Target[0], TargetY: preset.Target[1], TargetZ: preset.Target[2], Composition: preset.Composition,
