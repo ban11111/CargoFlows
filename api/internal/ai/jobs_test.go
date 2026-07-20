@@ -34,7 +34,7 @@ func seedAIJobFixture(t *testing.T) (*gorm.DB, aiJobFixture) {
 	if err := db.AutoMigrate(
 		&models.User{}, &models.Category{}, &models.Tag{}, &models.Product{}, &models.SKU{},
 		&models.CaptureSOP{}, &models.SOPVersion{}, &models.SOPView{}, &models.PhotoSession{}, &models.Asset{},
-		&models.AIContentTemplate{}, &models.AIContentTemplateVersion{}, &models.AIContentSlot{}, &models.AIJob{}, &models.AIJobItem{}, &models.AIAuditEvent{},
+		&models.AIContentTemplate{}, &models.AIContentTemplateVersion{}, &models.AIContentSlot{}, &models.AIJob{}, &models.AIJobItem{}, &models.AIExecution{}, &models.AIAuditEvent{},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -226,6 +226,60 @@ func TestCreateJobAllowsTextOnlyWithoutAssets(t *testing.T) {
 	}
 	if len(job.Items) != 2 || len(job.Items[0].SelectedInputAssetIDs) != 0 {
 		t.Fatalf("text-only job = %#v", job)
+	}
+}
+
+func TestJobAuditSnapshotsRemainImmutableAndAreFilterable(t *testing.T) {
+	db, fixture := seedAIJobFixture(t)
+	if err := db.AutoMigrate(&models.OpenAIProviderSetting{}); err != nil {
+		t.Fatal(err)
+	}
+	setting := models.OpenAIProviderSetting{
+		Provider: "openai", Status: "active", TextModel: "gpt-5.6-terra",
+		ImageModel: "gpt-image-2", ImageAPIMode: "images",
+		ImageResponsesModel: "gpt-5.6", ImageGenerationModel: "gpt-image-2",
+		EncryptedAPIKey: []byte("sealed"), EncryptionNonce: []byte("nonce"), EncryptionKeyVersion: "v1",
+		KeyFingerprint: "TEST", CreatedByID: fixture.Operator.ID, UpdatedByID: fixture.Operator.ID,
+	}
+	if err := db.Create(&setting).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := NewJobService(db)
+	job, err := service.Create(t.Context(), CreateJobInput{
+		SKUID: fixture.SKU.PublicID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID,
+		SelectedSlotKeys: []string{"title"}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID,
+		IdempotencyKey: "job-audit-snapshot",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.CreatedBy.Name != "Operator" || job.CreatedBy.Email != fixture.Operator.Email || job.CreatedBy.PublicID != fixture.Operator.PublicID {
+		t.Fatalf("creator snapshot = %#v", job.CreatedBy)
+	}
+	if job.ModelSnapshot.ImageAPIMode != "images" || job.ModelSnapshot.ImageGenerationModel != "gpt-image-2" || job.ModelSnapshot.TextModel != "gpt-5.6-terra" {
+		t.Fatalf("model snapshot = %#v", job.ModelSnapshot)
+	}
+	if err := db.Model(&models.User{}).Where("id = ?", fixture.Operator.ID).Updates(map[string]any{"name": "Renamed", "email": "renamed@example.test"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Delete(&models.User{}, fixture.Operator.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&setting).Updates(map[string]any{"image_api_mode": "responses", "image_model": "gpt-5.6", "text_model": "gpt-5.6"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	stored, err := service.Get(t.Context(), job.PublicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.CreatedBy.Name != "Operator" || stored.CreatedBy.Email != fixture.Operator.Email || stored.ModelSnapshot.ImageAPIMode != "images" {
+		t.Fatalf("historical snapshots changed: creator=%#v model=%#v", stored.CreatedBy, stored.ModelSnapshot)
+	}
+	for _, filters := range []JobListFilters{{CreatedBy: "operator"}, {CreatedBy: fixture.Operator.Email}, {Model: "gpt-image-2"}, {APIMode: "images"}} {
+		values, listErr := service.ListFiltered(t.Context(), filters)
+		if listErr != nil || len(values) != 1 || values[0].PublicID != job.PublicID {
+			t.Fatalf("filter %#v = %#v, %v", filters, values, listErr)
+		}
 	}
 }
 

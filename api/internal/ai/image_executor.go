@@ -69,14 +69,22 @@ func (e *ImageExecutor) Execute(ctx context.Context, leased LeasedItem) error {
 	if err != nil || len(credential.APIKey) == 0 || credential.SettingID == 0 || credential.KeyFingerprint == "" {
 		return e.fail(ctx, p, models.AIExecutionFailed, "OpenAI credential is unavailable", "")
 	}
-	runtimeModel := configuredModel(credential.ImageModel, e.model)
+	modelSnapshot := decodeJobModelSnapshot(p.job.ModelSnapshotJSON)
+	apiMode := configuredImageMode(defaultString(modelSnapshot.ImageAPIMode, credential.ImageAPIMode))
+	runtimeModel := configuredModel(modelSnapshot.ImageResponsesModel, configuredModel(credential.ImageResponsesModel, e.model))
+	if apiMode == "images" {
+		runtimeModel = configuredModel(modelSnapshot.ImageGenerationModel, configuredModel(credential.ImageGenerationModel, DefaultOpenAIImageGenerationModel))
+	}
 	if err := bindExecutionModel(ctx, e.db, &p.execution, runtimeModel); err != nil {
 		return e.fail(ctx, p, models.AIExecutionFailed, "OpenAI model selection could not be stored", "")
+	}
+	if err := bindExecutionAPIMode(ctx, e.db, &p.execution, apiMode); err != nil {
+		return e.fail(ctx, p, models.AIExecutionFailed, "OpenAI image API mode could not be stored", "")
 	}
 	if err := e.dispatch(ctx, leased, p, credential); err != nil {
 		return e.fail(ctx, p, models.AIExecutionFailed, "OpenAI dispatch failed before a confirmed call", "")
 	}
-	response, providerErr := e.provider.Generate(ctx, credential.APIKey, ImageRequest{Model: runtimeModel, Prompt: p.prompt, Inputs: inputs, Metadata: map[string]string{"job_id": p.job.PublicID, "job_item_id": p.item.PublicID, "execution_id": p.execution.PublicID}})
+	response, providerErr := e.provider.Generate(ctx, credential.APIKey, ImageRequest{Model: runtimeModel, APIMode: apiMode, Prompt: p.prompt, Inputs: inputs, Metadata: map[string]string{"job_id": p.job.PublicID, "job_item_id": p.item.PublicID, "execution_id": p.execution.PublicID}})
 	clearBytes(credential.APIKey)
 	if providerErr != nil {
 		status, safe := imageProviderFailureState(providerErr)
@@ -97,6 +105,19 @@ func (e *ImageExecutor) Execute(ctx context.Context, leased LeasedItem) error {
 		return e.fail(ctx, p, models.AIExecutionNeedsAttention, "Generated image could not be safely stored", response.RequestID)
 	}
 	_ = stored
+	return nil
+}
+
+func bindExecutionAPIMode(ctx context.Context, db *gorm.DB, execution *models.AIExecution, mode string) error {
+	mode = configuredImageMode(mode)
+	result := db.WithContext(ctx).Model(&models.AIExecution{}).Where("id = ? AND status = ?", execution.ID, models.AIExecutionPreparing).Update("api_mode", mode)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrExecutionNeedsAttention
+	}
+	execution.APIMode = mode
 	return nil
 }
 
@@ -151,7 +172,7 @@ func (e *ImageExecutor) prepare(ctx context.Context, leased LeasedItem) (prepare
 		}
 		now := e.clock.Now()
 		requestConfig, _ := json.Marshal(map[string]any{"model": e.model, "size": prompt.ToolConfig.Size, "quality": prompt.ToolConfig.Quality, "store": false})
-		execution := models.AIExecution{PublicID: uuid.NewString(), AIJobItemID: item.ID, AIImageTurnID: &turn.ID, Operation: models.AIExecutionGenerate, Status: models.AIExecutionPreparing, AttemptNumber: item.AttemptCount, L0PolicyVersion: prompt.LayerVersions.L0, L1ProductContextVersion: prompt.LayerVersions.L1, L2TemplateVersionPublicID: prompt.LayerVersions.L2, L3ContentSlotPublicID: prompt.LayerVersions.L3, NormalizedInputJSON: prompt.NormalizedInputJSON, OrderedInputListJSON: prompt.OrderedInputListJSON, CompiledPrompt: prompt.Instructions, CompiledPromptSHA256: prompt.SHA256, UserInstruction: snapshot.UserPreference, Model: e.model, RequestConfigJSON: requestConfig, WorkerID: leased.LeaseOwner, LeaseExpiresAt: item.LeaseExpiresAt, StartedAt: &now}
+		execution := models.AIExecution{PublicID: uuid.NewString(), AIJobItemID: item.ID, AIImageTurnID: &turn.ID, Operation: models.AIExecutionGenerate, Status: models.AIExecutionPreparing, AttemptNumber: item.AttemptCount, L0PolicyVersion: prompt.LayerVersions.L0, L1ProductContextVersion: prompt.LayerVersions.L1, L2TemplateVersionPublicID: prompt.LayerVersions.L2, L3ContentSlotPublicID: prompt.LayerVersions.L3, NormalizedInputJSON: prompt.NormalizedInputJSON, OrderedInputListJSON: prompt.OrderedInputListJSON, CompiledPrompt: prompt.Instructions, CompiledPromptSHA256: prompt.SHA256, UserInstruction: snapshot.UserPreference, Model: e.model, RequestedModel: e.model, APIMode: "responses", RequestConfigJSON: requestConfig, WorkerID: leased.LeaseOwner, LeaseExpiresAt: item.LeaseExpiresAt, StartedAt: &now}
 		if err := tx.Create(&execution).Error; err != nil {
 			return err
 		}
@@ -242,13 +263,17 @@ func (e *ImageExecutor) persistResult(ctx context.Context, p preparedImageExecut
 			return err
 		}
 		now := e.clock.Now()
-		if err := tx.Model(&execution).Updates(map[string]any{"status": models.AIExecutionCompleted, "open_ai_response_id": response.ResponseID, "open_ai_request_id": response.RequestID, "model": response.Model, "input_text_tokens": response.Usage.InputTextTokens, "input_image_tokens": response.Usage.InputImageTokens, "output_text_tokens": response.Usage.OutputTextTokens, "output_image_tokens": response.Usage.OutputImageTokens, "total_tokens": response.Usage.TotalTokens, "completed_at": now, "safe_error": ""}).Error; err != nil {
+		if err := tx.Model(&execution).Updates(map[string]any{"status": models.AIExecutionCompleted, "open_ai_response_id": response.ResponseID, "open_ai_request_id": response.RequestID, "model": response.Model, "actual_model": response.Model, "input_text_tokens": response.Usage.InputTextTokens, "input_image_tokens": response.Usage.InputImageTokens, "output_text_tokens": response.Usage.OutputTextTokens, "output_image_tokens": response.Usage.OutputImageTokens, "total_tokens": response.Usage.TotalTokens, "completed_at": now, "safe_error": "", "failure_code": ""}).Error; err != nil {
 			return err
 		}
 		// A successfully persisted image proves that the credential can use the
 		// configured image tool; keep the settings UI as an operational signal.
 		if execution.OpenAIProviderSettingID != nil {
-			if err := tx.Model(&models.OpenAIProviderSetting{}).Where("id = ?", *execution.OpenAIProviderSettingID).Update("image_capability_verified_at", now).Error; err != nil {
+			verifiedField := "image_responses_verified_at"
+			if execution.APIMode == "images" {
+				verifiedField = "image_generation_verified_at"
+			}
+			if err := tx.Model(&models.OpenAIProviderSetting{}).Where("id = ?", *execution.OpenAIProviderSettingID).Updates(map[string]any{"image_capability_verified_at": now, verifiedField: now}).Error; err != nil {
 				return err
 			}
 		}
@@ -265,16 +290,21 @@ func (e *ImageExecutor) persistResult(ctx context.Context, p preparedImageExecut
 }
 
 func (e *ImageExecutor) fail(ctx context.Context, p preparedImageExecution, status models.AIExecutionStatus, safe, requestID string) error {
-	return e.db.WithContext(context.WithoutCancel(ctx)).Transaction(func(tx *gorm.DB) error {
+	err := e.db.WithContext(context.WithoutCancel(ctx)).Transaction(func(tx *gorm.DB) error {
 		now := e.clock.Now()
-		tx.Model(&models.AIExecution{}).Where("id = ?", p.execution.ID).Updates(map[string]any{"status": status, "safe_error": safe, "open_ai_request_id": requestID, "completed_at": now})
+		if err := tx.Model(&models.AIExecution{}).Where("id = ?", p.execution.ID).Updates(map[string]any{"status": status, "safe_error": safe, "failure_code": failureCodeForSafeError(safe), "open_ai_request_id": requestID, "completed_at": now}).Error; err != nil {
+			return err
+		}
 		turnStatus := models.AIImageTurnFailed
 		if status == models.AIExecutionNeedsAttention {
 			turnStatus = models.AIImageTurnNeedsAttention
 		}
-		tx.Model(&models.AIImageTurn{}).Where("id = ?", p.turn.ID).Updates(map[string]any{"status": turnStatus, "safe_error": safe, "completed_at": now, "lease_owner": "", "lease_expires_at": nil})
-		return errors.New(safe)
+		return tx.Model(&models.AIImageTurn{}).Where("id = ?", p.turn.ID).Updates(map[string]any{"status": turnStatus, "safe_error": safe, "completed_at": now, "lease_owner": "", "lease_expires_at": nil}).Error
 	})
+	if err != nil {
+		return err
+	}
+	return errors.New(safe)
 }
 
 func imageProviderFailureState(err error) (models.AIExecutionStatus, string) {
@@ -283,6 +313,10 @@ func imageProviderFailureState(err error) (models.AIExecutionStatus, string) {
 		return models.AIExecutionNeedsAttention, "OpenAI call outcome is ambiguous"
 	case errors.Is(err, ErrImageProviderAuthentication):
 		return models.AIExecutionFailed, "OpenAI authentication failed"
+	case errors.Is(err, ErrImageProviderRateLimit):
+		return models.AIExecutionFailed, "OpenAI rate limit was reached"
+	case errors.Is(err, ErrImageProviderInvalidRequest):
+		return models.AIExecutionFailed, "Selected OpenAI model is incompatible with this image API mode"
 	case errors.Is(err, ErrImageProviderModeration):
 		return models.AIExecutionFailed, "OpenAI blocked the image request"
 	case errors.Is(err, ErrImageProviderRefusal):

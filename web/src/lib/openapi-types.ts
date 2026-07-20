@@ -1173,12 +1173,22 @@ export interface components {
             key_fingerprint: string;
             /** @description Model used for new text generation tasks. */
             text_model: string;
-            /** @description Responses API host model used with the image_generation tool for new image tasks. */
+            /** @description Deprecated compatibility field containing the currently active image model. */
             image_model: string;
+            /** @enum {string} */
+            image_api_mode: "responses" | "images";
+            /** @description Mainline Responses model that can call the image_generation tool. */
+            image_responses_model: string;
+            /** @description GPT Image model used directly with the Images API. */
+            image_generation_model: string;
             /** Format: date-time */
             verified_at: string | null;
             /** Format: date-time */
             image_capability_verified_at: string | null;
+            /** Format: date-time */
+            image_responses_verified_at: string | null;
+            /** Format: date-time */
+            image_generation_verified_at: string | null;
             /** Format: date-time */
             last_used_at: string | null;
         };
@@ -1189,10 +1199,19 @@ export interface components {
         OpenAIModel: {
             id: string;
             owned_by: string;
+            supports_text: boolean;
+            supports_image_tool: boolean;
+            supports_images_api: boolean;
+            compatibility_reason?: string;
         };
         OpenAIModelSelectionRequest: {
             text_model: string;
-            image_model: string;
+            /** @deprecated */
+            image_model?: string;
+            /** @enum {string} */
+            image_api_mode: "responses" | "images";
+            image_responses_model: string;
+            image_generation_model: string;
         };
         AIContentSlotMutation: {
             slot_key?: string;
@@ -1395,6 +1414,9 @@ export interface components {
             /** @enum {string} */
             snapshot_schema: "cargoflows_product_generation_v1";
             input_snapshot: components["schemas"]["ProductSnapshotV1"];
+            created_by: components["schemas"]["AIJobCreator"];
+            created_by_snapshot: components["schemas"]["AIJobCreator"];
+            model_snapshot: components["schemas"]["AIJobModelSnapshot"];
             /** Format: date-time */
             started_at: string | null;
             /** Format: date-time */
@@ -1419,6 +1441,8 @@ export interface components {
             selected_input_asset_ids: string[];
             attempt_count: number;
             safe_error: string;
+            failure: components["schemas"]["AIJobFailure"] | null;
+            executions: components["schemas"]["AIJobExecution"][];
             /** Format: date-time */
             started_at: string | null;
             /** Format: date-time */
@@ -1427,6 +1451,54 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        AIJobCreator: {
+            /** @description Empty only for legacy jobs that predate creator snapshots. */
+            public_id: string;
+            name: string;
+            email: string;
+        };
+        AIJobModelSnapshot: {
+            text_model: string;
+            /**
+             * @description Empty only for legacy jobs that predate model snapshots.
+             * @enum {string}
+             */
+            image_api_mode: "" | "responses" | "images";
+            image_responses_model: string;
+            image_generation_model: string;
+        };
+        AIJobExecution: {
+            /** Format: uuid */
+            public_id: string;
+            /** @enum {string} */
+            operation: "generate" | "edit" | "restart" | "text_generate";
+            status: string;
+            attempt_number: number;
+            requested_model: string;
+            actual_model: string;
+            /** @enum {string} */
+            api_mode: "responses" | "images";
+            provider_request_id: string;
+            failure_code: string;
+            safe_error: string;
+            /** Format: date-time */
+            started_at: string | null;
+            /** Format: date-time */
+            completed_at: string | null;
+        };
+        AIJobFailure: {
+            code: string;
+            safe_message: string;
+            /** @enum {string} */
+            recovery_action: "review_openai_settings" | "retry_later" | "adjust_input" | "contact_support" | "create_new_job";
+            model: string;
+            /**
+             * @description Empty only when a legacy failure has no execution record.
+             * @enum {string}
+             */
+            api_mode: "" | "responses" | "images";
+            provider_request_id: string;
         };
         AITextResult: {
             /** Format: uuid */
@@ -4267,7 +4339,14 @@ export interface operations {
     };
     listAIJobs: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Case-insensitive filter by immutable creator name */
+                created_by?: string;
+                /** @description Filter by a model recorded in the job snapshot. */
+                model?: string;
+                /** @description Filter by configured image API mode. */
+                api_mode?: "responses" | "images";
+            };
             header?: never;
             path?: never;
             cookie?: never;

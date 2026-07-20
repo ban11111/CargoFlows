@@ -229,6 +229,16 @@ func TestMigrateCreatesAIFoundationTables(t *testing.T) {
 			t.Fatalf("missing AI job column %q", column)
 		}
 	}
+	for _, column := range []string{"created_by_snapshot_json", "model_snapshot_json"} {
+		if !db.Migrator().HasColumn(&models.AIJob{}, column) {
+			t.Fatalf("missing AI job audit column %q", column)
+		}
+	}
+	for _, column := range []string{"requested_model", "actual_model", "api_mode", "failure_code"} {
+		if !db.Migrator().HasColumn(&models.AIExecution{}, column) {
+			t.Fatalf("missing AI execution audit column %q", column)
+		}
+	}
 	if !db.Migrator().HasIndex(&models.AIJob{}, "idx_ai_job_actor_idempotency") {
 		t.Fatal("missing actor-scoped AI job idempotency index")
 	}
@@ -237,6 +247,41 @@ func TestMigrateCreatesAIFoundationTables(t *testing.T) {
 	}
 	if !db.Migrator().HasIndex(&models.AIContentTemplateVersion{}, "idx_ai_template_draft_guard") {
 		t.Fatal("missing unique AI template draft guard index")
+	}
+}
+
+func TestMigrateBackfillsLegacyImageModelIntoCompatibleAPIMode(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	setting := models.OpenAIProviderSetting{Provider: "openai", EncryptedAPIKey: []byte("sealed"), EncryptionNonce: []byte("nonce"), EncryptionKeyVersion: "v1", KeyFingerprint: "TEST", Status: "active", TextModel: "gpt-5.6", ImageModel: "gpt-image-2", CreatedByID: 1, UpdatedByID: 1}
+	if err := db.Create(&setting).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&setting).Updates(map[string]any{"image_api_mode": "", "image_responses_model": "", "image_generation_model": ""}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&setting, setting.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if setting.ImageAPIMode != "images" || setting.ImageGenerationModel != "gpt-image-2" || setting.ImageResponsesModel != "gpt-5.6" {
+		t.Fatalf("direct-image migration = %#v", setting)
+	}
+	if err := db.Model(&setting).Updates(map[string]any{"image_model": "gpt-5.6", "image_api_mode": "", "image_responses_model": "", "image_generation_model": ""}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&setting, setting.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if setting.ImageAPIMode != "responses" || setting.ImageResponsesModel != "gpt-5.6" || setting.ImageGenerationModel != "gpt-image-2" {
+		t.Fatalf("Responses migration = %#v", setting)
 	}
 }
 

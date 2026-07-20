@@ -206,12 +206,8 @@ function mutationPayload(nameZh: string, nameEn: string, platform: string, platf
 
 function parseValidationError(error: unknown): Validation | null {
   if (!(error instanceof ApiError) || error.status !== 422) return null;
-  try {
-    const parsed = JSON.parse(error.message) as Validation;
-    return parsed.code === "template_validation_failed" && Array.isArray(parsed.issues) ? parsed : null;
-  } catch {
-    return null;
-  }
+  const parsed = error.details as Validation | undefined;
+  return parsed?.code === "template_validation_failed" && Array.isArray(parsed.issues) ? parsed : null;
 }
 
 function toMutationSlot(slot: AITemplateSlotInput, sequence: number): components["schemas"]["AIContentSlotMutation"] {

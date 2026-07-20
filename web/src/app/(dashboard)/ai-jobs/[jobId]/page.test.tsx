@@ -15,8 +15,9 @@ function Providers({ children }: { children: ReactNode }) {
 
 const job = {
   public_id: "job-1", sku_id: "11111111-1111-4111-8111-111111111111", template_version_id: "version-1", target_platform: "lazada", locale: "zh-CN", status: "completed", snapshot_schema: "cargoflows_product_generation_v1", started_at: "2026-07-17T00:00:01Z", completed_at: "2026-07-17T00:00:02Z", cancelled_at: null, created_at: "2026-07-17T00:00:00Z", updated_at: "2026-07-17T00:00:02Z",
+  created_by: { public_id: "33333333-3333-4333-8333-333333333333", name: "任务发起人", email: "operator@example.test" }, created_by_snapshot: { public_id: "33333333-3333-4333-8333-333333333333", name: "任务发起人", email: "operator@example.test" }, model_snapshot: { text_model: "gpt-5.6-terra", image_api_mode: "responses", image_responses_model: "gpt-5.6", image_generation_model: "gpt-image-2" },
   input_snapshot: { schema: "cargoflows_product_generation_v1", locale: "zh-CN", target_platform: "lazada", product: { name: "Clear Case", brand: "CargoFlows", description: "Private long description", category: { name_zh: "配件", name_en: "Accessories" } }, sku: { public_id: "11111111-1111-4111-8111-111111111111", code: "CF-CASE-CLR-IP17", color: "透明", size: "iPhone 17", platform_title: "Private title", selling_points: "Private claims", tags: ["clear"] }, sop: { public_id: "sop-1", version_public_id: "sop-v1", version_number: 1, schema_version: "v1", name: { zh: "手机壳拍摄", en: "Case capture" }, description: { zh: "private", en: "private" }, coordinate_system: "pcs_object_v1", views: [] }, template: { template_public_id: "template-1", version_public_id: "version-1", version_number: 1, prompt_compiler_version: "v1", platform_prompt: "SECRET PLATFORM PROMPT", selected_slots: [] }, selected_assets: [{ public_id: "22222222-2222-4222-8222-222222222222", mime_type: "image/jpeg", width: 1024, height: 1024, byte_count: 2048, sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", captured_at: "2026-07-17T00:00:00Z", view: {} }], user_preference: "PRIVATE USER PREFERENCE", generation_overrides: {} },
-  items: [{ public_id: "item-1", slot_key: "hero", kind: "image", status: "completed", slot_snapshot: { public_id: "slot-1", slot_key: "hero", kind: "image", name: { zh: "白底主图", en: "White-background hero" }, description: { zh: "商品主图", en: "Product hero" }, sequence: 1, optional: true, default_selected: false, prompt_fragment: "PRIVATE PROMPT", constraints: {}, generation_config: {}, layout_config: {} }, selected_input_asset_ids: ["22222222-2222-4222-8222-222222222222"], attempt_count: 1, safe_error: "", started_at: "2026-07-17T00:00:01Z", completed_at: "2026-07-17T00:00:02Z", created_at: "2026-07-17T00:00:00Z", updated_at: "2026-07-17T00:00:02Z" }],
+  items: [{ public_id: "item-1", slot_key: "hero", kind: "image", status: "completed", slot_snapshot: { public_id: "slot-1", slot_key: "hero", kind: "image", name: { zh: "白底主图", en: "White-background hero" }, description: { zh: "商品主图", en: "Product hero" }, sequence: 1, optional: true, default_selected: false, prompt_fragment: "PRIVATE PROMPT", constraints: {}, generation_config: {}, layout_config: {} }, selected_input_asset_ids: ["22222222-2222-4222-8222-222222222222"], attempt_count: 1, safe_error: "", failure: null, executions: [{ public_id: "execution-1", operation: "generate", status: "completed", attempt_number: 1, requested_model: "gpt-5.6", actual_model: "gpt-5.6-2026-07-01", api_mode: "responses", provider_request_id: "req_success", failure_code: "", safe_error: "", started_at: "2026-07-17T00:00:01Z", completed_at: "2026-07-17T00:00:02Z" }], started_at: "2026-07-17T00:00:01Z", completed_at: "2026-07-17T00:00:02Z", created_at: "2026-07-17T00:00:00Z", updated_at: "2026-07-17T00:00:02Z" }],
 };
 
 describe("AIJobDetailPage", () => {
@@ -32,10 +33,26 @@ describe("AIJobDetailPage", () => {
     expect(screen.getByText("白底主图")).toBeInTheDocument();
     expect(screen.getByText("1 张已审核图片")).toBeInTheDocument();
     expect(screen.getByText("手机壳拍摄 · V1")).toBeInTheDocument();
+    expect(screen.getByText("任务发起人")).toBeInTheDocument();
+    expect(screen.getByText("operator@example.test")).toBeInTheDocument();
+    expect(screen.getAllByText("gpt-5.6-terra").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("gpt-5.6-2026-07-01").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("/v1/responses").length).toBeGreaterThan(0);
     expect(screen.queryByText(/SECRET PLATFORM PROMPT/)).not.toBeInTheDocument();
     expect(screen.queryByText(/PRIVATE USER PREFERENCE/)).not.toBeInTheDocument();
     expect(screen.queryByText(/signed\.invalid/)).not.toBeInTheDocument();
     expect(screen.queryByText(/private\/key/)).not.toBeInTheDocument();
+  });
+
+  it("shows a structured failure reason, recovery action, attempted model, and request ID", async () => {
+    const failed = { ...job, status: "failed", items: [{ ...job.items[0], status: "failed", safe_error: "Selected OpenAI model is incompatible with this image API mode", failure: { code: "openai_model_incompatible", safe_message: "Selected OpenAI model is incompatible with this image API mode", recovery_action: "review_openai_settings", model: "gpt-image-2", api_mode: "responses", provider_request_id: "req_incompatible" }, executions: [{ ...job.items[0].executions[0], status: "failed", requested_model: "gpt-image-2", actual_model: "", provider_request_id: "req_incompatible", failure_code: "openai_model_incompatible", safe_error: "Selected OpenAI model is incompatible with this image API mode" }] }] };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(failed), { status: 200 }));
+    render(<AIJobDetailPage />, { wrapper: Providers });
+    expect(await screen.findByText("失败原因")).toBeInTheDocument();
+    expect(screen.getByText("Selected OpenAI model is incompatible with this image API mode")).toBeInTheDocument();
+    expect(screen.getByText(/检查模型与 API 路径是否兼容/)).toBeInTheDocument();
+    expect(screen.getAllByText("gpt-image-2").length).toBeGreaterThan(0);
+    expect(screen.getByText("ID: req_incompatible")).toBeInTheDocument();
   });
 
   it("edits, approves, previews, and explicitly applies a text candidate", async () => {

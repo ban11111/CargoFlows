@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"cargoflows/api/internal/models"
@@ -94,7 +95,7 @@ func migrateSchema(db *gorm.DB) error {
 	if err := migrateAITextSchema(db); err != nil {
 		return err
 	}
-	return db.AutoMigrate(
+	if err := db.AutoMigrate(
 		&models.User{},
 		&models.Category{},
 		&models.Tag{},
@@ -130,7 +131,45 @@ func migrateSchema(db *gorm.DB) error {
 		&models.AITextResult{},
 		&models.SKUPlatformContent{},
 		&models.SKUPlatformContentRevision{},
-	)
+	); err != nil {
+		return err
+	}
+	return backfillAIModelConfiguration(db)
+}
+
+func backfillAIModelConfiguration(db *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		var settings []models.OpenAIProviderSetting
+		if err := tx.Find(&settings).Error; err != nil {
+			return err
+		}
+		for _, setting := range settings {
+			mode := setting.ImageAPIMode
+			responsesModel := setting.ImageResponsesModel
+			generationModel := setting.ImageGenerationModel
+			legacy := setting.ImageModel
+			if strings.HasPrefix(strings.ToLower(legacy), "gpt-image-") {
+				mode = "images"
+				generationModel = legacy
+			} else if legacy != "" {
+				mode = "responses"
+				responsesModel = legacy
+			}
+			if mode == "" {
+				mode = "responses"
+			}
+			if responsesModel == "" {
+				responsesModel = "gpt-5.6"
+			}
+			if generationModel == "" {
+				generationModel = "gpt-image-2"
+			}
+			if err := tx.Model(&models.OpenAIProviderSetting{}).Where("id = ?", setting.ID).Updates(map[string]any{"image_api_mode": mode, "image_responses_model": responsesModel, "image_generation_model": generationModel}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func migrateUserSchema(db *gorm.DB) error {

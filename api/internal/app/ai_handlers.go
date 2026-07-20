@@ -48,14 +48,23 @@ func (s *Server) updateOpenAIModels(c *gin.Context) {
 		return
 	}
 	var req openAIModelSelectionRequest
-	if err := decodeJSONStrict(c, &req); err != nil || req.TextModel == nil || req.ImageModel == nil {
+	if err := decodeJSONStrict(c, &req); err != nil || req.TextModel == nil {
 		if err == nil {
-			err = errors.New("text_model and image_model are required")
+			err = errors.New("text_model and image model configuration are required")
 		}
 		respondAIBadRequest(c, err)
 		return
 	}
-	value, err := s.ai.ProviderSettings.UpdateModels(c.Request.Context(), currentUser(c).ID, *req.TextModel, *req.ImageModel)
+	config := ai.ModelConfiguration{TextModel: *req.TextModel}
+	if req.ImageAPIMode != nil && req.ImageResponsesModel != nil && req.ImageGenerationModel != nil {
+		config.ImageAPIMode, config.ImageResponsesModel, config.ImageGenerationModel = *req.ImageAPIMode, *req.ImageResponsesModel, *req.ImageGenerationModel
+	} else if req.ImageModel != nil {
+		config.ImageAPIMode, config.ImageResponsesModel, config.ImageGenerationModel = "responses", *req.ImageModel, ai.DefaultOpenAIImageGenerationModel
+	} else {
+		respondAIBadRequest(c, errors.New("image_api_mode, image_responses_model, and image_generation_model are required"))
+		return
+	}
+	value, err := s.ai.ProviderSettings.UpdateModels(c.Request.Context(), currentUser(c).ID, config)
 	if err != nil {
 		respondAIError(c, err)
 		return
@@ -126,7 +135,15 @@ func (s *Server) createAIJob(c *gin.Context) {
 }
 
 func (s *Server) listAIJobs(c *gin.Context) {
-	values, err := s.ai.Jobs.List(c.Request.Context())
+	apiMode := c.Query("api_mode")
+	if apiMode == "" {
+		apiMode = c.Query("image_api_mode")
+	}
+	if apiMode != "" && apiMode != "responses" && apiMode != "images" {
+		respondAIBadRequest(c, errors.New("api_mode must be responses or images"))
+		return
+	}
+	values, err := s.ai.Jobs.ListFiltered(c.Request.Context(), ai.JobListFilters{CreatedBy: c.Query("created_by"), Model: c.Query("model"), APIMode: apiMode})
 	if err != nil {
 		respondAIError(c, err)
 		return
