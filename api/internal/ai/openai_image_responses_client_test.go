@@ -115,6 +115,23 @@ func TestResponsesImageClientRejectsInvalidRequestAndResponse(t *testing.T) {
 	}
 }
 
+func TestResponsesImageClientUsesPerRequestModel(t *testing.T) {
+	client := NewOpenAIImageResponsesClient("https://api.openai.invalid/v1", nil, OpenAIImageResponsesConfig{Model: "fallback-model"})
+	request := responsesImageRequest(t, models.AIExecutionGenerate)
+	request.Model = "selected-image-host-model"
+	body, err := client.requestBody(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded["model"] != "selected-image-host-model" {
+		t.Fatalf("model = %v", decoded["model"])
+	}
+}
+
 func TestResponsesImageClientRetriesOnlyRateLimits(t *testing.T) {
 	for _, tc := range []struct {
 		name         string

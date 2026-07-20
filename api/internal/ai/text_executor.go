@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"cargoflows/api/internal/models"
@@ -92,6 +93,14 @@ func (executor *TextExecutor) Execute(ctx context.Context, leased LeasedItem) er
 		persistErr := executor.markProviderFailure(ctx, prepared.execution.ID, models.AIExecutionFailed, "OpenAI credential is unavailable", "")
 		return errors.Join(ErrProviderNotActive, persistErr)
 	}
+	runtimeModel := prepared.execution.Model
+	if prepared.newExecution {
+		runtimeModel = configuredModel(credential.TextModel, executor.config.Model)
+		if err := bindExecutionModel(ctx, executor.db, &prepared.execution, runtimeModel); err != nil {
+			persistErr := executor.markProviderFailure(ctx, prepared.execution.ID, models.AIExecutionFailed, "OpenAI model selection could not be stored", "")
+			return errors.Join(err, persistErr)
+		}
+	}
 	if err := executor.dispatch(ctx, leased, prepared, credential); err != nil {
 		if errors.Is(err, ErrLeaseLost) {
 			return err
@@ -100,6 +109,7 @@ func (executor *TextExecutor) Execute(ctx context.Context, leased LeasedItem) er
 		return errors.Join(err, persistErr)
 	}
 	response, providerErr := executor.provider.Generate(ctx, credential.APIKey, TextRequest{
+		Model:  runtimeModel,
 		Prompt: prepared.prompt,
 		Inputs: inputs,
 		Metadata: map[string]string{
@@ -141,6 +151,7 @@ type preparedTextExecution struct {
 	completed      bool
 	recoverStored  bool
 	needsAttention bool
+	newExecution   bool
 }
 
 func (executor *TextExecutor) prepare(ctx context.Context, leased LeasedItem) (preparedTextExecution, error) {
@@ -213,7 +224,7 @@ func (executor *TextExecutor) prepare(ctx context.Context, leased LeasedItem) (p
 			if createErr := tx.Create(&existing).Error; createErr != nil {
 				return createErr
 			}
-			prepared = preparedTextExecution{execution: existing, prompt: prompt, jobPublicID: job.PublicID, itemPublicID: item.PublicID, sourceKeys: sourceKeys}
+			prepared = preparedTextExecution{execution: existing, prompt: prompt, jobPublicID: job.PublicID, itemPublicID: item.PublicID, sourceKeys: sourceKeys, newExecution: true}
 		}
 		return nil
 	})
@@ -276,7 +287,7 @@ func (executor *TextExecutor) dispatch(ctx context.Context, leased LeasedItem, p
 		if executionUpdate.RowsAffected != 1 {
 			return ErrExecutionNeedsAttention
 		}
-		metadata, err := json.Marshal(map[string]any{"model": executor.config.Model, "key_fingerprint": credential.KeyFingerprint, "attempt_number": prepared.execution.AttemptNumber, "input_image_count": len(prepared.sourceKeys)})
+		metadata, err := json.Marshal(map[string]any{"model": prepared.execution.Model, "key_fingerprint": credential.KeyFingerprint, "attempt_number": prepared.execution.AttemptNumber, "input_image_count": len(prepared.sourceKeys)})
 		if err != nil {
 			return err
 		}
@@ -513,6 +524,33 @@ func clearBytes(value []byte) {
 	for index := range value {
 		value[index] = 0
 	}
+}
+
+func bindExecutionModel(ctx context.Context, db *gorm.DB, execution *models.AIExecution, model string) error {
+	if execution == nil || strings.TrimSpace(model) == "" {
+		return ErrProviderModelInvalid
+	}
+	var requestConfig map[string]any
+	if err := json.Unmarshal(execution.RequestConfigJSON, &requestConfig); err != nil {
+		return err
+	}
+	requestConfig["model"] = model
+	encoded, err := json.Marshal(requestConfig)
+	if err != nil {
+		return err
+	}
+	result := db.WithContext(ctx).Model(&models.AIExecution{}).
+		Where("id = ? AND status = ?", execution.ID, models.AIExecutionPreparing).
+		Updates(map[string]any{"model": model, "request_config_json": encoded})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrExecutionNeedsAttention
+	}
+	execution.Model = model
+	execution.RequestConfigJSON = encoded
+	return nil
 }
 
 type KindRoutingExecutor struct {

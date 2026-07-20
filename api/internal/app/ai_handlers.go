@@ -42,6 +42,27 @@ func (s *Server) listOpenAIModels(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": values})
 }
 
+func (s *Server) updateOpenAIModels(c *gin.Context) {
+	if s.ai.ProviderSettings == nil {
+		respondAIUnavailable(c)
+		return
+	}
+	var req openAIModelSelectionRequest
+	if err := decodeJSONStrict(c, &req); err != nil || req.TextModel == nil || req.ImageModel == nil {
+		if err == nil {
+			err = errors.New("text_model and image_model are required")
+		}
+		respondAIBadRequest(c, err)
+		return
+	}
+	value, err := s.ai.ProviderSettings.UpdateModels(c.Request.Context(), currentUser(c).ID, *req.TextModel, *req.ImageModel)
+	if err != nil {
+		respondAIError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, openAISettingDTOFromView(value))
+}
+
 func (s *Server) putOpenAISetting(c *gin.Context) {
 	if s.ai.ProviderSettings == nil {
 		respondAIUnavailable(c)
@@ -463,6 +484,8 @@ func respondAIError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"code": "provider_not_active", "message": err.Error()})
 	case errors.Is(err, ai.ErrProviderModelsUnavailable):
 		c.JSON(http.StatusBadGateway, gin.H{"code": "provider_models_unavailable", "message": "OpenAI model list is unavailable"})
+	case errors.Is(err, ai.ErrProviderModelInvalid):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "provider_model_invalid", "message": "Selected OpenAI model is not available to this credential"})
 	case errors.Is(err, ai.ErrTemplateNotFound), errors.Is(err, ai.ErrTemplateVersionNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
 	case errors.Is(err, ai.ErrJobNotFound), errors.Is(err, ai.ErrSKUNotFound):

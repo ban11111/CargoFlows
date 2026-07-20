@@ -112,6 +112,55 @@ func TestListModelsUsesActiveDecryptedCredential(t *testing.T) {
 	}
 }
 
+func TestUpdateModelsValidatesPersistsAndReturnsRuntimeSelections(t *testing.T) {
+	db := providerTestDB(t)
+	verifier := &fakeVerifier{
+		result: ProviderVerification{Authenticated: true},
+		models: []ProviderModel{{ID: "gpt-text", OwnedBy: "openai"}, {ID: "gpt-image-host", OwnedBy: "openai"}},
+	}
+	service := providerService(t, db, verifier)
+	configured, err := service.Configure(t.Context(), 1, "sk-proj-model-selection-WXYZ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configured.TextModel != DefaultOpenAITextModel || configured.ImageModel != DefaultOpenAIImageModel {
+		t.Fatalf("defaults = %q/%q", configured.TextModel, configured.ImageModel)
+	}
+
+	view, err := service.UpdateModels(t.Context(), 9, " gpt-text ", "gpt-image-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.TextModel != "gpt-text" || view.ImageModel != "gpt-image-host" {
+		t.Fatalf("view = %#v", view)
+	}
+	credential, err := service.DecryptActiveCredential(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clearByteSlice(credential.APIKey)
+	if credential.TextModel != "gpt-text" || credential.ImageModel != "gpt-image-host" {
+		t.Fatalf("credential models = %q/%q", credential.TextModel, credential.ImageModel)
+	}
+	var row models.OpenAIProviderSetting
+	if err := db.First(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	if row.UpdatedByID != 9 {
+		t.Fatalf("updated actor = %d", row.UpdatedByID)
+	}
+
+	if _, err := service.UpdateModels(t.Context(), 10, "not-visible", "gpt-image-host"); !errors.Is(err, ErrProviderModelInvalid) {
+		t.Fatalf("unknown model error = %v", err)
+	}
+	if err := db.First(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	if row.TextModel != "gpt-text" || row.UpdatedByID != 9 {
+		t.Fatalf("invalid update mutated row: %#v", row)
+	}
+}
+
 func TestConfigureRejectsInvalidOrUnauthenticatedKey(t *testing.T) {
 	db := providerTestDB(t)
 	verifier := &fakeVerifier{}

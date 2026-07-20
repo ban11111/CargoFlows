@@ -102,6 +102,10 @@ func (client *OpenAIImageResponsesClient) Generate(ctx context.Context, apiKey [
 }
 
 func (client *OpenAIImageResponsesClient) requestBody(request ImageRequest) ([]byte, error) {
+	model := strings.TrimSpace(request.Model)
+	if model == "" {
+		model = client.config.Model
+	}
 	if len(request.Prompt.NormalizedInputJSON) == 0 || len(request.Prompt.OrderedInputListJSON) == 0 || request.Prompt.Instructions == "" || request.Prompt.ToolConfig.Moderation != "auto" || (request.Prompt.ToolConfig.Action != "generate" && request.Prompt.ToolConfig.Action != "edit") || !supportedImageSize(request.Prompt.ToolConfig.Size) || !supportedQuality(request.Prompt.ToolConfig.Quality) || len(request.Inputs) == 0 || len(request.Metadata) > 16 {
 		return nil, &ImageProviderError{Kind: ErrImageProviderInvalidRequest}
 	}
@@ -140,7 +144,7 @@ func (client *OpenAIImageResponsesClient) requestBody(request ImageRequest) ([]b
 		ToolChoice   map[string]string `json:"tool_choice"`
 		Metadata     map[string]string `json:"metadata,omitempty"`
 	}{
-		Model: client.config.Model, Instructions: request.Prompt.Instructions, Store: false,
+		Model: model, Instructions: request.Prompt.Instructions, Store: false,
 		Input:      []map[string]any{{"role": "user", "content": content}},
 		Tools:      []map[string]any{{"type": "image_generation", "action": request.Prompt.ToolConfig.Action, "size": request.Prompt.ToolConfig.Size, "quality": request.Prompt.ToolConfig.Quality, "moderation": "auto"}},
 		ToolChoice: map[string]string{"type": "image_generation"}, Metadata: request.Metadata,

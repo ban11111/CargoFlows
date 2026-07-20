@@ -69,10 +69,14 @@ func (e *ImageExecutor) Execute(ctx context.Context, leased LeasedItem) error {
 	if err != nil || len(credential.APIKey) == 0 || credential.SettingID == 0 || credential.KeyFingerprint == "" {
 		return e.fail(ctx, p, models.AIExecutionFailed, "OpenAI credential is unavailable", "")
 	}
+	runtimeModel := configuredModel(credential.ImageModel, e.model)
+	if err := bindExecutionModel(ctx, e.db, &p.execution, runtimeModel); err != nil {
+		return e.fail(ctx, p, models.AIExecutionFailed, "OpenAI model selection could not be stored", "")
+	}
 	if err := e.dispatch(ctx, leased, p, credential); err != nil {
 		return e.fail(ctx, p, models.AIExecutionFailed, "OpenAI dispatch failed before a confirmed call", "")
 	}
-	response, providerErr := e.provider.Generate(ctx, credential.APIKey, ImageRequest{Prompt: p.prompt, Inputs: inputs, Metadata: map[string]string{"job_id": p.job.PublicID, "job_item_id": p.item.PublicID, "execution_id": p.execution.PublicID}})
+	response, providerErr := e.provider.Generate(ctx, credential.APIKey, ImageRequest{Model: runtimeModel, Prompt: p.prompt, Inputs: inputs, Metadata: map[string]string{"job_id": p.job.PublicID, "job_item_id": p.item.PublicID, "execution_id": p.execution.PublicID}})
 	clearBytes(credential.APIKey)
 	if providerErr != nil {
 		status, safe := imageProviderFailureState(providerErr)
@@ -218,7 +222,7 @@ func (e *ImageExecutor) dispatch(ctx context.Context, leased LeasedItem, p prepa
 		if err := tx.Model(&models.AIImageTurn{}).Where("id = ? AND status = ?", p.turn.ID, models.AIImageTurnQueued).Updates(map[string]any{"status": models.AIImageTurnRunning, "lease_owner": leased.LeaseOwner, "lease_expires_at": p.item.LeaseExpiresAt, "started_at": now}).Error; err != nil {
 			return err
 		}
-		metadata, _ := json.Marshal(map[string]any{"model": e.model, "key_fingerprint": credential.KeyFingerprint, "size": p.prompt.ToolConfig.Size, "quality": p.prompt.ToolConfig.Quality})
+		metadata, _ := json.Marshal(map[string]any{"model": p.execution.Model, "key_fingerprint": credential.KeyFingerprint, "size": p.prompt.ToolConfig.Size, "quality": p.prompt.ToolConfig.Quality})
 		jobID, itemID, executionID := p.job.ID, p.item.ID, p.execution.ID
 		return tx.Create(&models.AIAuditEvent{PublicID: uuid.NewString(), EventType: "ai_execution.image_dispatched", EntityType: "ai_execution", EntityPublicID: p.execution.PublicID, AIJobID: &jobID, AIJobItemID: &itemID, AIExecutionID: &executionID, MetadataJSON: metadata}).Error
 	})

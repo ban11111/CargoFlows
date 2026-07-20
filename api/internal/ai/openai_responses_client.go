@@ -105,6 +105,10 @@ func (client *OpenAIResponsesClient) Generate(ctx context.Context, apiKey []byte
 }
 
 func (client *OpenAIResponsesClient) requestBody(request TextRequest) ([]byte, error) {
+	model := strings.TrimSpace(request.Model)
+	if model == "" {
+		model = client.config.Model
+	}
 	if len(request.Prompt.InputJSON) == 0 || len(request.Prompt.JSONSchema) == 0 || request.Prompt.SchemaName == "" || request.Prompt.CandidateCount < 1 || len(request.Metadata) > 16 {
 		return nil, &TextProviderError{Kind: ErrTextProviderInvalidRequest}
 	}
@@ -135,7 +139,7 @@ func (client *OpenAIResponsesClient) requestBody(request TextRequest) ([]byte, e
 		Text         any               `json:"text"`
 		Metadata     map[string]string `json:"metadata,omitempty"`
 	}{
-		Model: client.config.Model, Instructions: request.Prompt.Instructions, Input: []map[string]any{{"role": "user", "content": content}}, Store: false,
+		Model: model, Instructions: request.Prompt.Instructions, Input: []map[string]any{{"role": "user", "content": content}}, Store: false,
 		Reasoning: map[string]string{"effort": client.config.ReasoningEffort},
 		Text:      map[string]any{"format": map[string]any{"type": "json_schema", "name": request.Prompt.SchemaName, "schema": request.Prompt.JSONSchema, "strict": true}},
 		Metadata:  request.Metadata,

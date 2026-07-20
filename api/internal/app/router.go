@@ -179,6 +179,7 @@ func registerAIRoutes(protected *gin.RouterGroup, server *Server) {
 	aiSettings.Use(requireRoles(models.RoleSuperAdmin))
 	aiSettings.GET("/settings/openai", server.getOpenAISetting)
 	aiSettings.GET("/settings/openai/models", server.listOpenAIModels)
+	aiSettings.PATCH("/settings/openai/models", server.updateOpenAIModels)
 	aiSettings.PUT("/settings/openai", server.putOpenAISetting)
 	aiSettings.DELETE("/settings/openai", server.disableOpenAISetting)
 	aiAdmin := protected.Group("")

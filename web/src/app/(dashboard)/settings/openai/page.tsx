@@ -33,6 +33,8 @@ const emptySetting: OpenAISetting = {
   provider: "openai",
   status: "unconfigured",
   key_fingerprint: "",
+  text_model: "gpt-5.6-terra",
+  image_model: "gpt-5.6",
   verified_at: null,
   image_capability_verified_at: null,
   last_used_at: null,
@@ -71,7 +73,6 @@ export default function OpenAISettingsPage() {
   const [showSecret, setShowSecret] = useState(false);
   const [fieldError, setFieldError] = useState<MessageKey | null>(null);
   const [notice, setNotice] = useState<MessageKey | null>(null);
-  const [selectedModel, setSelectedModel] = useState("");
 
   function setSecret(value: string) {
     secretRef.current = value;
@@ -96,17 +97,6 @@ export default function OpenAISettingsPage() {
   const setting = settingQuery.data ?? emptySetting;
   const forbidden = settingQuery.error instanceof ApiError && settingQuery.error.status === 403;
   const configured = Boolean(setting.key_fingerprint);
-
-  const modelsQuery = useQuery({
-    queryKey: ["openai-models", setting.key_fingerprint],
-    queryFn: getModels,
-    enabled: configured && setting.status === "active",
-    retry: false,
-    staleTime: 0,
-  });
-  const models = modelsQuery.data;
-  const visibleModels = models ?? [];
-  const visibleModel = visibleModels.some((model) => model.id === selectedModel) ? selectedModel : visibleModels[0]?.id ?? "";
 
   const saveMutation = useMutation({
     mutationFn: () => safeOpenAIRequest<OpenAISetting>("/settings/openai", {
@@ -192,6 +182,8 @@ export default function OpenAISettingsPage() {
               <Detail label={t("openAIProvider")} value="OpenAI" />
               <Detail label={t("openAICompatibility")} value={t("openAICompatibilityValue")} />
               <Detail label={t("openAIKeyFingerprint")} value={setting.key_fingerprint || t("openAINever")} mono />
+              <Detail label={t("openAITextModelLabel")} value={setting.text_model} mono />
+              <Detail label={t("openAIImageModelLabel")} value={setting.image_model} mono />
               <Detail label={t("openAIVerifiedAt")} value={formatDate(setting.verified_at, language, t("openAINever"))} />
               <Detail label={t("openAIImageVerifiedAt")} value={formatDate(setting.image_capability_verified_at, language, t("openAINever"))} />
               <Detail label={t("openAILastUsedAt")} value={formatDate(setting.last_used_at, language, t("openAINever"))} />
@@ -221,26 +213,8 @@ export default function OpenAISettingsPage() {
             </CardContent>
           </Card>
 
+          {verified ? <ModelSettingsCard key={setting.key_fingerprint} setting={setting} /> : null}
           {configured && setting.status !== "disabled" ? <section className="rounded-lg border border-danger/30 bg-card p-5" aria-labelledby="openai-danger-title"><div className="flex items-start gap-3"><ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-danger" /><div className="min-w-0 flex-1"><h2 className="font-semibold text-danger" id="openai-danger-title">{t("openAIDangerZone")}</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">{t("openAIDangerDescription")}</p><Button className="mt-4 min-h-11" disabled={disableMutation.isPending || saveMutation.isPending} onClick={disable} variant="danger">{disableMutation.isPending ? <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <ShieldAlert className="h-4 w-4" />}{disableMutation.isPending ? t("openAIDisabling") : t("openAIDisable")}</Button>{disableMutation.isError ? <p className="mt-3 text-sm text-danger" role="alert">{t("openAIDisableError")}</p> : null}</div></div></section> : null}
-          {verified ? <Card>
-            <CardHeader><CardTitle className="flex items-center gap-2"><MonitorCog className="h-4 w-4 text-primary" />{t("openAIModelsTitle")}</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="openai-model">{t("openAIModelLabel")}</Label>
-                <select aria-describedby="openai-model-help" className="flex min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm shadow-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50" disabled={modelsQuery.isLoading || modelsQuery.isError || visibleModels.length === 0} id="openai-model" onChange={(event) => setSelectedModel(event.target.value)} value={visibleModel}>
-                  {modelsQuery.isLoading ? <option value="">{t("openAIModelsLoading")}</option> : null}
-                  {!modelsQuery.isLoading && visibleModels.length === 0 ? <option value="">{t("openAIModelsEmpty")}</option> : null}
-                  {visibleModels.map((model) => <option key={model.id} value={model.id}>{model.id}{model.owned_by ? ` · ${model.owned_by}` : ""}</option>)}
-                </select>
-                <p className="text-sm leading-5 text-muted-foreground" id="openai-model-help">{t("openAIModelHelper")}</p>
-              </div>
-              {modelsQuery.isError ? <div className="rounded-md border border-danger/30 bg-danger/5 p-3" role="alert"><p className="text-sm text-danger">{t("openAIModelsError")}</p></div> : null}
-              <div className="flex items-center justify-between gap-3 border-t border-border pt-4">
-                <p aria-live="polite" className="text-xs text-muted-foreground">{modelsQuery.isSuccess ? t("openAIModelsCount").replace("{count}", String(visibleModels.length)) : ""}</p>
-                <Button className="min-h-11" disabled={modelsQuery.isFetching} onClick={() => modelsQuery.refetch()} type="button" variant="secondary"><RotateCw className={`h-4 w-4 ${modelsQuery.isFetching ? "animate-spin motion-reduce:animate-none" : ""}`} />{t("openAIModelsRefresh")}</Button>
-              </div>
-            </CardContent>
-          </Card> : null}
         </div>
       </div>
       {notice ? (
@@ -250,6 +224,71 @@ export default function OpenAISettingsPage() {
       ) : null}
     </div>
   );
+}
+
+function ModelSettingsCard({ setting }: { setting: OpenAISetting }) {
+  const { t } = useLanguage();
+  const queryClient = useQueryClient();
+  const [textModel, setTextModel] = useState(setting.text_model);
+  const [imageModel, setImageModel] = useState(setting.image_model);
+  const [saved, setSaved] = useState(false);
+  const modelsQuery = useQuery({
+    queryKey: ["openai-models", setting.key_fingerprint],
+    queryFn: getModels,
+    retry: false,
+    staleTime: 0,
+  });
+  const models = modelsQuery.data ?? [];
+  const canSave = modelsQuery.isSuccess && models.length > 0 && (textModel !== setting.text_model || imageModel !== setting.image_model);
+  const saveModels = useMutation({
+    mutationFn: () => safeOpenAIRequest<OpenAISetting>("/settings/openai/models", {
+      method: "PATCH",
+      body: JSON.stringify({ text_model: textModel, image_model: imageModel }),
+    }),
+    onSuccess(next) {
+      queryClient.setQueryData(["openai-setting"], next);
+      setSaved(true);
+    },
+  });
+  const options = (current: string) => models.some((model) => model.id === current)
+    ? models
+    : [{ id: current, owned_by: "" }, ...models];
+  const placeholder = modelsQuery.isLoading
+    ? t("openAIModelsLoading")
+    : modelsQuery.isError
+      ? t("openAIModelsUnavailable")
+      : t("openAIModelsEmpty");
+  const disabled = modelsQuery.isLoading || modelsQuery.isError || models.length === 0 || saveModels.isPending;
+
+  return <Card>
+    <CardHeader><CardTitle className="flex items-center gap-2"><MonitorCog className="h-4 w-4 text-primary" />{t("openAIModelsTitle")}</CardTitle></CardHeader>
+    <CardContent className="space-y-5">
+      <p className="text-sm leading-6 text-muted-foreground">{t("openAIModelsIntro")}</p>
+      <ModelSelect id="openai-text-model" label={t("openAITextModelLabel")} help={t("openAITextModelHelper")} value={textModel} onChange={(value) => { setTextModel(value); setSaved(false); saveModels.reset(); }} models={options(textModel)} placeholder={placeholder} disabled={disabled} />
+      <ModelSelect id="openai-image-model" label={t("openAIImageModelLabel")} help={t("openAIImageModelHelper")} value={imageModel} onChange={(value) => { setImageModel(value); setSaved(false); saveModels.reset(); }} models={options(imageModel)} placeholder={placeholder} disabled={disabled} />
+      {modelsQuery.isError ? <div className="rounded-md border border-danger/30 bg-danger/5 p-3" role="alert"><p className="text-sm text-danger">{t("openAIModelsError")}</p></div> : null}
+      {saveModels.isError ? <div className="rounded-md border border-danger/30 bg-danger/5 p-3" role="alert"><p className="text-sm text-danger">{t("openAIModelsSaveError")}</p></div> : null}
+      {saved ? <p className="flex items-center gap-2 text-sm text-success" role="status"><CheckCircle2 className="h-4 w-4" />{t("openAIModelsSaveSuccess")}</p> : null}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+        <p aria-live="polite" className="text-xs text-muted-foreground">{modelsQuery.isSuccess ? t("openAIModelsCount").replace("{count}", String(models.length)) : ""}</p>
+        <div className="flex gap-2">
+          <Button className="min-h-11" disabled={modelsQuery.isFetching || saveModels.isPending} onClick={() => { setSaved(false); modelsQuery.refetch(); }} type="button" variant="secondary"><RotateCw className={`h-4 w-4 ${modelsQuery.isFetching ? "animate-spin motion-reduce:animate-none" : ""}`} />{t("openAIModelsRefresh")}</Button>
+          <Button className="min-h-11" disabled={!canSave || saveModels.isPending} onClick={() => saveModels.mutate()} type="button">{saveModels.isPending ? <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <Check className="h-4 w-4" />}{saveModels.isPending ? t("openAIModelsSaving") : t("openAIModelsSave")}</Button>
+        </div>
+      </div>
+    </CardContent>
+  </Card>;
+}
+
+function ModelSelect({ id, label, help, value, onChange, models, placeholder, disabled }: { id: string; label: string; help: string; value: string; onChange: (value: string) => void; models: OpenAIModel[]; placeholder: string; disabled: boolean }) {
+  return <div className="space-y-2">
+    <Label htmlFor={id}>{label}</Label>
+    <select aria-describedby={`${id}-help`} className="flex min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm shadow-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50" disabled={disabled} id={id} onChange={(event) => onChange(event.target.value)} value={value}>
+      {models.length === 0 ? <option value="">{placeholder}</option> : null}
+      {models.map((model) => <option key={model.id} value={model.id}>{model.id}{model.owned_by ? ` · ${model.owned_by}` : ""}</option>)}
+    </select>
+    <p className="text-sm leading-5 text-muted-foreground" id={`${id}-help`}>{help}</p>
+  </div>;
 }
 
 function StatusNode({ complete, label, ready, pending, last = false }: { complete: boolean; label: string; ready: string; pending: string; last?: boolean }) {

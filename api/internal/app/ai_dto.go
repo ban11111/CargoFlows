@@ -12,6 +12,11 @@ type openAISettingRequest struct {
 	APIKey *string `json:"api_key"`
 }
 
+type openAIModelSelectionRequest struct {
+	TextModel  *string `json:"text_model"`
+	ImageModel *string `json:"image_model"`
+}
+
 type createAIJobRequest struct {
 	SKUID                   string                           `json:"sku_id"`
 	TemplateVersionPublicID string                           `json:"template_version_id"`
@@ -31,6 +36,8 @@ type openAISettingDTO struct {
 	Provider                  string     `json:"provider"`
 	Status                    string     `json:"status"`
 	KeyFingerprint            string     `json:"key_fingerprint"`
+	TextModel                 string     `json:"text_model"`
+	ImageModel                string     `json:"image_model"`
 	VerifiedAt                *time.Time `json:"verified_at"`
 	ImageCapabilityVerifiedAt *time.Time `json:"image_capability_verified_at"`
 	LastUsedAt                *time.Time `json:"last_used_at"`

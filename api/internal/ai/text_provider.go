@@ -19,6 +19,7 @@ var (
 )
 
 type TextRequest struct {
+	Model    string
 	Prompt   CompiledTextPrompt
 	Inputs   []ImageInput
 	Metadata map[string]string

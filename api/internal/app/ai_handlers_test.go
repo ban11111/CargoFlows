@@ -147,6 +147,20 @@ func TestOpenAIModelsAreFetchedForSuperAdminWithActiveCredential(t *testing.T) {
 	if forbidden.Code != http.StatusForbidden {
 		t.Fatalf("operator models status = %d", forbidden.Code)
 	}
+
+	verifier.models = append(verifier.models, ai.ProviderModel{ID: "gpt-image-host", OwnedBy: "openai"})
+	updated := aiRequest(t, server, server.token(t, admin), http.MethodPatch, "/api/v1/settings/openai/models", `{"text_model":"gpt-live","image_model":"gpt-image-host"}`)
+	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"text_model":"gpt-live"`) || !strings.Contains(updated.Body.String(), `"image_model":"gpt-image-host"`) {
+		t.Fatalf("update models = %d %s", updated.Code, updated.Body.String())
+	}
+	invalid := aiRequest(t, server, server.token(t, admin), http.MethodPatch, "/api/v1/settings/openai/models", `{"text_model":"unknown","image_model":"gpt-image-host"}`)
+	if invalid.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid model = %d %s", invalid.Code, invalid.Body.String())
+	}
+	forbidden = aiRequest(t, server, server.token(t, operator), http.MethodPatch, "/api/v1/settings/openai/models", `{"text_model":"gpt-live","image_model":"gpt-image-host"}`)
+	if forbidden.Code != http.StatusForbidden {
+		t.Fatalf("operator model update status = %d", forbidden.Code)
+	}
 }
 
 func TestTextResultReviewAndApplicationRoutesAreOperatorSafe(t *testing.T) {
@@ -600,6 +614,10 @@ func TestAIOpenAPIHasExactAdminPathsAndNeverExposesCredentialMaterial(t *testing
 			"put":    {"200", "400", "401", "403", "422", "500", "503"},
 			"delete": {"200", "401", "403", "404", "500", "503"},
 		},
+		"/settings/openai/models": {
+			"get":   {"200", "401", "403", "409", "502", "503"},
+			"patch": {"200", "400", "401", "403", "409", "422", "502", "503"},
+		},
 		"/ai-content-templates": {
 			"get":  {"200", "400", "401", "403", "500"},
 			"post": {"201", "400", "401", "403", "500"},
@@ -634,7 +652,7 @@ func TestAIOpenAPIHasExactAdminPathsAndNeverExposesCredentialMaterial(t *testing
 	}
 
 	schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
-	for _, name := range []string{"OpenAISetting", "OpenAISettingRequest", "AIContentTemplate", "AIContentTemplateVersion", "AIContentSlot", "AIContentTemplateMutationRequest", "AITemplateValidationResponse"} {
+	for _, name := range []string{"OpenAISetting", "OpenAISettingRequest", "OpenAIModel", "OpenAIModelSelectionRequest", "AIContentTemplate", "AIContentTemplateVersion", "AIContentSlot", "AIContentTemplateMutationRequest", "AITemplateValidationResponse"} {
 		if _, ok := schemas[name]; !ok {
 			t.Errorf("missing schema %s", name)
 		}
