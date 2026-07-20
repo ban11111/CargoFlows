@@ -69,6 +69,38 @@ func TestCompileImagePromptLayersProductAndCoordinateRules(t *testing.T) {
 	}
 }
 
+func TestCompileImagePromptCombinesChosenRequirementsOnOneCanvas(t *testing.T) {
+	snapshot, hero := imagePromptFixture()
+	detail := hero
+	detail.PublicID = "99999999-9999-4999-8999-999999999999"
+	detail.SlotKey = "detail"
+	detail.Name = LocalizedNameFacts{ZH: "细节卖点", EN: "Detail benefits"}
+	detail.PromptFragment = "Show edge protection and tactile button details for {{sku.code}}."
+	detail.LayoutConfig = json.RawMessage(`{"detail_inset":"right"}`)
+	snapshot.Template.SelectedSlots = []SlotFacts{hero, detail}
+	count := 3
+	hero.CanvasKey = "canvas-a"
+	hero.CanvasGeneration = &GenerationOverride{CandidateCount: &count}
+	heroRequirement := hero
+	heroRequirement.CanvasKey = ""
+	heroRequirement.CanvasGeneration = nil
+	hero.CompositeRequirements = []SlotFacts{heroRequirement, detail}
+
+	compiled, err := CompileImagePrompt(snapshot, hero, ImageTurnInput{Operation: models.AIExecutionGenerate, ThreadPublicID: "thread-composite"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compiled.CandidateCount != 3 {
+		t.Fatalf("canvas-specific generation override was ignored: %#v", compiled)
+	}
+	joined := compiled.Instructions + string(compiled.NormalizedInputJSON)
+	for _, required := range []string{"one coherent image", "simultaneous requirements", "[Requirement hero /", "[Requirement detail /", "edge protection", `"canvas_key":"canvas-a"`, `"composite_requirements"`, `"slot_key":"hero"`, `"slot_key":"detail"`} {
+		if !strings.Contains(joined, required) {
+			t.Fatalf("composite prompt missing %q: %s", required, joined)
+		}
+	}
+}
+
 func TestCompileImagePromptDistinguishesEditAndRestart(t *testing.T) {
 	snapshot, slot := imagePromptFixture()
 	edit, err := CompileImagePrompt(snapshot, slot, ImageTurnInput{Operation: models.AIExecutionEdit, ThreadPublicID: "thread-a", ParentThreadPublicID: "thread-a", ParentResultPublicID: "parent-result-a", UserInstruction: "只调整背景为浅蓝色"})

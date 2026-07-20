@@ -266,6 +266,49 @@ func validateDryRunProvenance(job models.AIJob, item models.AIJobItem, version m
 	if matchingSelectedSlots != 1 {
 		return dryRunProvenance{}, invalidExecutionInput("selected slot provenance is missing or duplicated")
 	}
+	seenCanvasKeys := make(map[string]struct{}, len(snapshot.ImageCanvases))
+	matchingCanvases := 0
+	for _, canvas := range snapshot.ImageCanvases {
+		if canvas.CanvasKey == "" || len(canvas.SlotKeys) == 0 {
+			return dryRunProvenance{}, invalidExecutionInput("image canvas is invalid")
+		}
+		if _, duplicate := seenCanvasKeys[canvas.CanvasKey]; duplicate {
+			return dryRunProvenance{}, invalidExecutionInput("duplicate image canvas key")
+		}
+		seenCanvasKeys[canvas.CanvasKey] = struct{}{}
+		if canvas.CanvasKey != slot.CanvasKey {
+			continue
+		}
+		matchingCanvases++
+		if item.Kind != models.AIContentSlotImage || len(slot.CompositeRequirements) != len(canvas.SlotKeys) || !equalJSONValue(slot.CanvasGeneration, canvas.GenerationOverride) {
+			return dryRunProvenance{}, invalidExecutionInput("canvas requirements mismatch")
+		}
+		for index, requirement := range slot.CompositeRequirements {
+			if requirement.SlotKey != canvas.SlotKeys[index] || requirement.Kind != models.AIContentSlotImage {
+				return dryRunProvenance{}, invalidExecutionInput("canvas slot order or kind mismatch")
+			}
+			matchingRequirements := 0
+			for _, selectedSlot := range snapshot.Template.SelectedSlots {
+				if selectedSlot.PublicID != requirement.PublicID && selectedSlot.SlotKey != requirement.SlotKey {
+					continue
+				}
+				if !equalPublishedSlotFacts(requirement, selectedSlot) {
+					return dryRunProvenance{}, invalidExecutionInput("canvas slot provenance mismatch")
+				}
+				matchingRequirements++
+			}
+			if matchingRequirements != 1 {
+				return dryRunProvenance{}, invalidExecutionInput("canvas slot provenance is missing or duplicated")
+			}
+		}
+	}
+	if slot.CanvasKey == "" {
+		if len(slot.CompositeRequirements) != 0 || slot.CanvasGeneration != nil {
+			return dryRunProvenance{}, invalidExecutionInput("unexpected canvas data")
+		}
+	} else if matchingCanvases != 1 {
+		return dryRunProvenance{}, invalidExecutionInput("image canvas provenance is missing or duplicated")
+	}
 	var assetIDs []string
 	if err := decodeStrictJSON(item.SelectedInputAssetIDsJSON, &assetIDs); err != nil || assetIDs == nil {
 		return dryRunProvenance{}, invalidExecutionInput("invalid selected asset ID array")
@@ -304,6 +347,24 @@ func validateDryRunProvenance(job models.AIJob, item models.AIJobItem, version m
 		}
 	}
 	return dryRunProvenance{operation: operation, templateVersionID: templateVersionID.String(), slotPublicID: slotPublicID.String()}, nil
+}
+
+func equalPublishedSlotFacts(left, right SlotFacts) bool {
+	left.CompositeRequirements = nil
+	left.CanvasKey = ""
+	left.CanvasGeneration = nil
+	right.CompositeRequirements = nil
+	right.CanvasKey = ""
+	right.CanvasGeneration = nil
+	leftJSON, leftErr := json.Marshal(left)
+	rightJSON, rightErr := json.Marshal(right)
+	return leftErr == nil && rightErr == nil && bytes.Equal(leftJSON, rightJSON)
+}
+
+func equalJSONValue(left, right any) bool {
+	leftJSON, leftErr := json.Marshal(left)
+	rightJSON, rightErr := json.Marshal(right)
+	return leftErr == nil && rightErr == nil && bytes.Equal(leftJSON, rightJSON)
 }
 
 func invalidExecutionInput(reason string) error {
