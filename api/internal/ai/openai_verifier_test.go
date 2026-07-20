@@ -2,6 +2,7 @@ package ai
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -27,6 +28,39 @@ func TestHTTPProviderVerifierAuthenticatesWithBearerKey(t *testing.T) {
 	}
 	if !result.Authenticated {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestHTTPProviderVerifierListsSortedUniqueModels(t *testing.T) {
+	const apiKey = "sk-proj-verifier-secret-MODELS"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer "+apiKey {
+			t.Errorf("authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"gpt-z","owned_by":"openai"},{"id":"gpt-a","owned_by":"system"},{"id":"gpt-z","owned_by":"duplicate"},{"id":"","owned_by":"openai"}]}`)
+	}))
+	t.Cleanup(server.Close)
+
+	models, err := NewHTTPProviderVerifier(server.URL, server.Client()).ListModels(t.Context(), apiKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 2 || models[0].ID != "gpt-a" || models[0].OwnedBy != "system" || models[1].ID != "gpt-z" {
+		t.Fatalf("models = %#v", models)
+	}
+}
+
+func TestHTTPProviderVerifierRejectsInvalidModelPayloadSafely(t *testing.T) {
+	const apiKey = "sk-proj-verifier-secret-BADMODELS"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"data":`+apiKey)
+	}))
+	t.Cleanup(server.Close)
+
+	_, err := NewHTTPProviderVerifier(server.URL, server.Client()).ListModels(t.Context(), apiKey)
+	if err == nil || strings.Contains(err.Error(), apiKey) {
+		t.Fatalf("unsafe error = %v", err)
 	}
 }
 

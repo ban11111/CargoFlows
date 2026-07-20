@@ -128,6 +128,29 @@ describe("OpenAI settings", () => {
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE")).toHaveLength(0);
   });
 
+  it("loads model options live through the backend and refreshes them", async () => {
+    let modelRequests = 0;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      if (String(input).includes("/settings/openai/models")) {
+        modelRequests += 1;
+        return jsonResponse({ data: modelRequests === 1
+          ? [{ id: "gpt-a", owned_by: "openai" }, { id: "gpt-b", owned_by: "system" }]
+          : [{ id: "gpt-c", owned_by: "openai" }] });
+      }
+      return jsonResponse(active);
+    });
+    render(<OpenAISettingsPage />, { wrapper: Providers });
+
+    const select = await screen.findByLabelText("模型选项");
+    await waitFor(() => expect(select).toHaveValue("gpt-a"));
+    expect(screen.getByRole("option", { name: "gpt-b · system" })).toBeInTheDocument();
+    expect(screen.getByText("共 2 个模型")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "刷新模型" }));
+    await waitFor(() => expect(select).toHaveValue("gpt-c"));
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/settings/openai/models"))).toHaveLength(2);
+  });
+
   it("shows validation, mutation failure, success status, and clears a shown secret", async () => {
     let putCount = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {
