@@ -89,11 +89,11 @@ func prepareTextExecutorLease(t *testing.T, candidateCount int) (*gorm.DB, Lease
 func TestTextExecutorPersistsCandidatesUsageAuditAndClearsCredential(t *testing.T) {
 	db, leased, setting := prepareTextExecutorLease(t, 2)
 	key := []byte("temporary-fake-api-key")
-	source := &fakeActiveCredentialSource{credential: ActiveOpenAICredential{SettingID: setting.ID, KeyFingerprint: setting.KeyFingerprint, APIKey: key}}
+	source := &fakeActiveCredentialSource{credential: ActiveOpenAICredential{SettingID: setting.ID, KeyFingerprint: setting.KeyFingerprint, APIKey: key, TextModel: "selected-runtime-model"}}
 	var providerCalls atomic.Int32
 	provider := textProviderFunc(func(_ context.Context, received []byte, request TextRequest) (TextResponse, error) {
 		providerCalls.Add(1)
-		if !bytes.Equal(received, []byte("temporary-fake-api-key")) || request.Prompt.CandidateCount != 2 || request.Metadata["execution_id"] == "" {
+		if !bytes.Equal(received, []byte("temporary-fake-api-key")) || request.Model != "selected-runtime-model" || request.Prompt.CandidateCount != 2 || request.Metadata["execution_id"] == "" {
 			t.Fatalf("provider input key=%q request=%#v", received, request)
 		}
 		return TextResponse{
@@ -127,6 +127,10 @@ func TestTextExecutorPersistsCandidatesUsageAuditAndClearsCredential(t *testing.
 	if stringsContainCredential(execution.CompiledPrompt, execution.NormalizedInputJSON, execution.RequestConfigJSON) {
 		t.Fatal("plaintext credential persisted in execution")
 	}
+	var requestConfig map[string]any
+	if err := json.Unmarshal(execution.RequestConfigJSON, &requestConfig); err != nil || requestConfig["model"] != "selected-runtime-model" {
+		t.Fatalf("request config = %#v err=%v", requestConfig, err)
+	}
 	var results []models.AITextResult
 	if err := db.Order("candidate_index").Find(&results).Error; err != nil {
 		t.Fatal(err)
@@ -148,6 +152,10 @@ func TestTextExecutorPersistsCandidatesUsageAuditAndClearsCredential(t *testing.
 	var dispatchAudit models.AIAuditEvent
 	if err := db.Where("event_type = ?", "ai_execution.text_dispatched").First(&dispatchAudit).Error; err != nil {
 		t.Fatal(err)
+	}
+	var dispatchMetadata map[string]any
+	if err := json.Unmarshal(dispatchAudit.MetadataJSON, &dispatchMetadata); err != nil || dispatchMetadata["model"] != "selected-runtime-model" {
+		t.Fatalf("dispatch metadata = %#v err=%v", dispatchMetadata, err)
 	}
 	var updatedSetting models.OpenAIProviderSetting
 	if err := db.First(&updatedSetting, setting.ID).Error; err != nil {

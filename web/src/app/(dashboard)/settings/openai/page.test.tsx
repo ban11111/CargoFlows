@@ -13,6 +13,8 @@ const unconfigured = {
   provider: "openai",
   status: "unconfigured",
   key_fingerprint: "",
+  text_model: "gpt-5.6-terra",
+  image_model: "gpt-5.6",
   verified_at: null,
   image_capability_verified_at: null,
   last_used_at: null,
@@ -22,6 +24,8 @@ const active = {
   provider: "openai",
   status: "active",
   key_fingerprint: "ABCD1234",
+  text_model: "gpt-a",
+  image_model: "gpt-b",
   verified_at: "2026-07-17T10:00:00Z",
   image_capability_verified_at: "2026-07-17T10:00:01Z",
   last_used_at: null,
@@ -128,27 +132,40 @@ describe("OpenAI settings", () => {
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE")).toHaveLength(0);
   });
 
-  it("loads model options live through the backend and refreshes them", async () => {
+  it("loads text and image options live, saves both selections, and refreshes them", async () => {
     let modelRequests = 0;
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    let patchBody: unknown;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       if (String(input).includes("/settings/openai/models")) {
+        if (init?.method === "PATCH") {
+          patchBody = JSON.parse(String(init.body));
+          return jsonResponse({ ...active, text_model: "gpt-c", image_model: "gpt-a" });
+        }
         modelRequests += 1;
         return jsonResponse({ data: modelRequests === 1
-          ? [{ id: "gpt-a", owned_by: "openai" }, { id: "gpt-b", owned_by: "system" }]
-          : [{ id: "gpt-c", owned_by: "openai" }] });
+          ? [{ id: "gpt-a", owned_by: "openai" }, { id: "gpt-b", owned_by: "system" }, { id: "gpt-c", owned_by: "openai" }]
+          : [{ id: "gpt-a", owned_by: "openai" }, { id: "gpt-c", owned_by: "openai" }] });
       }
       return jsonResponse(active);
     });
     render(<OpenAISettingsPage />, { wrapper: Providers });
 
-    const select = await screen.findByLabelText("模型选项");
-    await waitFor(() => expect(select).toHaveValue("gpt-a"));
-    expect(screen.getByRole("option", { name: "gpt-b · system" })).toBeInTheDocument();
-    expect(screen.getByText("共 2 个模型")).toBeInTheDocument();
+    const textSelect = await screen.findByLabelText("文字任务模型");
+    const imageSelect = screen.getByLabelText("图片任务主模型");
+    await waitFor(() => expect(textSelect).toHaveValue("gpt-a"));
+    expect(imageSelect).toHaveValue("gpt-b");
+    expect(screen.getAllByRole("option", { name: "gpt-b · system" })).toHaveLength(2);
+    expect(screen.getByText("共 3 个模型")).toBeInTheDocument();
+
+    fireEvent.change(textSelect, { target: { value: "gpt-c" } });
+    fireEvent.change(imageSelect, { target: { value: "gpt-a" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存模型配置" }));
+    expect(await screen.findByText(/文字和图片模型配置已保存/)).toBeInTheDocument();
+    expect(patchBody).toEqual({ text_model: "gpt-c", image_model: "gpt-a" });
 
     fireEvent.click(screen.getByRole("button", { name: "刷新模型" }));
-    await waitFor(() => expect(select).toHaveValue("gpt-c"));
-    expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/settings/openai/models"))).toHaveLength(2);
+    await waitFor(() => expect(modelRequests).toBe(2));
+    expect(fetchMock.mock.calls.filter(([input, init]) => String(input).includes("/settings/openai/models") && init?.method !== "PATCH")).toHaveLength(2);
   });
 
   it("shows validation, mutation failure, success status, and clears a shown secret", async () => {

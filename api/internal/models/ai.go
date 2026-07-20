@@ -93,6 +93,8 @@ type OpenAIProviderSetting struct {
 	EncryptionKeyVersion      string     `gorm:"size:16;not null" json:"-"`
 	KeyFingerprint            string     `gorm:"size:16;not null" json:"key_fingerprint"`
 	Status                    string     `gorm:"size:32;not null" json:"status"`
+	TextModel                 string     `gorm:"size:200;not null;default:gpt-5.6-terra" json:"text_model"`
+	ImageModel                string     `gorm:"size:200;not null;default:gpt-5.6" json:"image_model"`
 	VerifiedAt                *time.Time `json:"verified_at"`
 	ImageCapabilityVerifiedAt *time.Time `json:"image_capability_verified_at"`
 	LastUsedAt                *time.Time `json:"last_used_at"`

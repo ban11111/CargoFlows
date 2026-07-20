@@ -759,7 +759,8 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /** @description Validates both selections against the live OpenAI model list and persists the models used by new text and image tasks. */
+        patch: operations["updateOpenAIModels"];
         trace?: never;
     };
     "/ai-content-templates": {
@@ -1170,6 +1171,10 @@ export interface components {
             status: "unconfigured" | "active" | "invalid" | "disabled";
             /** @description Non-secret display fingerprint; empty when unconfigured. */
             key_fingerprint: string;
+            /** @description Model used for new text generation tasks. */
+            text_model: string;
+            /** @description Responses API host model used with the image_generation tool for new image tasks. */
+            image_model: string;
             /** Format: date-time */
             verified_at: string | null;
             /** Format: date-time */
@@ -1184,6 +1189,10 @@ export interface components {
         OpenAIModel: {
             id: string;
             owned_by: string;
+        };
+        OpenAIModelSelectionRequest: {
+            text_model: string;
+            image_model: string;
         };
         AIContentSlotMutation: {
             slot_key?: string;
@@ -3880,6 +3889,61 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description The OpenAI provider is not active */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description OpenAI model list is unavailable */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateOpenAIModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenAIModelSelectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated OpenAI model selections */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenAISetting"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description The OpenAI provider is not active */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description A selected model is not visible to the active OpenAI project */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

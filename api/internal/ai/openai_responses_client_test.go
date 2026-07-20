@@ -88,6 +88,23 @@ func TestResponsesTextClientAlwaysAppliesConfiguredTimeoutToClonedClient(t *test
 	}
 }
 
+func TestResponsesTextClientUsesPerRequestModel(t *testing.T) {
+	client := NewOpenAIResponsesClient("https://api.openai.invalid/v1", nil, OpenAIResponsesConfig{Model: "fallback-model"})
+	request := responsesTextRequest(t)
+	request.Model = "selected-text-model"
+	body, err := client.requestBody(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded["model"] != "selected-text-model" {
+		t.Fatalf("model = %v", decoded["model"])
+	}
+}
+
 func TestResponsesTextClientBuildsOrderedMultimodalContent(t *testing.T) {
 	client := NewOpenAIResponsesClient("https://api.openai.invalid/v1", nil, OpenAIResponsesConfig{})
 	request := responsesTextRequest(t)

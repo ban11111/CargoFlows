@@ -11,7 +11,11 @@ import (
 	"gorm.io/gorm"
 )
 
-const openAIProvider = "openai"
+const (
+	openAIProvider          = "openai"
+	DefaultOpenAITextModel  = "gpt-5.6-terra"
+	DefaultOpenAIImageModel = "gpt-5.6"
+)
 
 var (
 	ErrInvalidAPIKey             = errors.New("invalid API key")
@@ -19,6 +23,7 @@ var (
 	ErrProviderNotConfigured     = errors.New("provider is not configured")
 	ErrProviderNotActive         = errors.New("provider is not active")
 	ErrProviderModelsUnavailable = errors.New("provider models are unavailable")
+	ErrProviderModelInvalid      = errors.New("provider model is invalid")
 )
 
 type ProviderVerification struct {
@@ -42,6 +47,8 @@ type ProviderSettingView struct {
 	Provider                  string     `json:"provider"`
 	Status                    string     `json:"status"`
 	KeyFingerprint            string     `json:"key_fingerprint"`
+	TextModel                 string     `json:"text_model"`
+	ImageModel                string     `json:"image_model"`
 	VerifiedAt                *time.Time `json:"verified_at"`
 	ImageCapabilityVerifiedAt *time.Time `json:"image_capability_verified_at"`
 	LastUsedAt                *time.Time `json:"last_used_at"`
@@ -51,6 +58,8 @@ type ActiveOpenAICredential struct {
 	SettingID      uint
 	KeyFingerprint string
 	APIKey         []byte
+	TextModel      string
+	ImageModel     string
 }
 
 type ProviderSettingsService struct {
@@ -67,7 +76,7 @@ func (s *ProviderSettingsService) Get(ctx context.Context) (ProviderSettingView,
 	var row models.OpenAIProviderSetting
 	err := s.db.WithContext(ctx).Where("provider = ?", openAIProvider).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return ProviderSettingView{Provider: openAIProvider, Status: "unconfigured"}, nil
+		return ProviderSettingView{Provider: openAIProvider, Status: "unconfigured", TextModel: DefaultOpenAITextModel, ImageModel: DefaultOpenAIImageModel}, nil
 	}
 	if err != nil {
 		return ProviderSettingView{}, err
@@ -90,6 +99,50 @@ func (s *ProviderSettingsService) ListModels(ctx context.Context) ([]ProviderMod
 		return nil, ErrProviderModelsUnavailable
 	}
 	return models, nil
+}
+
+func (s *ProviderSettingsService) UpdateModels(ctx context.Context, actorID uint, textModel, imageModel string) (ProviderSettingView, error) {
+	textModel = strings.TrimSpace(textModel)
+	imageModel = strings.TrimSpace(imageModel)
+	if textModel == "" || imageModel == "" || len(textModel) > 200 || len(imageModel) > 200 {
+		return ProviderSettingView{}, ErrProviderModelInvalid
+	}
+	available, err := s.ListModels(ctx)
+	if err != nil {
+		return ProviderSettingView{}, err
+	}
+	known := make(map[string]struct{}, len(available))
+	for _, model := range available {
+		known[model.ID] = struct{}{}
+	}
+	if _, ok := known[textModel]; !ok {
+		return ProviderSettingView{}, ErrProviderModelInvalid
+	}
+	if _, ok := known[imageModel]; !ok {
+		return ProviderSettingView{}, ErrProviderModelInvalid
+	}
+
+	var row models.OpenAIProviderSetting
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("provider = ? AND status = ?", openAIProvider, "active").First(&row).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrProviderNotActive
+			}
+			return err
+		}
+		updates := map[string]any{"text_model": textModel, "image_model": imageModel, "updated_by_id": actorID}
+		if row.ImageModel != imageModel {
+			updates["image_capability_verified_at"] = nil
+		}
+		if err := tx.Model(&row).Updates(updates).Error; err != nil {
+			return err
+		}
+		return tx.First(&row, row.ID).Error
+	})
+	if err != nil {
+		return ProviderSettingView{}, err
+	}
+	return providerSettingView(row), nil
 }
 
 func (s *ProviderSettingsService) Configure(ctx context.Context, actorID uint, apiKey string) (ProviderSettingView, error) {
@@ -195,7 +248,18 @@ func (s *ProviderSettingsService) DecryptActiveCredential(ctx context.Context) (
 	if err != nil {
 		return ActiveOpenAICredential{}, err
 	}
-	return ActiveOpenAICredential{SettingID: row.ID, KeyFingerprint: row.KeyFingerprint, APIKey: plain}, nil
+	return ActiveOpenAICredential{
+		SettingID: row.ID, KeyFingerprint: row.KeyFingerprint, APIKey: plain,
+		TextModel:  configuredModel(row.TextModel, DefaultOpenAITextModel),
+		ImageModel: configuredModel(row.ImageModel, DefaultOpenAIImageModel),
+	}, nil
+}
+
+func configuredModel(value, fallback string) string {
+	if value = strings.TrimSpace(value); value != "" {
+		return value
+	}
+	return fallback
 }
 
 func fingerprint(apiKey string) string {
@@ -210,6 +274,8 @@ func providerSettingView(row models.OpenAIProviderSetting) ProviderSettingView {
 		Provider:                  row.Provider,
 		Status:                    row.Status,
 		KeyFingerprint:            row.KeyFingerprint,
+		TextModel:                 configuredModel(row.TextModel, DefaultOpenAITextModel),
+		ImageModel:                configuredModel(row.ImageModel, DefaultOpenAIImageModel),
 		VerifiedAt:                row.VerifiedAt,
 		ImageCapabilityVerifiedAt: row.ImageCapabilityVerifiedAt,
 		LastUsedAt:                row.LastUsedAt,
