@@ -12,7 +12,7 @@ export interface CurrentUser {
   role: AppRole;
   status: "active" | "disabled";
   must_change_password: boolean;
-  last_seen_at: string;
+  last_seen_at: string | null;
   created_at: string;
 }
 

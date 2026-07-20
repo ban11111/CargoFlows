@@ -62,4 +62,23 @@ describe("Users page", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("两次输入必须一致");
   });
+
+  it("allows a disabled account to be deleted after confirmation", async () => {
+    const disabledOperator = { ...operator, status: "disabled" };
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.includes("/auth/me")) return response(admin);
+      if (url.endsWith(`/users/${disabledOperator.public_id}`) && init?.method === "DELETE") return Promise.resolve(new Response(null, { status: 204 }));
+      if (url.endsWith("/users")) return response({ data: [owner, admin, disabledOperator] });
+      return response({}, 404);
+    });
+
+    render(<UsersPage />, { wrapper: Providers });
+    expect(await screen.findByText("operator@example.test")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("operator@example.test"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(`/api/proxy/users/${disabledOperator.public_id}`, expect.objectContaining({ method: "DELETE" })));
+  });
 });

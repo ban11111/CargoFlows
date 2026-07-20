@@ -76,6 +76,20 @@ func TestUserMigrationPromotesOneOwnerAndCollapsesLegacyRoles(t *testing.T) {
 			t.Fatalf("migrated user %d = %#v", index, user)
 		}
 	}
+	columns, err := db.Migrator().ColumnTypes(&models.User{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, column := range columns {
+		if column.Name() == "last_seen_at" {
+			nullable, ok := column.Nullable()
+			if !ok || !nullable {
+				t.Fatalf("last_seen_at nullable = %v, known = %v", nullable, ok)
+			}
+			return
+		}
+	}
+	t.Fatal("last_seen_at column not found")
 }
 
 func (oldAIContentTemplate) TableName() string { return "ai_content_templates" }

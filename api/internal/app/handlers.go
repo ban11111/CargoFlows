@@ -46,7 +46,8 @@ func (s *Server) login(c *gin.Context) {
 		return
 	}
 
-	user.LastSeenAt = time.Now()
+	lastSeenAt := time.Now()
+	user.LastSeenAt = &lastSeenAt
 	_ = s.db.Save(&user).Error
 
 	token, err := s.issueToken(user)
@@ -65,7 +66,7 @@ type userDTO struct {
 	Role               models.Role `json:"role"`
 	Status             string      `json:"status"`
 	MustChangePassword bool        `json:"must_change_password"`
-	LastSeenAt         time.Time   `json:"last_seen_at"`
+	LastSeenAt         *time.Time  `json:"last_seen_at"`
 	CreatedAt          time.Time   `json:"created_at"`
 }
 
@@ -1212,6 +1213,31 @@ func (s *Server) updateUser(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, userDTOFromModel(target))
+}
+
+func (s *Server) deleteUser(c *gin.Context) {
+	target, ok := s.findManagedUser(c)
+	if !ok {
+		return
+	}
+	actor := currentUser(c)
+	if target.Role == models.RoleSuperAdmin {
+		c.JSON(http.StatusForbidden, gin.H{"code": "system_owner_protected", "message": "the system owner cannot be deleted"})
+		return
+	}
+	if target.ID == actor.ID {
+		c.JSON(http.StatusForbidden, gin.H{"code": "self_management_forbidden", "message": "you cannot delete your own account"})
+		return
+	}
+	if target.Status != "disabled" {
+		c.JSON(http.StatusConflict, gin.H{"code": "user_must_be_disabled", "message": "disable the user before deletion"})
+		return
+	}
+	if err := s.db.Delete(&target).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "delete user failed"})
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 type resetUserPasswordRequest struct {

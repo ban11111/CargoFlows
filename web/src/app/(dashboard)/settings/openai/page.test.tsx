@@ -200,6 +200,16 @@ describe("OpenAI settings", () => {
     expect(screen.queryByRole("link", { name: "OpenAI 设置" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("OpenAI 设置 · 仅超级管理员")).toBeDisabled();
   });
+
+  it("submits logout through the cookie-clearing endpoint", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => jsonResponse({ public_id: "00000000-0000-4000-8000-000000000003", name: "Operator", email: "operator@example.test", role: "operator", status: "active", must_change_password: false, last_seen_at: "2026-07-17T10:00:00Z", created_at: "2026-07-17T10:00:00Z" }));
+    render(<AppShell><p>content</p></AppShell>, { wrapper: Providers });
+
+    const logout = await screen.findByRole("button", { name: "退出登录" });
+    expect(logout).toHaveAttribute("type", "submit");
+    expect(logout.closest("form")).toHaveAttribute("action", "/api/auth/logout");
+    expect(logout.closest("form")).toHaveAttribute("method", "post");
+  });
 });
 
 function errorMessage(error: unknown) {

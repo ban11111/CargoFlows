@@ -154,6 +154,7 @@ func registerExistingRoutes(protected *gin.RouterGroup, server *Server) {
 	userManagers.GET("/users", server.listUsers)
 	userManagers.POST("/users", server.createUser)
 	userManagers.PATCH("/users/:user_id", server.updateUser)
+	userManagers.DELETE("/users/:user_id", server.deleteUser)
 	userManagers.PUT("/users/:user_id/password", server.resetUserPassword)
 }
 

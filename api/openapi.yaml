@@ -56,6 +56,16 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
+    delete:
+      operationId: deleteUser
+      description: Soft-delete a disabled admin or operator account while preserving historical attribution.
+      responses:
+        '204': { description: User deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /users/{user_id}/password:
     parameters: [ { $ref: '#/components/parameters/UserID' } ]
     put:
@@ -964,7 +974,7 @@ components:
         role: { type: string, enum: [super_admin, admin, operator] }
         status: { type: string, enum: [active, disabled] }
         must_change_password: { type: boolean }
-        last_seen_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
     AuthResponse:
       type: object

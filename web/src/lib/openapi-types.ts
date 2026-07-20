@@ -64,7 +64,8 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete?: never;
+        /** @description Soft-delete a disabled admin or operator account while preserving historical attribution. */
+        delete: operations["deleteUser"];
         options?: never;
         head?: never;
         patch: operations["updateUser"];
@@ -1076,7 +1077,7 @@ export interface components {
             status: "active" | "disabled";
             must_change_password: boolean;
             /** Format: date-time */
-            last_seen_at: string;
+            last_seen_at: string | null;
             /** Format: date-time */
             created_at: string;
         };
@@ -2285,6 +2286,31 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["ValidationFailed"];
+        };
+    };
+    deleteUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description User deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     updateUser: {

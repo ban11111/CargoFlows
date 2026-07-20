@@ -169,9 +169,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="flex shrink-0 items-center gap-2">
             <LanguageToggle />
             {role === "super_admin" ? <Button asChild className="hidden sm:inline-flex" variant="secondary" size="sm"><Link aria-label={t("navOpenAISettings")} href="/settings/openai"><Settings2 className="h-4 w-4" /><span className="hidden xl:inline">{t("navOpenAISettings")}</span></Link></Button> : <Button aria-label={`${t("navOpenAISettings")} · ${language === "zh" ? "仅超级管理员" : "Super admin only"}`} className="hidden sm:inline-flex" disabled size="sm" title={language === "zh" ? "仅超级管理员可以管理 OpenAI 设置" : "Only the super admin can manage OpenAI settings"} variant="secondary"><LockKeyhole className="h-4 w-4" /><span className="hidden xl:inline">{t("navOpenAISettings")}</span></Button>}
-            <Button variant="ghost" size="icon" aria-label={t("logout")}>
-              <LogOut className="h-4 w-4" />
-            </Button>
+            <form action="/api/auth/logout" method="post">
+              <Button aria-label={t("logout")} size="icon" type="submit" variant="ghost">
+                <LogOut className="h-4 w-4" />
+              </Button>
+            </form>
           </div>
         </header>
         <main className="page-enter mx-auto max-w-[1480px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8" id="main-content" tabIndex={-1}>

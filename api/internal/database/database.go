@@ -318,10 +318,11 @@ func Seed(db *gorm.DB) error {
 		return err
 	}
 
+	lastSeenAt := time.Now()
 	users := []models.User{
-		{Name: "Zheng Baiyi", Email: "admin@cargoflow.local", PasswordHash: string(hash), Role: models.RoleSuperAdmin, Status: "active", LastSeenAt: time.Now()},
-		{Name: "Ivy Chen", Email: "ivy@cargoflow.local", PasswordHash: string(hash), Role: models.RoleOperator, Status: "active", LastSeenAt: time.Now()},
-		{Name: "Bo Lin", Email: "bo@cargoflow.local", PasswordHash: string(hash), Role: models.RoleOperator, Status: "active", LastSeenAt: time.Now()},
+		{Name: "Zheng Baiyi", Email: "admin@cargoflow.local", PasswordHash: string(hash), Role: models.RoleSuperAdmin, Status: "active", LastSeenAt: &lastSeenAt},
+		{Name: "Ivy Chen", Email: "ivy@cargoflow.local", PasswordHash: string(hash), Role: models.RoleOperator, Status: "active", LastSeenAt: &lastSeenAt},
+		{Name: "Bo Lin", Email: "bo@cargoflow.local", PasswordHash: string(hash), Role: models.RoleOperator, Status: "active", LastSeenAt: &lastSeenAt},
 	}
 	if err := db.Create(&users).Error; err != nil {
 		return err

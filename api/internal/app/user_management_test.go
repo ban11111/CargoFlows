@@ -83,7 +83,7 @@ func TestUserManagementCreatesNormalizesAndProtectsAccounts(t *testing.T) {
 	if err := json.Unmarshal(created.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Email != "new@example.test" || body.Role != models.RoleOperator || !body.MustChangePassword || body.PublicID == "" {
+	if body.Email != "new@example.test" || body.Role != models.RoleOperator || !body.MustChangePassword || body.PublicID == "" || body.LastSeenAt != nil {
 		t.Fatalf("created user = %#v", body)
 	}
 	duplicate := fixture.request(t, fixture.admin, http.MethodPost, "/api/v1/users", `{"name":"Again","email":"new@example.test","role":"admin","password":"temporary-password-123"}`)
@@ -112,12 +112,34 @@ func TestUserManagementCreatesNormalizesAndProtectsAccounts(t *testing.T) {
 	if enabled := fixture.request(t, fixture.admin, http.MethodPatch, "/api/v1/users/"+fixture.operator.PublicID, `{"status":"active"}`); enabled.Code != http.StatusOK {
 		t.Fatalf("enable = %d %s", enabled.Code, enabled.Body.String())
 	}
+	activeDelete := fixture.request(t, fixture.admin, http.MethodDelete, "/api/v1/users/"+fixture.operator.PublicID, "")
+	if activeDelete.Code != http.StatusConflict || !bytes.Contains(activeDelete.Body.Bytes(), []byte("user_must_be_disabled")) {
+		t.Fatalf("delete active = %d %s", activeDelete.Code, activeDelete.Body.String())
+	}
 	oldRequest := httptest.NewRequest(http.MethodGet, "/api/v1/tags", nil)
 	oldRequest.Header.Set("Authorization", "Bearer "+oldOperatorToken)
 	oldResponse := httptest.NewRecorder()
 	fixture.router.ServeHTTP(oldResponse, oldRequest)
 	if oldResponse.Code != http.StatusUnauthorized {
 		t.Fatalf("session survived disable/enable = %d %s", oldResponse.Code, oldResponse.Body.String())
+	}
+	if disabledAgain := fixture.request(t, fixture.admin, http.MethodPatch, "/api/v1/users/"+fixture.operator.PublicID, `{"status":"disabled"}`); disabledAgain.Code != http.StatusOK {
+		t.Fatalf("disable before delete = %d %s", disabledAgain.Code, disabledAgain.Body.String())
+	}
+	deleted := fixture.request(t, fixture.admin, http.MethodDelete, "/api/v1/users/"+fixture.operator.PublicID, "")
+	if deleted.Code != http.StatusNoContent {
+		t.Fatalf("delete disabled = %d %s", deleted.Code, deleted.Body.String())
+	}
+	var deletedUser models.User
+	if err := fixture.db.Unscoped().Where("id = ?", fixture.operator.ID).First(&deletedUser).Error; err != nil || !deletedUser.DeletedAt.Valid {
+		t.Fatalf("soft-deleted user = %#v, err = %v", deletedUser, err)
+	}
+	if visible := fixture.request(t, fixture.admin, http.MethodGet, "/api/v1/users", ""); visible.Code != http.StatusOK || bytes.Contains(visible.Body.Bytes(), []byte("operator@example.test")) {
+		t.Fatalf("list after delete = %d %s", visible.Code, visible.Body.String())
+	}
+	ownerDelete := fixture.request(t, fixture.super, http.MethodDelete, "/api/v1/users/"+fixture.super.PublicID, "")
+	if ownerDelete.Code != http.StatusForbidden {
+		t.Fatalf("delete owner = %d %s", ownerDelete.Code, ownerDelete.Body.String())
 	}
 }
 
