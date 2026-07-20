@@ -7,12 +7,16 @@ import { LanguageProvider } from "@/lib/i18n";
 import { LanguageToggle } from "@/components/language-toggle";
 import NewAITemplatePage from "./page";
 
+let searchParams = new URLSearchParams();
+vi.mock("next/navigation", () => ({ useSearchParams: () => searchParams }));
+
 function Providers({ children }: { children: ReactNode }) {
   return <LanguageProvider><LanguageToggle /><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}>{children}</QueryClientProvider></LanguageProvider>;
 }
 
 beforeEach(() => {
   localStorage.clear();
+  searchParams = new URLSearchParams();
   vi.restoreAllMocks();
 });
 
@@ -26,6 +30,30 @@ describe("NewAITemplatePage", () => {
     expect(screen.getByLabelText("默认图片风格")).toHaveValue("clean_white_background");
     expect(screen.getAllByText("白底棚拍")).toHaveLength(2);
     expect(screen.getByText("纯白背景、柔和落地阴影，适合平台主图。")).toBeInTheDocument();
+  });
+
+  it("normalizes a legacy default style when selecting all current styles", async () => {
+    searchParams = new URLSearchParams("template_id=template-1&version_id=version-1");
+    const slot = { public_id: "slot-1", slot_key: "lifestyle", kind: "image", name_zh: "使用场景图", name_en: "Lifestyle scene", description_zh: "", description_en: "", sequence: 1, optional: true, default_selected: false, prompt_fragment: "Create a lifestyle scene", constraints: {}, generation_config: { size: "1024x1536", quality: "high", candidate_count: 1, style: "legacy_campaign", allowed_styles: ["legacy_campaign"] }, layout_config: {} };
+    const version = { public_id: "version-1", version_number: 1, status: "draft", default_locale: "zh-CN", prompt_compiler_version: "v1", platform_prompt: "platform", published_at: null, archived_at: null, created_at: "2026-07-17T00:00:00Z", updated_at: "2026-07-17T00:00:00Z", slots: [slot] };
+    const template = { public_id: "template-1", name_zh: "模板", name_en: "Template", target_platform: "lazada", status: "active", created_at: "2026-07-17T00:00:00Z", updated_at: "2026-07-17T00:00:00Z", versions: [version] };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {
+      if (init?.method === "PATCH") return Promise.resolve(new Response(JSON.stringify(version), { status: 200 }));
+      if (String(_input).includes("/validate")) return Promise.resolve(new Response(JSON.stringify({ code: "template_valid", issues: [] }), { status: 200 }));
+      return Promise.resolve(new Response(JSON.stringify(template), { status: 200 }));
+    });
+    render(<NewAITemplatePage />, { wrapper: Providers });
+
+    expect(await screen.findByLabelText("默认图片风格")).toHaveValue("legacy_campaign");
+    fireEvent.click(screen.getByRole("button", { name: "全选" }));
+    expect(screen.getByLabelText("默认图片风格")).toHaveValue("clean_white_background");
+    fireEvent.click(screen.getByRole("button", { name: "保存并校验" }));
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true));
+    const patchCall = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH");
+    expect(JSON.parse(String(patchCall?.[1]?.body)).slots[0].generation_config).toMatchObject({ style: "clean_white_background", allowed_styles: expect.arrayContaining(["clean_white_background"]) });
+    expect(await screen.findByText("校验通过，可以发布。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "发布版本" })).toBeEnabled();
   });
 
   it("blocks creation until bilingual names and a valid slot exist", async () => {
@@ -72,6 +100,13 @@ describe("NewAITemplatePage", () => {
     expect(screen.getByRole("button", { name: "发布版本" })).toBeDisabled();
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
     expect(body.slots[0]).toMatchObject({ kind: "title", slot_key: "title_1", sequence: 1, constraints: { min_length: 10, max_length: 120 } });
+
+    fireEvent.change(screen.getByLabelText("中文名称"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "运行发布校验" }));
+    expect(await screen.findByText("保存并校验未执行：请先修正上方标出的必填项或格式问题。")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PATCH")).toHaveLength(0);
+    fireEvent.change(screen.getByLabelText("中文名称"), { target: { value: "Lazada 商品详情" } });
+    expect(screen.queryByText("保存并校验未执行：请先修正上方标出的必填项或格式问题。")).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("英文名称"), { target: { value: "Updated Lazada PDP" } });
     fireEvent.click(screen.getByRole("button", { name: "运行发布校验" }));
