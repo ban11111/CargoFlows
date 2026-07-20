@@ -280,6 +280,11 @@ func TestAIContentTemplateAdminLifecycleUsesPublicDTOs(t *testing.T) {
 		t.Fatalf("archive status/body = %d %s", archived.Code, archived.Body.String())
 	}
 	assertNoAIInternalFields(t, archived.Body.Bytes())
+	restored := aiRequest(t, server, adminToken, http.MethodPost, "/api/v1/ai-content-template-versions/"+versionID+"/restore", "")
+	if restored.Code != http.StatusOK || !strings.Contains(restored.Body.String(), `"status":"published"`) || !strings.Contains(restored.Body.String(), `"archived_at":null`) {
+		t.Fatalf("restore status/body = %d %s", restored.Code, restored.Body.String())
+	}
+	assertNoAIInternalFields(t, restored.Body.Bytes())
 
 	forbidden := aiRequest(t, server, server.token(t, operator), http.MethodPost, "/api/v1/ai-content-templates", createBody)
 	if forbidden.Code != http.StatusForbidden {
@@ -581,6 +586,7 @@ func TestAIOpenAPIHasExactAdminPathsAndNeverExposesCredentialMaterial(t *testing
 		"/ai-content-template-versions/{version_id}/validate": {"post": {"200", "400", "401", "403", "404", "500"}},
 		"/ai-content-template-versions/{version_id}/publish":  {"post": {"200", "400", "401", "403", "404", "409", "422", "500"}},
 		"/ai-content-template-versions/{version_id}/archive":  {"post": {"200", "400", "401", "403", "404", "409", "500"}},
+		"/ai-content-template-versions/{version_id}/restore":  {"post": {"200", "400", "401", "403", "404", "409", "500"}},
 	}
 	for path, methods := range expected {
 		pathItem, ok := paths[path].(map[string]any)

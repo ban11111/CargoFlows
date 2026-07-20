@@ -869,6 +869,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ai-content-template-versions/{version_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: components["parameters"]["AIContentTemplateVersionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["restoreAIContentTemplateVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ai-jobs": {
         parameters: {
             query?: never;
@@ -4075,6 +4093,34 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Archived template version */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIContentTemplateVersion"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    restoreAIContentTemplateVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: components["parameters"]["AIContentTemplateVersionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Re-enabled template version */
             200: {
                 headers: {
                     [name: string]: unknown;

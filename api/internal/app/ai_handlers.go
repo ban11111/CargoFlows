@@ -397,6 +397,22 @@ func (s *Server) archiveAIContentTemplateVersion(c *gin.Context) {
 	c.JSON(http.StatusOK, aiContentTemplateVersionDTOFromModel(*value))
 }
 
+func (s *Server) restoreAIContentTemplateVersion(c *gin.Context) {
+	if !requireAIUUIDParam(c, "version_id") {
+		return
+	}
+	if err := s.ai.Templates.Restore(c.Request.Context(), c.Param("version_id")); err != nil {
+		respondAIError(c, err)
+		return
+	}
+	value, err := s.ai.Templates.GetVersion(c.Request.Context(), c.Param("version_id"))
+	if err != nil {
+		respondAIError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, aiContentTemplateVersionDTOFromModel(*value))
+}
+
 func (s *Server) deleteAIContentTemplateDraft(c *gin.Context) {
 	if !requireAIUUIDParam(c, "version_id") {
 		return

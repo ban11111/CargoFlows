@@ -785,6 +785,18 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '500': { $ref: '#/components/responses/InternalServerError' }
+  /ai-content-template-versions/{version_id}/restore:
+    parameters: [ { $ref: '#/components/parameters/AIContentTemplateVersionID' } ]
+    post:
+      operationId: restoreAIContentTemplateVersion
+      responses:
+        '200': { description: Re-enabled template version, content: { application/json: { schema: { $ref: '#/components/schemas/AIContentTemplateVersion' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
   /ai-jobs:
     get:
       operationId: listAIJobs

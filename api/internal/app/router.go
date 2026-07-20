@@ -189,6 +189,7 @@ func registerAIRoutes(protected *gin.RouterGroup, server *Server) {
 	aiAdmin.POST("/ai-content-template-versions/:version_id/validate", server.validateAIContentTemplateVersion)
 	aiAdmin.POST("/ai-content-template-versions/:version_id/publish", server.publishAIContentTemplateVersion)
 	aiAdmin.POST("/ai-content-template-versions/:version_id/archive", server.archiveAIContentTemplateVersion)
+	aiAdmin.POST("/ai-content-template-versions/:version_id/restore", server.restoreAIContentTemplateVersion)
 	aiAdmin.DELETE("/ai-content-template-versions/:version_id", server.deleteAIContentTemplateDraft)
 }
 

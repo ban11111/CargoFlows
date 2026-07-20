@@ -1,8 +1,8 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
-import { AlertTriangle, Box, Plus, Tags } from "lucide-react";
+import { AlertTriangle, Box, LoaderCircle, Plus, Power, PowerOff, Tags } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { DataTable } from "@/components/data-table";
@@ -19,10 +19,13 @@ interface SKUListItem {
   code: string;
   color: string;
   size: string;
+  barcode: string;
   stock: number;
   low_stock_threshold: number;
+  platform_title: string;
+  selling_points: string;
   status: "active" | "draft" | "disabled";
-  product: { name: string; category: string; category_record?: { name: string; name_en?: string } };
+  product: { category_id: number; name: string; brand: string; category: string; category_record?: { name: string; name_en?: string } };
   tags: Array<{ name: string }>;
 }
 
@@ -34,6 +37,7 @@ interface Category {
 
 export default function SkusPage() {
   const { language, t } = useLanguage();
+  const queryClient = useQueryClient();
   const [categoryID, setCategoryID] = useState<number>();
   const skusQuery = useQuery({
     queryKey: ["skus", categoryID],
@@ -42,6 +46,34 @@ export default function SkusPage() {
   const categoriesQuery = useQuery({
     queryKey: ["categories"],
     queryFn: () => apiRequest<{ data: Category[] }>("/categories"),
+  });
+  const lifecycle = useMutation({
+    mutationFn: ({ sku, status }: { sku: SKUListItem; status: "active" | "disabled" }) => apiRequest<SKUListItem>(`/skus/${sku.public_id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        category_id: sku.product.category_id,
+        product_name: sku.product.name,
+        brand: sku.product.brand,
+        code: sku.code,
+        color: sku.color,
+        size: sku.size,
+        barcode: sku.barcode,
+        stock: sku.stock,
+        low_stock_threshold: sku.low_stock_threshold,
+        platform_title: sku.platform_title,
+        selling_points: sku.selling_points,
+        status,
+        tags: sku.tags.map((tag) => tag.name),
+      }),
+    }),
+    onSuccess: async (updated) => {
+      queryClient.setQueriesData({ queryKey: ["skus"] }, (current) => {
+        if (!current || typeof current !== "object" || !("data" in current) || !Array.isArray(current.data)) return current;
+        return { ...current, data: current.data.map((sku: SKUListItem) => sku.public_id === updated.public_id ? updated : sku) };
+      });
+      queryClient.setQueryData(["skus", updated.public_id], updated);
+      await queryClient.invalidateQueries({ queryKey: ["skus"] });
+    },
   });
   const skus = skusQuery.data?.data ?? [];
   const lowStockCount = skus.filter((sku) => sku.stock <= sku.low_stock_threshold).length;
@@ -85,6 +117,38 @@ export default function SkusPage() {
       header: t("status"),
       cell: ({ row }) => <Badge variant={row.original.status === "active" ? "success" : row.original.status === "draft" ? "warning" : "neutral"}>{t(row.original.status)}</Badge>,
     },
+    {
+      id: "actions",
+      header: language === "zh" ? "操作" : "Actions",
+      cell: ({ row }) => {
+        const sku = row.original;
+        const pending = lifecycle.isPending && lifecycle.variables?.sku.public_id === sku.public_id;
+        return sku.status === "active" ? (
+          <Button
+            aria-label={`${t("skuDisable")} ${sku.code}`}
+            className="min-h-11"
+            disabled={lifecycle.isPending}
+            onClick={() => { if (window.confirm(t("skuDisableConfirm"))) lifecycle.mutate({ sku, status: "disabled" }); }}
+            size="sm"
+            variant="outline"
+          >
+            {pending ? <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <PowerOff className="h-4 w-4" />}
+            {t("skuDisable")}
+          </Button>
+        ) : (
+          <Button
+            aria-label={`${t("skuEnable")} ${sku.code}`}
+            className="min-h-11"
+            disabled={lifecycle.isPending}
+            onClick={() => lifecycle.mutate({ sku, status: "active" })}
+            size="sm"
+          >
+            {pending ? <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <Power className="h-4 w-4" />}
+            {t("skuEnable")}
+          </Button>
+        );
+      },
+    },
   ];
 
   return (
@@ -124,6 +188,7 @@ export default function SkusPage() {
           <Tags className="ml-2 h-4 w-4" />
           {t("tagHint")}
         </div>
+        {lifecycle.isError ? <p className="mt-4 rounded-md border border-danger/30 bg-danger/5 p-3 text-sm text-danger" role="alert">{t("skuLifecycleError")}</p> : null}
         <div className="mt-4">
           <DataTable columns={columns} data={skus} searchPlaceholder={t("searchSku")} />
         </div>

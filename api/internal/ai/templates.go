@@ -339,6 +339,43 @@ func (s *TemplateService) Archive(ctx context.Context, versionPublicID string) e
 	})
 }
 
+// Restore makes an archived immutable version selectable again. The version
+// contents and version number remain unchanged, matching the capture SOP
+// lifecycle semantics.
+func (s *TemplateService) Restore(ctx context.Context, versionPublicID string) error {
+	var identity struct {
+		AIContentTemplateID uint
+	}
+	err := s.db.WithContext(ctx).Model(&models.AIContentTemplateVersion{}).
+		Select("ai_content_template_id").Where("public_id = ?", versionPublicID).Take(&identity).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrTemplateVersionNotFound
+	}
+	if err != nil {
+		return err
+	}
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var parent models.AIContentTemplate
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&parent, identity.AIContentTemplateID).Error; err != nil {
+			return err
+		}
+		version, err := getTemplateVersion(tx.Clauses(clause.Locking{Strength: "UPDATE"}), versionPublicID)
+		if err != nil {
+			return err
+		}
+		if version.AIContentTemplateID != parent.ID {
+			return ErrTemplateVersionNotFound
+		}
+		if version.Status != models.AITemplateArchived {
+			return ErrTemplateVersionImmutable
+		}
+		if err := tx.Model(version).Updates(map[string]any{"status": models.AITemplatePublished, "archived_at": nil}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&parent).Update("status", models.AIContentTemplateActive).Error
+	})
+}
+
 // DeleteDraft removes only an unpublished draft. Published versions are immutable
 // audit records and must be archived instead.
 func (s *TemplateService) DeleteDraft(ctx context.Context, versionPublicID string) error {

@@ -311,6 +311,23 @@ func TestPublishFreezesVersionCopyCreatesFreshDraftAndArchiveRecalculatesParent(
 	if err != nil || len(selectable) != 0 {
 		t.Fatalf("selectable after last archive = %#v, err = %v", selectable, err)
 	}
+	if err := service.Restore(t.Context(), created.Version.PublicID); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := service.Get(t.Context(), created.Template.PublicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.Status != models.AIContentTemplateActive || restored.Versions[0].Status != models.AITemplatePublished || restored.Versions[0].ArchivedAt != nil {
+		t.Fatalf("restored states = %#v", restored)
+	}
+	selectable, err = service.List(t.Context(), false)
+	if err != nil || len(selectable) != 1 || len(selectable[0].Versions) != 1 || selectable[0].Versions[0].PublicID != created.Version.PublicID {
+		t.Fatalf("selectable after restore = %#v, err = %v", selectable, err)
+	}
+	if err := service.Restore(t.Context(), created.Version.PublicID); !errors.Is(err, ErrTemplateVersionImmutable) {
+		t.Fatalf("second restore error = %v", err)
+	}
 }
 
 func TestDatabaseRejectsSecondDraftForLogicalTemplate(t *testing.T) {
