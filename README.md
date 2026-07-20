@@ -18,6 +18,30 @@ and an English name; all category displays must follow the selected language.
 
 ## Local Development
 
+The root Makefile provides the normal development workflow:
+
+```bash
+make dev                    # Start backend and frontend
+make re-dev                 # Rebuild/restart backend only
+make dev backend            # Start backend only
+make dev frontend           # Start frontend only
+make re-dev backend         # Rebuild/recreate backend application services
+make help                   # Show all commands and aliases
+```
+
+`SCOPE` syntax is also supported, for example `make dev SCOPE=backend`.
+Frontend commands manage the existing `com.cargoflows.web-dev` launchd agent;
+they do not start a second Next.js process in the terminal. `make dev frontend`
+ensures the agent is loaded and running, while `make re-dev frontend` restarts it.
+The system `com.cloudflare.cloudflared` daemon remains independently managed;
+Make checks and reports its status without reinstalling or restarting it.
+
+`make dev` does not force Docker image rebuilds. By default, `make re-dev`
+rebuilds and recreates only `migrate`, `api`, and `worker`, while preserving the
+MySQL and MinIO containers and their named volumes. Use `make re-dev frontend`
+to restart the frontend launchd agent, or `make re-dev SCOPE=all` to rebuild the
+backend and restart the frontend together.
+
 Start infrastructure and the Go API:
 
 ```bash
@@ -34,7 +58,7 @@ Web login: `http://localhost:3005/login`
 
 iOS login: use the same email and password after the API is running.
 
-Run the Web console once in the foreground:
+Without the launchd agent, the Web console can still be run manually in the foreground:
 
 ```bash
 cd web
