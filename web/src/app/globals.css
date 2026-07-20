@@ -55,7 +55,7 @@ body {
     var(--background);
   background-size: 32px 32px;
   color: var(--foreground);
-  font-family: "Avenir Next", Avenir, "Noto Sans SC", "Segoe UI", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   font-size: 16px;
   line-height: 1.55;
   text-rendering: optimizeLegibility;
@@ -95,8 +95,8 @@ h3 {
 }
 
 h1 {
-  font-family: "Arial Narrow", "Avenir Next Condensed", "Noto Sans SC", sans-serif;
-  letter-spacing: -0.035em;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  letter-spacing: -0.022em;
 }
 
 .data-value,
