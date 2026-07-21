@@ -24,6 +24,8 @@ const (
 	inventoryPosted = "posted"
 )
 
+var errInventoryConflict = errors.New("idempotency key was already used with different correction data")
+
 var inventoryTypes = map[string]bool{
 	"purchase_receipt": true, "sale_issue": true, "customer_return": true,
 	"supplier_return": true, "stock_adjustment": true,
@@ -258,7 +260,7 @@ func normalizedQuantity(kind string, quantity int) int {
 
 func (s *Server) listInventoryTransactions(c *gin.Context) {
 	var rows []models.InventoryTransaction
-	query := s.db.Preload("Lines.SKU.Product").Preload("Charges").Preload("CreatedBy").Preload("PostedBy").Order("business_date DESC, id DESC")
+	query := s.db.Preload("Lines.SKU.Product").Preload("Charges").Preload("CreatedBy").Preload("PostedBy").Preload("Corrections.CreatedBy").Order("business_date DESC, id DESC")
 	if value := c.Query("type"); value != "" {
 		query = query.Where("type = ?", value)
 	}
@@ -278,6 +280,7 @@ func (s *Server) listInventoryTransactions(c *gin.Context) {
 	}
 	for i := range rows {
 		normalizeInventoryDocument(&rows[i])
+		s.decorateEffectiveInventoryCosts(&rows[i])
 	}
 	c.JSON(http.StatusOK, gin.H{"data": rows})
 }
@@ -296,9 +299,10 @@ func (s *Server) loadInventoryTransaction(publicID string) (models.InventoryTran
 		return models.InventoryTransaction{}, false, errors.New("transaction_id must be a UUID")
 	}
 	var row models.InventoryTransaction
-	err := s.db.Preload("Lines.SKU.Product").Preload("Charges").Preload("CreatedBy").Preload("PostedBy").Where("public_id = ?", publicID).First(&row).Error
+	err := s.db.Preload("Lines.SKU.Product").Preload("Charges").Preload("CreatedBy").Preload("PostedBy").Preload("Corrections.CreatedBy").Preload("Corrections.ResultTransaction.Lines.SKU.Product").Where("public_id = ?", publicID).First(&row).Error
 	if err == nil {
 		normalizeInventoryDocument(&row)
+		s.decorateEffectiveInventoryCosts(&row)
 	}
 	return row, false, err
 }
@@ -316,6 +320,14 @@ func normalizeInventoryDocument(row *models.InventoryTransaction) {
 		line.AverageCostAfterSGD = decimalOrZero(line.AverageCostAfterSGD)
 		line.InventoryValueBeforeSGD = decimalOrZero(line.InventoryValueBeforeSGD)
 		line.InventoryValueAfterSGD = decimalOrZero(line.InventoryValueAfterSGD)
+		line.EffectiveMerchandiseAmountSGD = line.MerchandiseAmountSGD
+		line.EffectiveAllocatedChargesSGD = line.AllocatedChargesSGD
+		line.EffectiveLandedUnitCostSGD = line.LandedUnitCostSGD
+		line.EffectiveMovementCostSGD = line.MovementCostSGD
+		line.EffectiveAverageCostBeforeSGD = line.AverageCostBeforeSGD
+		line.EffectiveAverageCostAfterSGD = line.AverageCostAfterSGD
+		line.EffectiveInventoryValueBeforeSGD = line.InventoryValueBeforeSGD
+		line.EffectiveInventoryValueAfterSGD = line.InventoryValueAfterSGD
 		line.SKU.AverageUnitCostSGD = decimalOrZero(line.SKU.AverageUnitCostSGD)
 		line.SKU.InventoryValueSGD = decimalOrZero(line.SKU.InventoryValueSGD)
 	}
@@ -324,6 +336,28 @@ func normalizeInventoryDocument(row *models.InventoryTransaction) {
 		charge.SourceAmount = decimalOrZero(charge.SourceAmount)
 		charge.FXRateToSGD = decimalOrZero(charge.FXRateToSGD)
 		charge.AmountSGD = decimalOrZero(charge.AmountSGD)
+	}
+}
+
+func (s *Server) decorateEffectiveInventoryCosts(row *models.InventoryTransaction) {
+	for i := range row.Lines {
+		state, err := effectiveStateForLine(s.db, row.Lines[i])
+		if err != nil {
+			continue
+		}
+		line := &row.Lines[i]
+		line.EffectiveMerchandiseAmountSGD = decimalOrZero(state.MerchandiseAmountSGD)
+		line.EffectiveAllocatedChargesSGD = decimalOrZero(state.AllocatedChargesSGD)
+		line.EffectiveLandedUnitCostSGD = decimalOrZero(state.LandedUnitCostSGD)
+		line.EffectiveMovementCostSGD = decimalOrZero(state.MovementCostSGD)
+		line.EffectiveAverageCostBeforeSGD = decimalOrZero(state.AverageCostBeforeSGD)
+		line.EffectiveAverageCostAfterSGD = decimalOrZero(state.AverageCostAfterSGD)
+		line.EffectiveInventoryValueBeforeSGD = decimalOrZero(state.InventoryValueBeforeSGD)
+		line.EffectiveInventoryValueAfterSGD = decimalOrZero(state.InventoryValueAfterSGD)
+		line.CostVersion = state.Version
+	}
+	for i := range row.Corrections {
+		normalizeCorrection(&row.Corrections[i])
 	}
 }
 
@@ -502,51 +536,28 @@ func (s *Server) postPreparedInventory(prepared *models.InventoryTransaction, ac
 }
 
 func (s *Server) reverseInventoryTransaction(c *gin.Context) {
-	if !isUUID(c.Param("transaction_id")) {
-		respondInventoryError(c, errors.New("transaction_id must be a UUID"))
-		return
-	}
-	var original models.InventoryTransaction
-	if err := s.db.Preload("Lines").Where("public_id = ?", c.Param("transaction_id")).First(&original).Error; err != nil {
-		respondInventoryError(c, err)
-		return
-	}
-	if original.Status != inventoryPosted {
-		respondInventoryError(c, errors.New("only posted transactions can be reversed"))
-		return
-	}
-	var existing models.InventoryTransaction
-	if err := s.db.Where("reversal_of_id = ?", original.ID).First(&existing).Error; err == nil {
-		value, _, _ := s.loadInventoryTransaction(existing.PublicID)
-		c.JSON(http.StatusOK, value)
-		return
-	}
-	now := time.Now().UTC()
-	reversal := models.InventoryTransaction{Type: "stock_adjustment", Status: inventoryDraft, BusinessDate: now, Note: "Reversal of " + original.PublicID, CreatedByID: currentUser(c).ID, ReversalOfID: &original.ID}
-	err := s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&reversal).Error; err != nil {
-			return err
-		}
-		for _, source := range original.Lines {
-			line := models.InventoryTransactionLine{InventoryTransactionID: reversal.ID, SKUID: source.SKUID, QuantityDelta: -source.QuantityDelta, SourceCurrency: "SGD", SourceUnitPrice: "0.00000000", FXRateToSGD: "1.00000000", FXRateDate: &now, FXRateSource: "reversal"}
-			if err := tx.Create(&line).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	// Compatibility route: legacy callers now receive the same guarded exact
+	// reversal used by the unified correction API.
+	key := "legacy-reverse:" + c.Param("transaction_id")
+	result, err := s.inventoryCorrection(c, inventoryCorrectionInput{Kind: "void", Reason: "Legacy reversal request"}, true, key)
 	if err != nil {
 		respondInventoryError(c, err)
 		return
 	}
-	if err := s.db.Preload("Lines").First(&reversal, reversal.ID).Error; err == nil {
-		err = s.postPreparedInventory(&reversal, currentUser(c).ID)
+	if result.Correction == nil || result.Correction.ResultTransactionID == nil {
+		respondInventoryError(c, errors.New("exact reversal did not create a result transaction"))
+		return
 	}
+	var reversal models.InventoryTransaction
+	if err := s.db.First(&reversal, *result.Correction.ResultTransactionID).Error; err != nil {
+		respondInventoryError(c, err)
+		return
+	}
+	value, _, err := s.loadInventoryTransaction(reversal.PublicID)
 	if err != nil {
 		respondInventoryError(c, err)
 		return
 	}
-	value, _, _ := s.loadInventoryTransaction(reversal.PublicID)
 	c.JSON(http.StatusCreated, value)
 }
 
@@ -624,6 +635,8 @@ func respondInventoryError(c *gin.Context, err error) {
 	status := http.StatusBadRequest
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		status = http.StatusNotFound
+	} else if errors.Is(err, errInventoryConflict) {
+		status = http.StatusConflict
 	}
 	c.JSON(status, gin.H{"code": "inventory_error", "message": err.Error()})
 }
