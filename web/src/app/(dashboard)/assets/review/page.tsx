@@ -1,258 +1,142 @@
 "use client";
-/* eslint-disable @next/next/no-img-element -- authenticated private media is not compatible with the public image optimizer */
+/* eslint-disable @next/next/no-img-element -- authenticated private media bypasses the public image optimizer */
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronRight, ImageUp, Palette, Search, Tags, X } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { ChevronLeft, ChevronRight, ClipboardCheck, Filter, Search } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { StyleGrantsPanel } from "@/components/assets/style-grants";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { apiRequest, authenticatedMediaURL } from "@/lib/api";
 import { categoryLabel } from "@/lib/category-label";
 import { useLanguage } from "@/lib/i18n";
 import { formatDateTime } from "@/lib/utils";
 
 type ReviewStatus = "pending" | "approved" | "rejected";
-
-interface Asset {
-  public_id: string;
-  media_url: string;
-  review_status: ReviewStatus;
-  captured_at: string;
-  sop_view_name: { "zh-CN": string; en: string };
-  photo_session_code: string;
-	origin_type: "captured" | "uploaded" | "ai_generated";
-	source_summary: Record<string, string>;
-}
-
-interface HierarchySKU {
+interface Counts { pending: number; approved: number; rejected: number; total: number }
+interface Category { id: number; name: string; name_en: string; is_system: boolean }
+interface QueueSKU {
   public_id: string;
   code: string;
   product_name: string;
+  category: Category;
   tags: Array<{ name: string }>;
-  assets: Asset[];
+  counts: Counts;
+  latest_asset_at: string;
+  latest_pending_at: string | null;
+  cover_asset: { public_id: string; media_url: string; review_status: ReviewStatus; origin_type: string } | null;
+}
+interface Pagination { page: number; page_size: number; total: number; total_pages: number }
+
+function StatusRail({ counts }: { counts: Counts }) {
+  const total = Math.max(counts.total, 1);
+  return <div aria-label={`Pending ${counts.pending}, approved ${counts.approved}, rejected ${counts.rejected}`} className="flex h-1.5 w-full min-w-28 overflow-hidden rounded-full bg-muted"><span className="bg-warning" style={{ width: `${counts.pending / total * 100}%` }} /><span className="bg-success" style={{ width: `${counts.approved / total * 100}%` }} /><span className="bg-danger" style={{ width: `${counts.rejected / total * 100}%` }} /></div>;
 }
 
-interface HierarchyCategory {
-  id: number;
-  name: string;
-  name_en: string;
-  is_system: boolean;
-  skus: HierarchySKU[];
-}
+function AssetReviewQueue() {
+  const { language } = useLanguage();
+  const zh = language === "zh";
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const tab = searchParams.get("tab") === "styles" ? "styles" : "review";
+  const page = Math.max(1, Number(searchParams.get("page")) || 1);
+  const status = searchParams.get("status") ?? "";
+  const categoryID = searchParams.get("category_id") ?? "";
+  const query = searchParams.get("q") ?? "";
+  const [searchEdit, setSearchEdit] = useState({ base: query, value: query });
+  const search = searchEdit.base === query ? searchEdit.value : query;
 
-interface SelectedAsset {
-  category: HierarchyCategory;
-  sku: HierarchySKU;
-  asset: Asset;
-}
+  useEffect(() => {
+    if (search === query) return;
+    const timer = window.setTimeout(() => {
+      const next = new URLSearchParams(searchParams.toString());
+      if (search.trim()) next.set("q", search.trim()); else next.delete("q");
+      next.delete("page");
+      router.replace(`/assets/review?${next.toString()}`);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [query, router, search, searchParams]);
 
-interface StyleReferenceGrant {
-  public_id: string;
-  version: number;
-  source_sku_id: string;
-  description_zh: string;
-  description_en: string;
-  derivative_sha256: string;
-  status: "approved" | "revoked";
-}
-
-function ReviewBadge({ status, label }: { status: ReviewStatus; label: string }) {
-  const variant = status === "approved" ? "success" : status === "rejected" ? "danger" : "warning";
-  return <Badge variant={variant}>{label}</Badge>;
-}
-
-export default function AssetReviewPage() {
-  const { language, t } = useLanguage();
-  const queryClient = useQueryClient();
-  const [query, setQuery] = useState("");
-  const [selectedAssetID, setSelectedAssetID] = useState<string>();
-	const [styleDialog, setStyleDialog] = useState(false);
-	const [styleZH, setStyleZH] = useState("");
-	const [styleEN, setStyleEN] = useState("");
-	const [styleMask, setStyleMask] = useState<File>();
-  const hierarchyQuery = useQuery({
-    queryKey: ["assets", "review", "hierarchy"],
-    queryFn: () => apiRequest<{ data: HierarchyCategory[] }>("/assets/review/hierarchy"),
+  const categories = useQuery({ queryKey: ["categories"], queryFn: () => apiRequest<{ data: Category[] }>("/categories") });
+  const queueParams = useMemo(() => {
+    const params = new URLSearchParams({ page: String(page), page_size: "40" });
+    if (query) params.set("q", query);
+    if (status) params.set("status", status);
+    if (categoryID) params.set("category_id", categoryID);
+    return params;
+  }, [categoryID, page, query, status]);
+  const queue = useQuery({
+    queryKey: ["assets", "review", "skus", queueParams.toString()],
+    queryFn: () => apiRequest<{ data: QueueSKU[]; pagination: Pagination }>(`/assets/review/skus?${queueParams}`),
+    enabled: tab === "review",
   });
-  const styleReferencesQuery = useQuery({ queryKey: ["style-reference-grants"], queryFn: () => apiRequest<{ data: StyleReferenceGrant[] }>("/style-reference-grants") });
-  const reviewMutation = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: "approved" | "rejected" }) =>
-      apiRequest(`/assets/${id}/review`, { method: "PATCH", body: JSON.stringify({ status }) }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["assets", "review"] });
-    },
-  });
-	const styleMutation = useMutation({ mutationFn: async () => { if (!selected || !styleMask) throw new Error("missing style grant fields"); const form = new FormData(); form.set("asset_id", selected.asset.public_id); form.set("description_zh", styleZH.trim()); form.set("description_en", styleEN.trim()); form.set("product_exclusion_mask", styleMask, "product-mask.png"); return apiRequest("/style-reference-grants", { method: "POST", body: form }); }, onSuccess: async () => { setStyleDialog(false); setStyleZH(""); setStyleEN(""); setStyleMask(undefined); await queryClient.invalidateQueries({ queryKey: ["style-reference-grants"] }); } });
-  const revokeStyleReference = useMutation({ mutationFn: (id: string) => apiRequest(`/style-reference-grants/${id}`, { method: "PATCH", body: JSON.stringify({ status: "revoked" }) }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["style-reference-grants"] }) });
 
-  const selectedAssets = useMemo<SelectedAsset[]>(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase();
-    return (hierarchyQuery.data?.data ?? []).flatMap((category) =>
-      category.skus.flatMap((sku) =>
-        sku.assets
-          .filter(() => {
-            if (!normalizedQuery) return true;
-            const searchable = [category.name, category.name_en, sku.code, sku.product_name, ...sku.tags.map((tag) => tag.name)].join(" ").toLocaleLowerCase();
-            return searchable.includes(normalizedQuery);
-          })
-          .map((asset) => ({ category, sku, asset })),
-      ),
-    );
-  }, [hierarchyQuery.data, query]);
-  const selected = selectedAssets.find(({ asset }) => asset.public_id === selectedAssetID) ?? selectedAssets[0];
-
-  const grouped = useMemo(() => {
-    const assetsBySKU = new Map<string, Asset[]>();
-    for (const item of selectedAssets) {
-      assetsBySKU.set(item.sku.public_id, [...(assetsBySKU.get(item.sku.public_id) ?? []), item.asset]);
-    }
-    return (hierarchyQuery.data?.data ?? [])
-      .map((category) => ({
-        ...category,
-        skus: category.skus
-          .map((sku) => ({ ...sku, assets: assetsBySKU.get(sku.public_id) ?? [] }))
-          .filter((sku) => sku.assets.length > 0),
-      }))
-      .filter((category) => category.skus.length > 0);
-  }, [hierarchyQuery.data, selectedAssets]);
-
-  const statusLabel = (status: ReviewStatus) =>
-    status === "approved" ? t("approved") : status === "rejected" ? t("rejected") : t("pendingReview");
-	const viewName = (asset: Asset) => asset.origin_type === "ai_generated"
-		? (language === "zh" ? "AI 生成成品" : "AI-generated output")
-		: asset.sop_view_name[language === "zh" ? "zh-CN" : "en"];
+  const setParam = (name: string, value: string) => {
+    const next = new URLSearchParams(searchParams.toString());
+    if (value) next.set(name, value); else next.delete(name);
+    if (name !== "page") next.delete("page");
+    router.replace(`/assets/review?${next.toString()}`);
+  };
+  const currentReturn = `/assets/review?${searchParams.toString()}`;
+  const statusLabel = (value: string) => value === "pending" ? (zh ? "待审核" : "Pending") : value === "approved" ? (zh ? "已通过" : "Approved") : value === "rejected" ? (zh ? "已拒绝" : "Rejected") : (zh ? "全部状态" : "All statuses");
 
   return (
     <div className="space-y-6">
-      <div>
+      <header>
         <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">CargoFlows · Quality gate</p>
-        <h1 className="text-3xl font-bold tracking-tight text-navy sm:text-4xl">{t("assetReview")}</h1>
-        <p className="mt-2 text-sm text-muted-foreground">{t("categoryHierarchyDesc")}</p>
-      </div>
+        <h1 className="text-3xl font-bold tracking-tight text-navy sm:text-4xl">{zh ? "素材审核" : "Asset review"}</h1>
+        <p className="mt-2 text-sm text-muted-foreground">{zh ? "先定位需要处理的 SKU，再进入专注的逐张审核工作台。" : "Find the SKU that needs attention, then review its assets in a focused workspace."}</p>
+      </header>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <section className="min-w-0 overflow-hidden rounded-xl border border-border bg-card shadow-[var(--shadow-sm)]">
-          <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-center gap-2">
-              <ImageUp className="h-4 w-4 text-primary" />
-              <h2 className="text-sm font-semibold">{t("categoryHierarchy")}</h2>
-            </div>
-            <div className="relative w-full sm:max-w-xs">
-              <Search className="pointer-events-none absolute left-3.5 top-3.5 h-4 w-4 text-muted-foreground" />
-              <Input className="pl-9" onChange={(event) => setQuery(event.target.value)} placeholder={t("searchAssets")} value={query} />
-            </div>
+      <nav aria-label={zh ? "素材审核页面" : "Asset review sections"} className="inline-flex rounded-xl border border-border bg-card p-1 shadow-[var(--shadow-sm)]">
+        <button className={`rounded-lg px-4 py-2 text-sm font-semibold ${tab === "review" ? "bg-navy text-white" : "text-muted-foreground hover:bg-muted"}`} onClick={() => setParam("tab", "")} type="button">{zh ? "素材审核" : "Review queue"}</button>
+        <button className={`rounded-lg px-4 py-2 text-sm font-semibold ${tab === "styles" ? "bg-navy text-white" : "text-muted-foreground hover:bg-muted"}`} onClick={() => setParam("tab", "styles")} type="button">{zh ? "风格授权" : "Style grants"}</button>
+      </nav>
+
+      {tab === "styles" ? <StyleGrantsPanel /> : (
+        <section className="overflow-hidden rounded-xl border border-border bg-card shadow-[var(--shadow-sm)]">
+          <div className="grid gap-3 border-b border-border p-4 lg:grid-cols-[minmax(240px,1fr)_220px_190px_auto] lg:items-center">
+            <div className="relative"><Search className="pointer-events-none absolute left-3.5 top-3.5 h-4 w-4 text-muted-foreground" /><Input className="pl-9" onChange={(event) => setSearchEdit({ base: query, value: event.target.value })} placeholder={zh ? "搜索 SKU、商品、分类或标签" : "Search SKU, product, category, or tag"} value={search} /></div>
+            <label className="sr-only" htmlFor="review-category">{zh ? "分类" : "Category"}</label>
+            <select className="h-11 rounded-lg border border-border bg-card px-3 text-sm" id="review-category" onChange={(event) => setParam("category_id", event.target.value)} value={categoryID}><option value="">{zh ? "全部分类" : "All categories"}</option>{(categories.data?.data ?? []).map((category) => <option key={category.id} value={category.id}>{categoryLabel(category, language)}</option>)}</select>
+            <label className="sr-only" htmlFor="review-status">{zh ? "状态" : "Status"}</label>
+            <select className="h-11 rounded-lg border border-border bg-card px-3 text-sm" id="review-status" onChange={(event) => setParam("status", event.target.value)} value={status}><option value="">{statusLabel("")}</option><option value="pending">{statusLabel("pending")}</option><option value="approved">{statusLabel("approved")}</option><option value="rejected">{statusLabel("rejected")}</option></select>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground"><Filter className="h-4 w-4" />{queue.data?.pagination.total ?? 0} {zh ? "个 SKU" : "SKUs"}</div>
           </div>
 
-          <div className="divide-y divide-border">
-            {grouped.map((category) => (
-              <section key={category.id || category.name}>
-                <div className="flex items-center gap-2 bg-muted/40 px-4 py-2.5">
-                  <span className="text-sm font-semibold">{categoryLabel(category, language)}</span>
-                  {category.is_system ? <Badge variant="neutral">{t("systemCategory")}</Badge> : null}
-                </div>
-                <div className="divide-y divide-border">
-                  {category.skus.map((sku) => (
-                    <div className="px-4 py-3" key={sku.public_id}>
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                        <Link className="font-medium text-primary" href={`/skus/${sku.public_id}`}>
-                          {sku.code}
-                        </Link>
-                        <span className="text-sm text-muted-foreground">{sku.product_name}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {sku.assets.length} {t("assetCount")}
-                        </span>
-                        {sku.tags.map((tag) => (
-                          <Badge key={tag.name} variant="neutral">
-                            <Tags className="h-3 w-3" />
-                            {tag.name}
-                          </Badge>
-                        ))}
-                      </div>
-                      <div className="mt-2 grid gap-1">
-                        {sku.assets.map((asset) => (
-                          <button
-                            className={`grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 rounded-md px-2 py-2 text-left text-sm transition-colors hover:bg-muted ${selected?.asset.public_id === asset.public_id ? "bg-muted" : ""}`}
-                            key={asset.public_id}
-                            onClick={() => setSelectedAssetID(asset.public_id)}
-                            type="button"
-                          >
-							<span className="min-w-0 truncate">{viewName(asset)} {asset.origin_type === "ai_generated" ? <Badge variant="warning">AI</Badge> : null}</span>
-                            <ReviewBadge label={statusLabel(asset.review_status)} status={asset.review_status} />
-                            <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            ))}
-            {!hierarchyQuery.isLoading && grouped.length === 0 ? (
-              <p className="px-4 py-10 text-center text-sm text-muted-foreground">{t("noData")}</p>
-            ) : null}
+          <div className="hidden overflow-x-auto md:block">
+            <table className="w-full min-w-[900px] text-sm">
+              <thead className="bg-muted/55 text-left text-[11px] font-bold uppercase tracking-[0.08em] text-muted-foreground"><tr><th className="px-4 py-3">{zh ? "SKU / 商品" : "SKU / product"}</th><th className="px-4 py-3">{zh ? "分类与标签" : "Category & tags"}</th><th className="px-4 py-3">{zh ? "审核状态" : "Review status"}</th><th className="px-4 py-3">{zh ? "最近更新" : "Latest"}</th><th className="w-12 px-4 py-3"><span className="sr-only">{zh ? "打开" : "Open"}</span></th></tr></thead>
+              <tbody className="divide-y divide-border">
+                {(queue.data?.data ?? []).map((sku) => (
+                  <tr className="group hover:bg-primary/[0.035]" key={sku.public_id}>
+                    <td className="px-4 py-3"><Link className="flex items-center gap-3" href={`/assets/review/${sku.public_id}?return=${encodeURIComponent(currentReturn)}`}><span className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-border bg-muted">{sku.cover_asset ? <img alt="" className="h-full w-full object-cover" src={authenticatedMediaURL(sku.cover_asset.media_url)} /> : null}</span><span className="min-w-0"><span className="block font-semibold text-primary group-hover:underline">{sku.code}</span><span className="block max-w-72 truncate text-xs text-muted-foreground">{sku.product_name}</span></span></Link></td>
+                    <td className="px-4 py-3"><span className="block text-xs font-medium">{categoryLabel(sku.category, language)}</span><span className="mt-1 flex max-w-64 gap-1 overflow-hidden">{sku.tags.slice(0, 3).map((tag) => <Badge key={tag.name} variant="neutral">{tag.name}</Badge>)}</span></td>
+                    <td className="px-4 py-3"><div className="mb-2 flex gap-3 text-xs"><strong className="text-warning">{sku.counts.pending} {zh ? "待审" : "pending"}</strong><span className="text-success">{sku.counts.approved}</span><span className="text-danger">{sku.counts.rejected}</span></div><StatusRail counts={sku.counts} /></td>
+                    <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{formatDateTime(sku.latest_pending_at ?? sku.latest_asset_at)}</td>
+                    <td className="px-4 py-3"><Button asChild aria-label={`${zh ? "审核" : "Review"} ${sku.code}`} size="icon" variant="ghost"><Link href={`/assets/review/${sku.public_id}?return=${encodeURIComponent(currentReturn)}`}><ChevronRight className="h-4 w-4" /></Link></Button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
+
+          <div className="divide-y divide-border md:hidden">{(queue.data?.data ?? []).map((sku) => <Link className="block p-4 active:bg-muted" href={`/assets/review/${sku.public_id}?return=${encodeURIComponent(currentReturn)}`} key={sku.public_id}><div className="flex gap-3"><span className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border bg-muted">{sku.cover_asset ? <img alt="" className="h-full w-full object-cover" src={authenticatedMediaURL(sku.cover_asset.media_url)} /> : null}</span><span className="min-w-0 flex-1"><span className="flex items-center justify-between gap-2"><strong className="text-primary">{sku.code}</strong><ChevronRight className="h-4 w-4 text-muted-foreground" /></span><span className="block truncate text-xs text-muted-foreground">{sku.product_name} · {categoryLabel(sku.category, language)}</span><span className="mt-2 flex gap-3 text-xs"><strong className="text-warning">{sku.counts.pending} {zh ? "待审" : "pending"}</strong><span className="text-success">{sku.counts.approved} {zh ? "通过" : "approved"}</span><span className="text-danger">{sku.counts.rejected} {zh ? "拒绝" : "rejected"}</span></span><span className="mt-2 block"><StatusRail counts={sku.counts} /></span></span></div></Link>)}</div>
+
+          {queue.isLoading ? <div className="grid min-h-48 place-items-center text-sm text-muted-foreground">{zh ? "正在加载审核队列…" : "Loading review queue…"}</div> : null}
+          {queue.isError ? <div className="m-4 rounded-lg border border-danger/30 bg-danger/5 p-4 text-sm text-danger" role="alert">{zh ? "审核队列加载失败，请重试。" : "The review queue could not be loaded. Try again."}</div> : null}
+          {!queue.isLoading && !queue.isError && !queue.data?.data.length ? <div className="grid min-h-52 place-items-center p-8 text-center"><div><ClipboardCheck className="mx-auto h-8 w-8 text-primary" /><p className="mt-3 font-medium">{zh ? "没有符合条件的 SKU" : "No matching SKUs"}</p><p className="mt-1 text-sm text-muted-foreground">{zh ? "调整搜索或筛选条件后再试。" : "Try changing the search or filters."}</p></div></div> : null}
+
+          {(queue.data?.pagination.total_pages ?? 0) > 1 ? <footer className="flex items-center justify-between gap-3 border-t border-border p-4"><span className="text-xs text-muted-foreground">{zh ? `第 ${page} / ${queue.data?.pagination.total_pages} 页` : `Page ${page} of ${queue.data?.pagination.total_pages}`}</span><div className="flex gap-2"><Button disabled={page <= 1} onClick={() => setParam("page", String(page - 1))} size="sm" variant="secondary"><ChevronLeft className="h-4 w-4" />{zh ? "上一页" : "Previous"}</Button><Button disabled={page >= (queue.data?.pagination.total_pages ?? 1)} onClick={() => setParam("page", String(page + 1))} size="sm" variant="secondary">{zh ? "下一页" : "Next"}<ChevronRight className="h-4 w-4" /></Button></div></footer> : null}
         </section>
-
-        <aside className="xl:sticky xl:top-20 xl:self-start">
-          {selected ? (
-            <div className="overflow-hidden rounded-xl border border-border bg-card shadow-[var(--shadow-md)]">
-              <div className="border-b border-border p-4">
-                <p className="text-xs text-muted-foreground">{categoryLabel(selected.category, language)}</p>
-                <p className="mt-1 font-semibold">{selected.sku.code} · {viewName(selected.asset)}</p>
-				{selected.asset.origin_type === "ai_generated" ? <p className="mt-2 text-xs leading-5 text-amber-700">{language === "zh" ? "AI 来源：审核通过仅表示可作为渠道成品使用，不能作为商品身份或事实依据。" : "AI source: approval permits channel use only; it never establishes product identity or facts."}</p> : null}
-              </div>
-              <div className="aspect-[4/5] bg-muted">
-                {/* MinIO image URLs are private authenticated assets and bypass Next Image optimization. */}
-                <img alt={`${selected.sku.code} ${viewName(selected.asset)}`} className="h-full w-full object-contain" src={authenticatedMediaURL(selected.asset.media_url)} />
-              </div>
-              <div className="space-y-4 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <ReviewBadge label={statusLabel(selected.asset.review_status)} status={selected.asset.review_status} />
-                  <span className="text-xs text-muted-foreground">{formatDateTime(selected.asset.captured_at)}</span>
-                </div>
-                <p className="text-sm text-muted-foreground">{selected.asset.photo_session_code}</p>
-                {selected.asset.origin_type === "ai_generated" ? <dl className="grid gap-2 rounded-lg bg-muted/50 p-3 text-xs"><div className="flex justify-between gap-3"><dt>{language === "zh" ? "模型" : "Model"}</dt><dd className="font-mono">{selected.asset.source_summary.model || "—"}</dd></div><div className="flex justify-between gap-3"><dt>{language === "zh" ? "API 路径" : "API path"}</dt><dd className="font-mono">{selected.asset.source_summary.api_mode || "—"}</dd></div><div className="flex justify-between gap-3"><dt>{language === "zh" ? "生成任务" : "Source job"}</dt><dd className="max-w-48 truncate font-mono">{selected.asset.source_summary.job_id || "—"}</dd></div></dl> : null}
-				{selected.asset.origin_type === "ai_generated" ? <section><h3 className="text-xs font-semibold">{language === "zh" ? "目标 SKU 真实身份素材对比" : "Target SKU real identity comparison"}</h3><div className="mt-2 grid grid-cols-3 gap-2">{selectedAssets.filter((item) => item.sku.public_id === selected.sku.public_id && item.asset.origin_type !== "ai_generated").slice(0, 3).map((item) => <img alt={viewName(item.asset)} className="aspect-square rounded-md bg-muted object-cover" key={item.asset.public_id} src={authenticatedMediaURL(item.asset.media_url)} />)}</div></section> : null}
-                <div className="flex gap-2">
-                  <Button
-                    className="flex-1"
-                    disabled={reviewMutation.isPending}
-                    onClick={() => reviewMutation.mutate({ id: selected.asset.public_id, status: "approved" })}
-                    variant="secondary"
-                  >
-                    <Check className="h-4 w-4" />
-                    {t("approve")}
-                  </Button>
-                  <Button
-                    className="flex-1"
-                    disabled={reviewMutation.isPending}
-                    onClick={() => reviewMutation.mutate({ id: selected.asset.public_id, status: "rejected" })}
-                    variant="danger"
-                  >
-                    <X className="h-4 w-4" />
-                    {t("reject")}
-                  </Button>
-                </div>
-				{selected.asset.review_status === "approved" ? <Button className="w-full" onClick={() => setStyleDialog(true)} variant="outline"><Palette className="h-4 w-4" />{language === "zh" ? "授权为跨 SKU 风格参考" : "Authorize as cross-SKU style"}</Button> : null}
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-              {t("selectAsset")}
-            </div>
-          )}
-        </aside>
-      </div>
-
-      <section className="overflow-hidden rounded-xl border border-border bg-card shadow-[var(--shadow-sm)]">
-        <div className="border-b border-border p-4"><div className="flex items-center gap-2"><Palette className="h-4 w-4 text-primary" /><h2 className="text-sm font-semibold">{language === "zh" ? "跨 SKU 风格授权" : "Cross-SKU style grants"}<Badge className="ml-2" variant="neutral">{styleReferencesQuery.data?.data.length ?? 0}</Badge></h2></div><p className="mt-1 text-xs leading-5 text-muted-foreground">{language === "zh" ? "这里只管理去除来源商品主体后的私有派生图。撤销只影响未来任务，历史任务继续使用冻结版本。" : "Only private derivatives with the source product removed are managed here. Revocation affects future jobs; historical snapshots keep their frozen version."}</p></div>
-        <div className="divide-y divide-border">{(styleReferencesQuery.data?.data ?? []).map((grant) => <article className="grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center" key={grant.public_id}><div><div className="flex flex-wrap items-center gap-2"><Badge variant="success">{grant.status}</Badge><span className="font-mono text-xs">V{grant.version} · {grant.source_sku_id.slice(0, 8)}</span></div><p className="mt-2 text-sm">{language === "zh" ? grant.description_zh : grant.description_en}</p><p className="mt-1 font-mono text-[11px] text-muted-foreground">SHA-256 {grant.derivative_sha256.slice(0, 12)}…</p></div><Button aria-label={`${language === "zh" ? "撤销风格授权" : "Revoke style grant"}: ${grant.public_id}`} disabled={revokeStyleReference.isPending} onClick={() => revokeStyleReference.mutate(grant.public_id)} size="sm" variant="ghost"><X className="h-4 w-4" />{language === "zh" ? "撤销" : "Revoke"}</Button></article>)}{!styleReferencesQuery.isLoading && !(styleReferencesQuery.data?.data.length) ? <p className="p-6 text-center text-sm text-muted-foreground">{language === "zh" ? "暂无风格授权。" : "No style grants yet."}</p> : null}</div>
-        {styleReferencesQuery.isError || revokeStyleReference.isError ? <p aria-live="polite" className="m-4 rounded-md border border-danger/30 bg-danger/5 p-3 text-sm text-danger" role="alert">{language === "zh" ? "风格授权列表或撤销操作失败，请重试。" : "Style grants could not be loaded or revoked. Try again."}</p> : null}
-      </section>
-		{styleDialog && selected ? <div aria-modal="true" className="fixed inset-0 z-50 grid overflow-y-auto bg-navy/55 p-4" role="dialog"><form className="m-auto w-full max-w-lg space-y-4 rounded-xl bg-card p-5 shadow-2xl" onSubmit={(event) => { event.preventDefault(); styleMutation.mutate(); }}><div className="flex items-start justify-between gap-3"><div><h2 className="font-semibold">{language === "zh" ? "创建风格授权" : "Create style grant"}</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">{language === "zh" ? "上传与原图同尺寸的 PNG 商品排除蒙版：透明区域必须完整覆盖商品主体。服务端只保存去除主体后的私有派生图。" : "Upload a same-size PNG exclusion mask. Transparent pixels must fully cover the product. Only a private product-free derivative is retained for reuse."}</p></div><Button aria-label={language === "zh" ? "关闭" : "Close"} onClick={() => setStyleDialog(false)} size="icon" type="button" variant="ghost"><X className="h-4 w-4" /></Button></div><label className="block text-sm font-medium">中文风格说明<Textarea className="mt-2" maxLength={2000} onChange={(event) => setStyleZH(event.target.value)} value={styleZH} /></label><label className="block text-sm font-medium">English style description<Textarea className="mt-2" maxLength={2000} onChange={(event) => setStyleEN(event.target.value)} value={styleEN} /></label><label className="block text-sm font-medium">{language === "zh" ? "商品排除蒙版（PNG）" : "Product exclusion mask (PNG)"}<Input accept="image/png" className="mt-2" onChange={(event) => setStyleMask(event.target.files?.[0])} type="file" /></label>{styleMutation.isError ? <p aria-live="polite" className="text-sm text-danger" role="alert">{styleMutation.error instanceof Error ? styleMutation.error.message : (language === "zh" ? "创建失败" : "Creation failed")}</p> : null}<Button className="w-full" disabled={styleMutation.isPending || !styleMask || !styleZH.trim() || !styleEN.trim()} type="submit">{styleMutation.isPending ? (language === "zh" ? "创建中…" : "Creating…") : (language === "zh" ? "生成私有派生图并授权" : "Create private derivative and grant")}</Button></form></div> : null}
+      )}
     </div>
   );
+}
+
+export default function AssetReviewPage() {
+  return <Suspense fallback={<div className="min-h-64 rounded-xl border border-border bg-card" />}><AssetReviewQueue /></Suspense>;
 }

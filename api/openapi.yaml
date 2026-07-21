@@ -761,10 +761,39 @@ paths:
       parameters:
         - { in: query, name: status, schema: { type: string, enum: [pending, approved, rejected] } }
         - { in: query, name: sku_id, schema: { type: string, format: uuid }, description: Limit results to one SKU. }
+        - { in: query, name: page, schema: { type: integer, minimum: 1 }, description: Enables pagination when supplied. }
+        - { in: query, name: page_size, schema: { type: integer, minimum: 1, maximum: 100 }, description: Enables pagination when supplied; defaults to 48. }
       responses:
-        '200': { description: Review assets, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/AssetReviewItem' } } } } } } }
+        '200': { description: Review assets, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/AssetReviewItem' } }, pagination: { $ref: '#/components/schemas/Pagination' } } } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /assets/review/skus:
+    get:
+      operationId: listAssetReviewSKUs
+      parameters:
+        - { in: query, name: q, schema: { type: string }, description: Search SKU code, product, category, or tag. }
+        - { in: query, name: category_id, schema: { type: integer, minimum: 1 } }
+        - { in: query, name: status, schema: { type: string, enum: [pending, approved, rejected] }, description: Return SKUs containing at least one asset in this status. }
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: page_size, schema: { type: integer, minimum: 1, maximum: 100, default: 40 } }
+      responses:
+        '200': { description: Paginated SKU review queue, content: { application/json: { schema: { type: object, required: [data, pagination], properties: { data: { type: array, items: { $ref: '#/components/schemas/AssetReviewSKUSummary' } }, pagination: { $ref: '#/components/schemas/Pagination' } } } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /assets/review/skus/{sku_id}:
+    parameters: [ { $ref: '#/components/parameters/SKUID' } ]
+    get:
+      operationId: getAssetReviewSKU
+      responses:
+        '200': { description: SKU review summary, content: { application/json: { schema: { $ref: '#/components/schemas/AssetReviewSKUDetail' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /assets/review/hierarchy:
     get:
@@ -3069,12 +3098,73 @@ components:
         name_en: { type: string }
         is_system: { type: boolean }
         skus: { type: array, items: { $ref: '#/components/schemas/AssetReviewSKU' } }
+    Pagination:
+      type: object
+      additionalProperties: false
+      required: [page, page_size, total, total_pages]
+      properties:
+        page: { type: integer, minimum: 1 }
+        page_size: { type: integer, minimum: 1 }
+        total: { type: integer, minimum: 0 }
+        total_pages: { type: integer, minimum: 0 }
+    AssetReviewCounts:
+      type: object
+      additionalProperties: false
+      required: [pending, approved, rejected, total]
+      properties:
+        pending: { type: integer, minimum: 0 }
+        approved: { type: integer, minimum: 0 }
+        rejected: { type: integer, minimum: 0 }
+        total: { type: integer, minimum: 0 }
+    AssetReviewQueueCategory:
+      type: object
+      additionalProperties: false
+      required: [id, name, name_en, is_system]
+      properties:
+        id: { type: integer, minimum: 1 }
+        name: { type: string }
+        name_en: { type: string }
+        is_system: { type: boolean }
+    AssetReviewCover:
+      type: object
+      additionalProperties: false
+      required: [public_id, media_url, review_status, origin_type]
+      properties:
+        public_id: { type: string, format: uuid }
+        media_url: { type: string }
+        review_status: { type: string, enum: [pending, approved, rejected] }
+        origin_type: { type: string, enum: [captured, uploaded, ai_generated] }
+    AssetReviewSKUSummary:
+      type: object
+      additionalProperties: false
+      required: [public_id, code, product_name, category, tags, counts, latest_asset_at]
+      properties:
+        public_id: { type: string, format: uuid }
+        code: { type: string }
+        product_name: { type: string }
+        category: { $ref: '#/components/schemas/AssetReviewQueueCategory' }
+        tags: { type: array, items: { $ref: '#/components/schemas/Tag' } }
+        counts: { $ref: '#/components/schemas/AssetReviewCounts' }
+        latest_asset_at: { type: string, format: date-time }
+        latest_pending_at: { type: string, format: date-time, nullable: true }
+        cover_asset: { allOf: [ { $ref: '#/components/schemas/AssetReviewCover' } ], nullable: true }
+    AssetReviewSKUDetail:
+      type: object
+      additionalProperties: false
+      required: [public_id, code, product_name, category, tags, counts]
+      properties:
+        public_id: { type: string, format: uuid }
+        code: { type: string }
+        product_name: { type: string }
+        category: { $ref: '#/components/schemas/AssetReviewQueueCategory' }
+        tags: { type: array, items: { $ref: '#/components/schemas/Tag' } }
+        counts: { $ref: '#/components/schemas/AssetReviewCounts' }
     ReviewAssetRequest:
       type: object
       additionalProperties: false
       required: [status]
       properties:
-        status: { type: string, enum: [approved, rejected] }
+        status: { type: string, enum: [pending, approved, rejected] }
         reason: { type: string }
     ReviewedAsset:
       type: object
@@ -3082,4 +3172,4 @@ components:
       required: [public_id, review_status]
       properties:
         public_id: { type: string, format: uuid }
-        review_status: { type: string, enum: [approved, rejected] }
+        review_status: { type: string, enum: [pending, approved, rejected] }

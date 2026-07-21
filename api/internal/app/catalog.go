@@ -1,9 +1,12 @@
 package app
 
 import (
+	"database/sql/driver"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -169,6 +172,290 @@ type assetReviewHierarchyAsset struct {
 type localizedViewName struct {
 	ZHCN string `json:"zh-CN"`
 	EN   string `json:"en"`
+}
+
+type paginationDTO struct {
+	Page       int   `json:"page"`
+	PageSize   int   `json:"page_size"`
+	Total      int64 `json:"total"`
+	TotalPages int   `json:"total_pages"`
+}
+
+type assetReviewCounts struct {
+	Pending  int64 `json:"pending"`
+	Approved int64 `json:"approved"`
+	Rejected int64 `json:"rejected"`
+	Total    int64 `json:"total"`
+}
+
+type assetReviewCover struct {
+	PublicID     string `json:"public_id"`
+	MediaURL     string `json:"media_url"`
+	ReviewStatus string `json:"review_status"`
+	OriginType   string `json:"origin_type"`
+}
+
+type assetReviewCategory struct {
+	ID       uint   `json:"id"`
+	Name     string `json:"name"`
+	NameEN   string `json:"name_en"`
+	IsSystem bool   `json:"is_system"`
+}
+
+type assetReviewSKUSummary struct {
+	PublicID        string              `json:"public_id"`
+	Code            string              `json:"code"`
+	ProductName     string              `json:"product_name"`
+	Category        assetReviewCategory `json:"category"`
+	Tags            []publicTagDTO      `json:"tags"`
+	Counts          assetReviewCounts   `json:"counts"`
+	LatestAt        time.Time           `json:"latest_asset_at"`
+	LatestPendingAt *time.Time          `json:"latest_pending_at"`
+	CoverAsset      *assetReviewCover   `json:"cover_asset"`
+}
+
+type assetReviewCoverRow struct {
+	SKUID        uint
+	PublicID     string
+	ReviewStatus string
+	OriginType   string
+}
+
+type assetReviewSKURow struct {
+	SKUID           uint
+	PublicID        string
+	Code            string
+	ProductName     string
+	CategoryID      uint
+	CategoryName    string
+	CategoryNameEN  string
+	CategorySystem  bool
+	PendingCount    int64
+	ApprovedCount   int64
+	RejectedCount   int64
+	TotalCount      int64
+	LatestAt        nullableDatabaseTime
+	LatestPendingAt nullableDatabaseTime
+}
+
+type nullableDatabaseTime struct {
+	Time  time.Time
+	Valid bool
+}
+
+func (value nullableDatabaseTime) Value() (driver.Value, error) {
+	if !value.Valid {
+		return nil, nil
+	}
+	return value.Time, nil
+}
+
+func (value *nullableDatabaseTime) Scan(source any) error {
+	if source == nil {
+		value.Valid = false
+		return nil
+	}
+	if parsed, ok := source.(time.Time); ok {
+		value.Time, value.Valid = parsed, true
+		return nil
+	}
+	var raw string
+	switch typed := source.(type) {
+	case string:
+		raw = typed
+	case []byte:
+		raw = string(typed)
+	default:
+		return fmt.Errorf("unsupported database time type %T", source)
+	}
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999-07:00", "2006-01-02 15:04:05.999999999", "2006-01-02 15:04:05"} {
+		if parsed, err := time.Parse(layout, raw); err == nil {
+			value.Time, value.Valid = parsed, true
+			return nil
+		}
+	}
+	return fmt.Errorf("unsupported database time value %q", raw)
+}
+
+func parseAssetReviewPagination(c *gin.Context, defaultPageSize int) (int, int, bool) {
+	page, pageSize := 1, defaultPageSize
+	var err error
+	if raw := c.Query("page"); raw != "" {
+		page, err = strconv.Atoi(raw)
+		if err != nil || page < 1 {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": "page must be a positive integer"})
+			return 0, 0, false
+		}
+	}
+	if raw := c.Query("page_size"); raw != "" {
+		pageSize, err = strconv.Atoi(raw)
+		if err != nil || pageSize < 1 || pageSize > 100 {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": "page_size must be between 1 and 100"})
+			return 0, 0, false
+		}
+	}
+	return page, pageSize, true
+}
+
+func reviewStatusFilter(c *gin.Context) (string, bool) {
+	status := strings.TrimSpace(c.Query("status"))
+	if status != "" && status != "pending" && status != "approved" && status != "rejected" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": "status must be pending, approved, or rejected"})
+		return "", false
+	}
+	return status, true
+}
+
+func pagination(page, pageSize int, total int64) paginationDTO {
+	totalPages := 0
+	if total > 0 {
+		totalPages = int((total + int64(pageSize) - 1) / int64(pageSize))
+	}
+	return paginationDTO{Page: page, PageSize: pageSize, Total: total, TotalPages: totalPages}
+}
+
+func (s *Server) assetReviewSKUQuery(c *gin.Context) (*gorm.DB, string, bool) {
+	status, ok := reviewStatusFilter(c)
+	if !ok {
+		return nil, "", false
+	}
+	query := s.db.Table("assets").
+		Joins("JOIN skus ON skus.id = assets.sk_uid").
+		Joins("JOIN products ON products.id = skus.product_id").
+		Joins("LEFT JOIN categories ON categories.id = products.category_id")
+	if categoryID := strings.TrimSpace(c.Query("category_id")); categoryID != "" {
+		value, err := strconv.ParseUint(categoryID, 10, 64)
+		if err != nil || value == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": "category_id must be a positive integer"})
+			return nil, "", false
+		}
+		query = query.Where("products.category_id = ?", value)
+	}
+	if search := strings.TrimSpace(c.Query("q")); search != "" {
+		like := "%" + search + "%"
+		query = query.Where("skus.code LIKE ? OR products.name LIKE ? OR categories.name LIKE ? OR categories.name_en LIKE ? OR EXISTS (SELECT 1 FROM sku_tags JOIN tags ON tags.id = sku_tags.tag_id WHERE sku_tags.sk_uid = skus.id AND tags.name LIKE ?)", like, like, like, like, like)
+	}
+	return query, status, true
+}
+
+func (s *Server) listAssetReviewSKUs(c *gin.Context) {
+	page, pageSize, ok := parseAssetReviewPagination(c, 40)
+	if !ok {
+		return
+	}
+	base, status, ok := s.assetReviewSKUQuery(c)
+	if !ok {
+		return
+	}
+	group := "skus.id, skus.public_id, skus.code, products.name, categories.id, categories.name, categories.name_en, categories.is_system"
+	grouped := base.Select("skus.id AS sk_uid").Group(group)
+	if status != "" {
+		grouped = grouped.Having("SUM(CASE WHEN assets.review_status = ? THEN 1 ELSE 0 END) > 0", status)
+	}
+	var total int64
+	if err := s.db.Table("(?) AS matching_skus", grouped).Count(&total).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+	base, status, ok = s.assetReviewSKUQuery(c)
+	if !ok {
+		return
+	}
+
+	selectFields := `skus.id AS sk_uid, skus.public_id, skus.code, products.name AS product_name,
+		categories.id AS category_id, categories.name AS category_name, categories.name_en AS category_name_en,
+		categories.is_system AS category_system,
+		SUM(CASE WHEN assets.review_status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
+		SUM(CASE WHEN assets.review_status = 'approved' THEN 1 ELSE 0 END) AS approved_count,
+		SUM(CASE WHEN assets.review_status = 'rejected' THEN 1 ELSE 0 END) AS rejected_count,
+		COUNT(assets.id) AS total_count, MAX(assets.captured_at) AS latest_at,
+		MAX(CASE WHEN assets.review_status = 'pending' THEN assets.captured_at ELSE NULL END) AS latest_pending_at`
+	query := base.Select(selectFields).Group(group)
+	if status != "" {
+		query = query.Having("SUM(CASE WHEN assets.review_status = ? THEN 1 ELSE 0 END) > 0", status)
+	}
+	var rows []assetReviewSKURow
+	if err := query.Order("CASE WHEN SUM(CASE WHEN assets.review_status = 'pending' THEN 1 ELSE 0 END) > 0 THEN 0 ELSE 1 END ASC").
+		Order("latest_pending_at DESC").Order("skus.code ASC").Offset((page - 1) * pageSize).Limit(pageSize).Scan(&rows).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+
+	ids := make([]uint, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.SKUID)
+	}
+	tagsBySKU := make(map[uint][]publicTagDTO)
+	coverBySKU := make(map[uint]assetReviewCover)
+	if len(ids) > 0 {
+		var skus []models.SKU
+		if err := s.db.Preload("Tags").Where("id IN ?", ids).Find(&skus).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+			return
+		}
+		for _, sku := range skus {
+			tagsBySKU[sku.ID] = publicTagDTOs(sku.Tags)
+		}
+		var covers []assetReviewCoverRow
+		coverQuery := `SELECT sk_uid, public_id, review_status, origin_type FROM (
+			SELECT sk_uid, public_id, review_status, origin_type,
+			ROW_NUMBER() OVER (PARTITION BY sk_uid ORDER BY CASE review_status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END, captured_at DESC) AS rn
+			FROM assets WHERE sk_uid IN ?
+		) ranked_assets WHERE rn = 1`
+		if err := s.db.Raw(coverQuery, ids).Scan(&covers).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+			return
+		}
+		for _, asset := range covers {
+			coverBySKU[asset.SKUID] = assetReviewCover{PublicID: asset.PublicID, MediaURL: "/api/v1/assets/" + asset.PublicID + "/media", ReviewStatus: asset.ReviewStatus, OriginType: asset.OriginType}
+		}
+	}
+
+	items := make([]assetReviewSKUSummary, 0, len(rows))
+	for _, row := range rows {
+		var cover *assetReviewCover
+		if value, exists := coverBySKU[row.SKUID]; exists {
+			copy := value
+			cover = &copy
+		}
+		var latestPendingAt *time.Time
+		if row.LatestPendingAt.Valid {
+			copy := row.LatestPendingAt.Time
+			latestPendingAt = &copy
+		}
+		items = append(items, assetReviewSKUSummary{
+			PublicID: row.PublicID, Code: row.Code, ProductName: row.ProductName,
+			Category: assetReviewCategory{ID: row.CategoryID, Name: row.CategoryName, NameEN: row.CategoryNameEN, IsSystem: row.CategorySystem},
+			Tags:     tagsBySKU[row.SKUID], Counts: assetReviewCounts{Pending: row.PendingCount, Approved: row.ApprovedCount, Rejected: row.RejectedCount, Total: row.TotalCount},
+			LatestAt: row.LatestAt.Time, LatestPendingAt: latestPendingAt, CoverAsset: cover,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"data": items, "pagination": pagination(page, pageSize, total)})
+}
+
+func (s *Server) getAssetReviewSKU(c *gin.Context) {
+	publicID := c.Param("sku_id")
+	if !isUUID(publicID) {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": "sku_id must be a UUID"})
+		return
+	}
+	var sku models.SKU
+	if err := s.db.Preload("Product.CatalogCategory").Preload("Tags").Where("public_id = ?", publicID).First(&sku).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"message": "sku not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+	var counts assetReviewCounts
+	if err := s.db.Model(&models.Asset{}).Where("sk_uid = ?", sku.ID).
+		Select("COALESCE(SUM(CASE WHEN review_status = 'pending' THEN 1 ELSE 0 END), 0) AS pending, COALESCE(SUM(CASE WHEN review_status = 'approved' THEN 1 ELSE 0 END), 0) AS approved, COALESCE(SUM(CASE WHEN review_status = 'rejected' THEN 1 ELSE 0 END), 0) AS rejected, COUNT(*) AS total").Scan(&counts).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+	category := sku.Product.CatalogCategory
+	c.JSON(http.StatusOK, gin.H{"public_id": sku.PublicID, "code": sku.Code, "product_name": sku.Product.Name, "category": assetReviewCategory{ID: category.ID, Name: category.Name, NameEN: category.NameEN, IsSystem: category.IsSystem}, "tags": publicTagDTOs(sku.Tags), "counts": counts})
 }
 
 type assetReviewHierarchySKU struct {

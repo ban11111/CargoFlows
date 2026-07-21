@@ -932,6 +932,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/assets/review/skus": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAssetReviewSKUs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assets/review/skus/{sku_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sku_id: components["parameters"]["SKUID"];
+            };
+            cookie?: never;
+        };
+        get: operations["getAssetReviewSKU"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/assets/review/hierarchy": {
         parameters: {
             query?: never;
@@ -3433,16 +3467,66 @@ export interface components {
             is_system: boolean;
             skus: components["schemas"]["AssetReviewSKU"][];
         };
+        Pagination: {
+            page: number;
+            page_size: number;
+            total: number;
+            total_pages: number;
+        };
+        AssetReviewCounts: {
+            pending: number;
+            approved: number;
+            rejected: number;
+            total: number;
+        };
+        AssetReviewQueueCategory: {
+            id: number;
+            name: string;
+            name_en: string;
+            is_system: boolean;
+        };
+        AssetReviewCover: {
+            /** Format: uuid */
+            public_id: string;
+            media_url: string;
+            /** @enum {string} */
+            review_status: "pending" | "approved" | "rejected";
+            /** @enum {string} */
+            origin_type: "captured" | "uploaded" | "ai_generated";
+        };
+        AssetReviewSKUSummary: {
+            /** Format: uuid */
+            public_id: string;
+            code: string;
+            product_name: string;
+            category: components["schemas"]["AssetReviewQueueCategory"];
+            tags: components["schemas"]["Tag"][];
+            counts: components["schemas"]["AssetReviewCounts"];
+            /** Format: date-time */
+            latest_asset_at: string;
+            /** Format: date-time */
+            latest_pending_at?: string | null;
+            cover_asset?: components["schemas"]["AssetReviewCover"] | null;
+        };
+        AssetReviewSKUDetail: {
+            /** Format: uuid */
+            public_id: string;
+            code: string;
+            product_name: string;
+            category: components["schemas"]["AssetReviewQueueCategory"];
+            tags: components["schemas"]["Tag"][];
+            counts: components["schemas"]["AssetReviewCounts"];
+        };
         ReviewAssetRequest: {
             /** @enum {string} */
-            status: "approved" | "rejected";
+            status: "pending" | "approved" | "rejected";
             reason?: string;
         };
         ReviewedAsset: {
             /** Format: uuid */
             public_id: string;
             /** @enum {string} */
-            review_status: "approved" | "rejected";
+            review_status: "pending" | "approved" | "rejected";
         };
     };
     responses: {
@@ -5543,6 +5627,10 @@ export interface operations {
                 status?: "pending" | "approved" | "rejected";
                 /** @description Limit results to one SKU. */
                 sku_id?: string;
+                /** @description Enables pagination when supplied. */
+                page?: number;
+                /** @description Enables pagination when supplied; defaults to 48. */
+                page_size?: number;
             };
             header?: never;
             path?: never;
@@ -5558,11 +5646,75 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["AssetReviewItem"][];
+                        pagination?: components["schemas"]["Pagination"];
                     };
                 };
             };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    listAssetReviewSKUs: {
+        parameters: {
+            query?: {
+                /** @description Search SKU code */
+                q?: string;
+                category_id?: number;
+                /** @description Return SKUs containing at least one asset in this status. */
+                status?: "pending" | "approved" | "rejected";
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated SKU review queue */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AssetReviewSKUSummary"][];
+                        pagination: components["schemas"]["Pagination"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    getAssetReviewSKU: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sku_id: components["parameters"]["SKUID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SKU review summary */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetReviewSKUDetail"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalServerError"];
         };
     };

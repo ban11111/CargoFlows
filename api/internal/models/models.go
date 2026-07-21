@@ -171,14 +171,14 @@ type PhotoSession struct {
 type Asset struct {
 	ID                    uint         `gorm:"primaryKey" json:"-"`
 	PublicID              string       `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
-	SKUID                 uint         `gorm:"index;not null" json:"-"`
+	SKUID                 uint         `gorm:"index;index:idx_assets_review_queue,priority:1;not null" json:"-"`
 	PhotoSessionID        uint         `gorm:"index" json:"-"`
 	SOPViewID             uint         `gorm:"index" json:"-"`
 	UploadID              *string      `gorm:"size:36;uniqueIndex" json:"-"`
 	ObjectKey             string       `gorm:"size:500;uniqueIndex;not null" json:"-"`
 	OriginalURL           string       `gorm:"size:500;not null" json:"-"`
 	ThumbnailURL          string       `gorm:"size:500" json:"-"`
-	ReviewStatus          string       `gorm:"size:32;not null;default:pending" json:"review_status"`
+	ReviewStatus          string       `gorm:"size:32;index:idx_assets_review_queue,priority:2;not null;default:pending" json:"review_status"`
 	MIMEType              string       `gorm:"size:80;not null;default:'';<-:create" json:"mime_type"`
 	Width                 int          `gorm:"not null;default:0;<-:create" json:"width"`
 	Height                int          `gorm:"not null;default:0;<-:create" json:"height"`
@@ -187,7 +187,7 @@ type Asset struct {
 	OriginType            string       `gorm:"size:32;index;not null;default:uploaded" json:"origin_type"`
 	SourceAIImageResultID *uint        `gorm:"uniqueIndex" json:"-"`
 	ProvenanceJSON        []byte       `gorm:"type:json;not null" json:"-"`
-	CapturedAt            time.Time    `json:"captured_at"`
+	CapturedAt            time.Time    `gorm:"index:idx_assets_review_queue,priority:3" json:"captured_at"`
 	CreatedAt             time.Time    `json:"created_at"`
 	UpdatedAt             time.Time    `json:"updated_at"`
 	SKU                   SKU          `json:"sku"`

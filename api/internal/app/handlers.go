@@ -215,7 +215,7 @@ func (s *Server) listSKUs(c *gin.Context) {
 	}
 	if search := c.Query("q"); search != "" {
 		like := "%" + search + "%"
-		query = query.Where("skus.code LIKE ? OR products.name LIKE ? OR products.category LIKE ? OR EXISTS (SELECT 1 FROM sku_tags JOIN tags ON tags.id = sku_tags.tag_id WHERE sku_tags.sku_id = skus.id AND tags.name LIKE ?)", like, like, like, like)
+		query = query.Where("skus.code LIKE ? OR products.name LIKE ? OR products.category LIKE ? OR EXISTS (SELECT 1 FROM sku_tags JOIN tags ON tags.id = sku_tags.tag_id WHERE sku_tags.sk_uid = skus.id AND tags.name LIKE ?)", like, like, like, like)
 	}
 	if err := query.Find(&skus).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
@@ -1069,8 +1069,20 @@ func (s *Server) listAssetsForReview(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": "operators may only read approved assets"})
 		return
 	}
+	status, ok := reviewStatusFilter(c)
+	if !ok {
+		return
+	}
+	paginated := c.Query("page") != "" || c.Query("page_size") != ""
+	page, pageSize := 1, 48
+	if paginated {
+		page, pageSize, ok = parseAssetReviewPagination(c, 48)
+		if !ok {
+			return
+		}
+	}
 	var assets []models.Asset
-	query := scopeAssetsForUser(s.db.Model(&models.Asset{}), currentUser(c)).Preload("SKU.Product.CatalogCategory").Preload("SKU.Tags").Preload("SOPView").Preload("PhotoSession").Order("assets.created_at DESC")
+	query := scopeAssetsForUser(s.db.Model(&models.Asset{}), currentUser(c)).Preload("SKU").Preload("SOPView").Preload("PhotoSession")
 	if skuPublicID := c.Query("sku_id"); skuPublicID != "" {
 		if !isUUID(skuPublicID) {
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": "sku_id must be a UUID"})
@@ -1078,9 +1090,18 @@ func (s *Server) listAssetsForReview(c *gin.Context) {
 		}
 		query = query.Joins("JOIN skus ON skus.id = assets.sk_uid").Where("skus.public_id = ?", skuPublicID)
 	}
-	if status := c.Query("status"); status != "" {
+	if status != "" {
 		query = query.Where("review_status = ?", status)
 	}
+	var total int64
+	if paginated {
+		if err := query.Count(&total).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+			return
+		}
+		query = query.Offset((page - 1) * pageSize).Limit(pageSize)
+	}
+	query = query.Order("CASE assets.review_status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END ASC").Order("assets.captured_at DESC")
 	if err := query.Find(&assets).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
 		return
@@ -1098,7 +1119,11 @@ func (s *Server) listAssetsForReview(c *gin.Context) {
 			SourceSummary:    safeAssetSourceSummary(asset.ProvenanceJSON),
 		})
 	}
-	c.JSON(http.StatusOK, gin.H{"data": items})
+	response := gin.H{"data": items}
+	if paginated {
+		response["pagination"] = pagination(page, pageSize, total)
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 type assetReviewItem struct {
@@ -1130,8 +1155,8 @@ func (s *Server) reviewAsset(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 		return
 	}
-	if req.Status != "approved" && req.Status != "rejected" {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": "status must be approved or rejected"})
+	if req.Status != "pending" && req.Status != "approved" && req.Status != "rejected" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": "status must be pending, approved, or rejected"})
 		return
 	}
 	user := currentUser(c)

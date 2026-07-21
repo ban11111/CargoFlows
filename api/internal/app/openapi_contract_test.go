@@ -38,8 +38,10 @@ func TestCaptureSOPOpenAPIHasCompleteRuntimeErrorResponses(t *testing.T) {
 		"/sop-reference-images/{image_id}/media":                                 {"get": {"200", "400", "401", "404", "503"}},
 		"/assets/{asset_id}/media":                                               {"get": {"200", "400", "401", "403", "404", "503"}},
 		"/assets/{asset_id}/review":                                              {"patch": {"200", "400", "401", "403", "404", "500"}},
-		"/assets/review":                                                         {"get": {"200", "401", "403", "500"}},
+		"/assets/review":                                                         {"get": {"200", "400", "401", "403", "500"}},
 		"/assets/review/hierarchy":                                               {"get": {"200", "401", "403", "500"}},
+		"/assets/review/skus":                                                    {"get": {"200", "400", "401", "403", "500"}},
+		"/assets/review/skus/{sku_id}":                                           {"get": {"200", "400", "401", "403", "404", "500"}},
 	}
 	for path, methods := range expected {
 		pathItem, ok := paths[path].(map[string]any)

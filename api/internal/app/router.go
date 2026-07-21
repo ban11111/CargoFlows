@@ -189,6 +189,8 @@ func registerExistingRoutes(protected *gin.RouterGroup, server *Server) {
 	assetReviewManagers := protected.Group("")
 	assetReviewManagers.Use(requireRoles(models.RoleSuperAdmin, models.RoleAdmin))
 	assetReviewManagers.GET("/assets/review/hierarchy", server.listAssetReviewHierarchy)
+	assetReviewManagers.GET("/assets/review/skus", server.listAssetReviewSKUs)
+	assetReviewManagers.GET("/assets/review/skus/:sku_id", server.getAssetReviewSKU)
 	assetReviewers := protected.Group("")
 	assetReviewers.Use(requireRoles(models.RoleSuperAdmin, models.RoleAdmin))
 	assetReviewers.PATCH("/assets/:asset_id/review", server.reviewAsset)
