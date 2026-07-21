@@ -47,8 +47,8 @@ func TestImagesAPIClientUsesMultipartEditWithSources(t *testing.T) {
 		if err := r.ParseMultipartForm(1 << 20); err != nil {
 			t.Fatal(err)
 		}
-		if r.FormValue("model") != "gpt-image-2" || len(r.MultipartForm.File["image[]"]) != 2 {
-			t.Fatalf("form model=%q files=%d", r.FormValue("model"), len(r.MultipartForm.File["image[]"]))
+		if r.FormValue("model") != "gpt-image-2" || len(r.MultipartForm.File["image[]"]) != 2 || len(r.MultipartForm.File["mask"]) != 1 {
+			t.Fatalf("form model=%q files=%d masks=%d", r.FormValue("model"), len(r.MultipartForm.File["image[]"]), len(r.MultipartForm.File["mask"]))
 		}
 		w.Header().Set("x-request-id", "req_edit")
 		_, _ = io.WriteString(w, `{"data":[{"b64_json":"YQ=="}]}`)
@@ -57,6 +57,7 @@ func TestImagesAPIClientUsesMultipartEditWithSources(t *testing.T) {
 
 	request := responsesImageRequest(t, models.AIExecutionEdit)
 	request.Model, request.APIMode = "gpt-image-2", "images"
+	request.Mask = &ImageInput{Bytes: []byte("png-mask"), MIMEType: "image/png"}
 	result, err := NewOpenAIImagesClient(server.URL+"/v1", server.Client(), OpenAIImagesConfig{MaxAttempts: 1}).Generate(t.Context(), []byte("sk-images-test"), request)
 	if err != nil {
 		t.Fatal(err)

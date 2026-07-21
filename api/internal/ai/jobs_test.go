@@ -35,6 +35,7 @@ func seedAIJobFixture(t *testing.T) (*gorm.DB, aiJobFixture) {
 		&models.User{}, &models.Category{}, &models.Tag{}, &models.Product{}, &models.SKU{},
 		&models.CaptureSOP{}, &models.SOPVersion{}, &models.SOPView{}, &models.PhotoSession{}, &models.Asset{},
 		&models.AIContentTemplate{}, &models.AIContentTemplateVersion{}, &models.AIContentSlot{}, &models.AIJob{}, &models.AIJobItem{}, &models.AIExecution{}, &models.AIAuditEvent{},
+		&models.ModelFamily{}, &models.ModelFamilyMember{}, &models.StyleReferenceGrant{}, &models.ModelFamilyReferenceAsset{},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -226,6 +227,102 @@ func TestCreateJobAllowsTextOnlyWithoutAssets(t *testing.T) {
 	}
 	if len(job.Items) != 2 || len(job.Items[0].SelectedInputAssetIDs) != 0 {
 		t.Fatalf("text-only job = %#v", job)
+	}
+}
+
+func TestCreateJobRejectsStyleReferencesForTextOnlySlots(t *testing.T) {
+	db, fixture := seedAIJobFixture(t)
+	grant := models.StyleReferenceGrant{
+		PublicID: uuid.NewString(), AssetID: fixture.ApprovedAsset.ID, Version: 1,
+		DescriptionZH: "柔和棚拍", DescriptionEN: "Soft studio lighting",
+		ExclusionMaskObjectKey: "private/masks/style.png", DerivativeObjectKey: "private/derived/style.png",
+		DerivativeSHA256: strings.Repeat("a", 64), Status: "approved", ReviewedByID: fixture.Operator.ID,
+	}
+	if err := db.Create(&grant).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := NewJobService(db).Create(t.Context(), CreateJobInput{
+		SKUID: fixture.SKU.PublicID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID,
+		SelectedSlotKeys: []string{"title"}, SelectedStyleReferenceIDs: []string{grant.PublicID},
+		Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-text-style-rejected",
+	})
+	if !errors.Is(err, ErrStyleReferenceNotEligible) {
+		t.Fatalf("text-only style reference error = %v", err)
+	}
+}
+
+func TestCreateJobFreezesStyleReferenceVersionAndDerivative(t *testing.T) {
+	db, fixture := seedAIJobFixture(t)
+	grant := models.StyleReferenceGrant{
+		PublicID: uuid.NewString(), AssetID: fixture.ApprovedAsset.ID, Version: 3,
+		DescriptionZH: "柔和棚拍", DescriptionEN: "Soft studio lighting",
+		ExclusionMaskObjectKey: "private/masks/style-v3.png", DerivativeObjectKey: "private/derived/style-v3.png",
+		DerivativeSHA256: strings.Repeat("b", 64), Status: "approved", ReviewedByID: fixture.Operator.ID,
+	}
+	if err := db.Create(&grant).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	job, err := NewJobService(db).Create(t.Context(), CreateJobInput{
+		SKUID: fixture.SKU.PublicID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID,
+		SelectedSlotKeys: []string{"hero"}, SelectedAssetIDs: []string{fixture.ApprovedAsset.PublicID},
+		SelectedStyleReferenceIDs: []string{grant.PublicID}, Locale: "zh-CN",
+		CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-style-snapshot",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&grant).Updates(map[string]any{"status": "revoked", "derivative_sha256": strings.Repeat("c", 64)}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	persisted, err := NewJobService(db).Get(t.Context(), job.PublicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot ProductSnapshotV1
+	if err := json.Unmarshal(persisted.InputSnapshot, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.StyleReferences) != 1 || snapshot.StyleReferences[0].Version != 3 || snapshot.StyleReferences[0].DerivativeSHA256 != strings.Repeat("b", 64) {
+		t.Fatalf("style reference snapshot changed with grant: %#v", snapshot.StyleReferences)
+	}
+}
+
+func TestStructureReferencesNeverCrossModelFamily(t *testing.T) {
+	db, fixture := seedAIJobFixture(t)
+	familyA := models.ModelFamily{PublicID: uuid.NewString(), Brand: "CargoFlows", NameZH: "A 系列", NameEN: "Series A", ModelCode: "SERIES-A-" + uuid.NewString(), Status: models.ModelFamilyActive, CreatedByID: fixture.Operator.ID}
+	familyB := models.ModelFamily{PublicID: uuid.NewString(), Brand: "CargoFlows", NameZH: "B 系列", NameEN: "Series B", ModelCode: "SERIES-B-" + uuid.NewString(), Status: models.ModelFamilyActive, CreatedByID: fixture.Operator.ID}
+	if err := db.Create(&familyA).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&familyB).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, member := range []models.ModelFamilyMember{
+		{PublicID: uuid.NewString(), ModelFamilyID: familyA.ID, SKUID: fixture.SKU.ID, AddedByID: fixture.Operator.ID},
+		{PublicID: uuid.NewString(), ModelFamilyID: familyB.ID, SKUID: fixture.OtherSKU.ID, AddedByID: fixture.Operator.ID},
+	} {
+		if err := db.Create(&member).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, reference := range []models.ModelFamilyReferenceAsset{
+		{PublicID: uuid.NewString(), ModelFamilyID: familyA.ID, AssetID: fixture.ApprovedAsset.ID, Role: "geometry_only", Version: 2, AllowedAttributesJSON: []byte(`["geometry"]`), ForbiddenAttributesJSON: []byte(`["color"]`), DerivativeObjectKey: "private/derived/a.png", DerivativeSHA256: strings.Repeat("d", 64), Status: "approved", ReviewedByID: fixture.Operator.ID},
+		{PublicID: uuid.NewString(), ModelFamilyID: familyB.ID, AssetID: fixture.OtherAsset.ID, Role: "geometry_only", Version: 4, AllowedAttributesJSON: []byte(`["geometry"]`), ForbiddenAttributesJSON: []byte(`["color"]`), DerivativeObjectKey: "private/derived/b.png", DerivativeSHA256: strings.Repeat("e", 64), Status: "approved", ReviewedByID: fixture.Operator.ID},
+	} {
+		if err := db.Create(&reference).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	references, err := loadStructureReferences(db, fixture.SKU.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(references) != 1 || references[0].ModelFamilyPublicID != familyA.PublicID || references[0].DerivativeSHA256 != strings.Repeat("d", 64) {
+		t.Fatalf("target family received wrong structural references: %#v", references)
 	}
 }
 

@@ -35,7 +35,7 @@ until curl --fail --silent "http://127.0.0.1:$API_HOST_PORT/healthz" >/dev/null;
 done
 
 cd "$ROOT/web"
-if ! API_BASE_URL="http://127.0.0.1:$API_HOST_PORT" FAKE_OPENAI_TEST_URL="http://127.0.0.1:$FAKE_OPENAI_PORT" PLAYWRIGHT_WEB_PORT="$WEB_PORT" PLAYWRIGHT_REUSE_SERVER=false pnpm exec playwright test tests/e2e/ai-text-generation.spec.ts --reporter=line; then
+if ! API_BASE_URL="http://127.0.0.1:$API_HOST_PORT" FAKE_OPENAI_TEST_URL="http://127.0.0.1:$FAKE_OPENAI_PORT" PLAYWRIGHT_WEB_PORT="$WEB_PORT" PLAYWRIGHT_REUSE_SERVER=false ./node_modules/.bin/playwright test tests/e2e/ai-text-generation.spec.ts --reporter=line; then
   docker compose --project-name "$PROJECT" --project-directory "$ROOT" logs api worker fake-openai
   exit 1
 fi

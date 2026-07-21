@@ -129,6 +129,21 @@ func imagesRequestBody(model string, request ImageRequest) ([]byte, string, stri
 			return nil, "", "", err
 		}
 	}
+	if request.Mask != nil {
+		if request.Mask.MIMEType != "image/png" || len(request.Mask.Bytes) == 0 {
+			return nil, "", "", &ImageProviderError{Kind: ErrImageProviderInvalidRequest}
+		}
+		header := textproto.MIMEHeader{}
+		header.Set("Content-Disposition", `form-data; name="mask"; filename="mask.png"`)
+		header.Set("Content-Type", "image/png")
+		part, err := w.CreatePart(header)
+		if err != nil {
+			return nil, "", "", err
+		}
+		if _, err := part.Write(request.Mask.Bytes); err != nil {
+			return nil, "", "", err
+		}
+	}
 	if err := w.Close(); err != nil {
 		return nil, "", "", err
 	}

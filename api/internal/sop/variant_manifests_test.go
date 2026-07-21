@@ -138,6 +138,19 @@ func TestVariantManifestRejectsCrossSKUUnapprovedEvidenceAndUnpublishedDimension
 	}
 }
 
+func TestVariantManifestRejectsApprovedAIImageAsIdentityEvidence(t *testing.T) {
+	db := variantManifestTestDB(t)
+	_, target, _ := createVariantManifestFamily(t, db, []string{"ports"})
+	aiAsset := models.Asset{SKUID: target.ID, ObjectKey: "ai-generated-assets/result.png", OriginalURL: "private", ReviewStatus: "approved", OriginType: "ai_generated", MIMEType: "image/png", Width: 20, Height: 20, ByteCount: 100, SHA256: strings.Repeat("a", 64)}
+	if err := db.Create(&aiAsset).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewVariantManifestService(db).CreateDraft(t.Context(), target.PublicID, CreateVariantManifestDraftInput{Identity: validVariantIdentityJSON(t), Regions: []VariantDifferenceRegionInput{{Key: "right_ports", DifferenceKind: models.DifferenceKindPorts, Strictness: models.DifferenceRegionExact, DescriptionEN: "Right-side ports", Shape: json.RawMessage(`{"kind":"rectangle","x":0,"y":0,"width":1,"height":1}`), RequiredViewKeys: []string{"right_ports"}, EvidenceAssetIDs: []string{aiAsset.PublicID}}}, ActorID: 9})
+	if !errors.Is(err, ErrVariantManifestInvalid) {
+		t.Fatalf("AI evidence error = %v", err)
+	}
+}
+
 func TestVariantManifestRejectsUnknownUnsafeAndTrailingIdentityDocumentData(t *testing.T) {
 	db := variantManifestTestDB(t)
 	_, target, _ := createVariantManifestFamily(t, db, []string{"color", "material", "finish", "texture", "labels", "ports", "accessories"})

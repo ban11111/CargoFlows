@@ -27,10 +27,11 @@ export async function apiRequest<TResponse>(
   path: string,
   options: RequestInit = {},
 ): Promise<TResponse> {
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
   const response = await fetch(`/api/proxy${path}`, {
     ...options,
     headers: {
-      "content-type": "application/json",
+      ...(isFormData ? {} : { "content-type": "application/json" }),
       ...options.headers,
     },
   });

@@ -228,6 +228,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/model-families/{family_id}/reference-assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                family_id: components["parameters"]["ModelFamilyID"];
+            };
+            cookie?: never;
+        };
+        get: operations["listModelFamilyReferenceAssets"];
+        put?: never;
+        post: operations["createModelFamilyReferenceAsset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/model-families/{family_id}/reference-assets/{reference_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                family_id: components["parameters"]["ModelFamilyID"];
+                reference_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["revokeModelFamilyReferenceAsset"];
+        trace?: never;
+    };
     "/model-families/{family_id}/members/{member_id}": {
         parameters: {
             query?: never;
@@ -975,6 +1012,117 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ai-jobs/{job_id}/image-threads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+            };
+            cookie?: never;
+        };
+        get: operations["listAIImageThreads"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-jobs/{job_id}/items/{item_id}/image-turns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+                item_id: components["parameters"]["AIJobItemID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createAIImageTurn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-jobs/{job_id}/items/{item_id}/image-results/{result_id}/select": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+                item_id: components["parameters"]["AIJobItemID"];
+                result_id: components["parameters"]["AIImageResultID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["selectAIImageResult"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-jobs/{job_id}/items/{item_id}/image-results/{result_id}/submit-to-assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+                item_id: components["parameters"]["AIJobItemID"];
+                result_id: components["parameters"]["AIImageResultID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["submitAIImageResultToAssets"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/style-reference-grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listStyleReferenceGrants"];
+        put?: never;
+        post: operations["createStyleReferenceGrant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/style-reference-grants/{grant_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                grant_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["revokeStyleReferenceGrant"];
+        trace?: never;
+    };
     "/ai-jobs/{job_id}/image-results/{result_id}/media": {
         parameters: {
             query?: never;
@@ -1370,6 +1518,8 @@ export interface components {
             selected_slot_keys: string[];
             /** @description Duplicate public UUIDs are accepted and normalized to one ordered reference. */
             selected_asset_ids: string[];
+            /** @description Optional administrator-approved cross-SKU style grants. */
+            selected_style_reference_ids?: string[];
             locale: string;
             /** @description Optional L4 user instruction stored immutably in the job snapshot. */
             user_preference?: string;
@@ -1545,6 +1695,96 @@ export interface components {
             media_url: string;
             /** Format: date-time */
             created_at: string;
+        };
+        AIImageThread: {
+            /** Format: uuid */
+            public_id: string;
+            /** Format: uuid */
+            job_item_id: string;
+            slot_key: string;
+            /** Format: uuid */
+            selected_result_id?: string;
+            turns: components["schemas"]["AIImageTurn"][];
+        };
+        AIImageTurn: {
+            /** Format: uuid */
+            public_id: string;
+            sequence: number;
+            /** @enum {string} */
+            operation: "generate" | "edit" | "restart";
+            /** Format: uuid */
+            parent_result_id?: string;
+            user_instruction: string;
+            mask_present: boolean;
+            /** @enum {string} */
+            status: "queued" | "running" | "completed" | "failed" | "needs_attention";
+            actor: components["schemas"]["AIJobCreator"];
+            safe_error: string;
+            requested_model: string;
+            actual_model: string;
+            /** @enum {string} */
+            api_mode: "" | "responses" | "images";
+            provider_request_id: string;
+            failure_code: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            completed_at?: string | null;
+            results: components["schemas"]["AIImageTurnResult"][];
+        };
+        AIImageTurnResult: {
+            /** Format: uuid */
+            public_id: string;
+            candidate_index: number;
+            /** Format: uuid */
+            parent_result_id?: string;
+            media_url: string;
+            selected: boolean;
+            /** Format: date-time */
+            created_at: string;
+        };
+        CreateAIImageTurnRequest: {
+            /** @enum {string} */
+            operation: "edit" | "restart";
+            /** Format: uuid */
+            parent_result_id?: string;
+            user_instruction?: string;
+        };
+        SubmittedAIAsset: {
+            /** Format: uuid */
+            public_id: string;
+            /** @enum {string} */
+            review_status: "pending" | "approved" | "rejected";
+            /** @enum {string} */
+            origin_type: "ai_generated";
+        };
+        StyleReferenceGrant: {
+            /** Format: uuid */
+            public_id: string;
+            version: number;
+            /** Format: uuid */
+            source_sku_id: string;
+            description_zh: string;
+            description_en: string;
+            derivative_sha256: string;
+            /** @enum {string} */
+            status: "approved" | "revoked";
+        };
+        ModelFamilyReferenceAsset: {
+            /** Format: uuid */
+            public_id: string;
+            version: number;
+            /** Format: uuid */
+            source_sku_id: string;
+            /** @enum {string} */
+            role: "geometry_only" | "viewpoint_only" | "detail_geometry";
+            derivative_sha256: string;
+            /** @enum {string} */
+            status: "approved" | "revoked";
+        };
+        RevokeReferenceRequest: {
+            /** @enum {string} */
+            status: "revoked";
         };
         EditAITextResultRequest: {
             structured: {
@@ -1737,6 +1977,35 @@ export interface components {
                 [key: string]: components["schemas"]["AIJobGenerationOverride"];
             };
             image_canvases?: components["schemas"]["AIJobImageCanvas"][];
+            style_references?: components["schemas"]["AISnapshotStyleReference"][];
+            structure_references?: components["schemas"]["AISnapshotStructureReference"][];
+        };
+        AISnapshotStyleReference: {
+            /** Format: uuid */
+            public_id: string;
+            version: number;
+            /** Format: uuid */
+            source_sku_id: string;
+            description: components["schemas"]["AISnapshotLocalizedText"];
+            derivative_sha256: string;
+            /** Format: uuid */
+            reviewed_by: string;
+        };
+        AISnapshotStructureReference: {
+            /** Format: uuid */
+            public_id: string;
+            version: number;
+            /** Format: uuid */
+            source_sku_id: string;
+            /** Format: uuid */
+            model_family_id: string;
+            /** @enum {string} */
+            role: "geometry_only" | "viewpoint_only" | "detail_geometry";
+            allowed_attributes: string[];
+            forbidden_attributes: string[];
+            derivative_sha256: string;
+            /** Format: uuid */
+            reviewed_by: string;
         };
         AITemplateValidationIssue: {
             code: string;
@@ -2145,6 +2414,12 @@ export interface components {
             media_url: string;
             /** @enum {string} */
             review_status: "pending" | "approved" | "rejected";
+            /** @enum {string} */
+            origin_type: "captured" | "uploaded" | "ai_generated";
+            /** @description Safe AI provenance without prompts */
+            source_summary: {
+                [key: string]: string;
+            };
             /** Format: date-time */
             captured_at: string;
             /** Format: uuid */
@@ -2172,6 +2447,12 @@ export interface components {
             media_url: string;
             /** @enum {string} */
             review_status: "pending" | "approved" | "rejected";
+            /** @enum {string} */
+            origin_type: "captured" | "uploaded" | "ai_generated";
+            /** @description Safe AI provenance summary. */
+            source_summary: {
+                [key: string]: string;
+            };
             /** Format: date-time */
             captured_at: string;
             /** @description Stable SOP preset key used to satisfy AI slot required_views. */
@@ -2913,6 +3194,110 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             500: components["responses"]["InternalServerError"];
+        };
+    };
+    listModelFamilyReferenceAssets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                family_id: components["parameters"]["ModelFamilyID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Approved same-family structural derivatives */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ModelFamilyReferenceAsset"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createModelFamilyReferenceAsset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                family_id: components["parameters"]["ModelFamilyID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: uuid */
+                    asset_id: string;
+                    /** @enum {string} */
+                    role: "geometry_only" | "viewpoint_only" | "detail_geometry";
+                    /**
+                     * Format: binary
+                     * @description Transparent pixels cover identity attributes that must not be inherited.
+                     */
+                    forbidden_identity_mask: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Approved private grayscale structural derivative */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelFamilyReferenceAsset"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Source is not an approved real asset in the same model family */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    revokeModelFamilyReferenceAsset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                family_id: components["parameters"]["ModelFamilyID"];
+                reference_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RevokeReferenceRequest"];
+            };
+        };
+        responses: {
+            /** @description Revoked for future jobs; historical snapshots remain executable. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
         };
     };
     removeModelFamilyMember: {
@@ -4503,6 +4888,241 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalServerError"];
+        };
+    };
+    listAIImageThreads: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Permanent version history grouped by output slot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AIImageThread"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createAIImageTurn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+                item_id: components["parameters"]["AIJobItemID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAIImageTurnRequest"];
+                "multipart/form-data": components["schemas"]["CreateAIImageTurnRequest"] & {
+                    /** Format: binary */
+                    mask?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Queued one-image edit or restart turn */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIImageTurn"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            409: components["responses"]["Conflict"];
+            /** @description Parent or mask is invalid */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    selectAIImageResult: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+                item_id: components["parameters"]["AIJobItemID"];
+                result_id: components["parameters"]["AIImageResultID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Selected final version for this slot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        selected_result_id: string;
+                    };
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    submitAIImageResultToAssets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+                item_id: components["parameters"]["AIJobItemID"];
+                result_id: components["parameters"]["AIImageResultID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Idempotent replay of an existing asset submission */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubmittedAIAsset"];
+                };
+            };
+            /** @description Pending AI-generated asset */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubmittedAIAsset"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            /** @description Only the selected version can be submitted */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    listStyleReferenceGrants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Approved style-only private derivatives */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["StyleReferenceGrant"][];
+                    };
+                };
+            };
+        };
+    };
+    createStyleReferenceGrant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: uuid */
+                    asset_id: string;
+                    description_zh: string;
+                    description_en: string;
+                    /**
+                     * Format: binary
+                     * @description Transparent pixels cover the source product to remove.
+                     */
+                    product_exclusion_mask: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Administrator-approved style derivative */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StyleReferenceGrant"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            403: components["responses"]["Forbidden"];
+            /** @description Source asset is not eligible */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    revokeStyleReferenceGrant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                grant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RevokeReferenceRequest"];
+            };
+        };
+        responses: {
+            /** @description Revoked for future jobs; historical snapshots remain executable. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
         };
     };
     getAIImageResultMedia: {

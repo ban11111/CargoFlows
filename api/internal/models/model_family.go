@@ -202,3 +202,67 @@ type VariantDifferenceRegionEvidenceAsset struct {
 	AssetID                   uint      `gorm:"uniqueIndex:idx_variant_difference_region_evidence,priority:2;index;not null" json:"-"`
 	CreatedAt                 time.Time `json:"created_at"`
 }
+
+// StyleReferenceGrant permits only non-product visual treatment to cross SKU
+// boundaries. The derivative is mandatory so the source product is never sent
+// to a later task as a style reference.
+type StyleReferenceGrant struct {
+	ID                     uint      `gorm:"primaryKey" json:"-"`
+	PublicID               string    `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
+	AssetID                uint      `gorm:"uniqueIndex:idx_style_reference_version,priority:1;index;not null" json:"-"`
+	Version                int       `gorm:"uniqueIndex:idx_style_reference_version,priority:2;not null;default:1" json:"version"`
+	DescriptionZH          string    `gorm:"type:text;not null" json:"description_zh"`
+	DescriptionEN          string    `gorm:"type:text;not null" json:"description_en"`
+	ExclusionMaskObjectKey string    `gorm:"size:768;not null" json:"-"`
+	DerivativeObjectKey    string    `gorm:"size:768;not null" json:"-"`
+	DerivativeSHA256       string    `gorm:"size:64;index;not null" json:"derivative_sha256"`
+	Status                 string    `gorm:"size:32;index;not null;default:approved" json:"status"`
+	ReviewedByID           uint      `gorm:"index;not null" json:"-"`
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
+	Asset                  Asset     `json:"asset,omitempty"`
+}
+
+func (grant *StyleReferenceGrant) BeforeCreate(*gorm.DB) error {
+	if grant.Version == 0 {
+		grant.Version = 1
+	}
+	return ensurePublicID(&grant.PublicID)
+}
+
+// ModelFamilyReferenceAsset grants narrowly scoped geometry reuse. Appearance
+// and identity are deliberately not valid roles.
+type ModelFamilyReferenceAsset struct {
+	ID                      uint        `gorm:"primaryKey" json:"-"`
+	PublicID                string      `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
+	ModelFamilyID           uint        `gorm:"uniqueIndex:idx_family_reference_asset,priority:1;index;not null" json:"-"`
+	AssetID                 uint        `gorm:"uniqueIndex:idx_family_reference_asset,priority:2;index;not null" json:"-"`
+	Role                    string      `gorm:"uniqueIndex:idx_family_reference_asset,priority:3;size:32;index;not null" json:"role"`
+	Version                 int         `gorm:"uniqueIndex:idx_family_reference_asset,priority:4;not null;default:1" json:"version"`
+	AllowedAttributesJSON   []byte      `gorm:"type:json;not null" json:"allowed_attributes"`
+	ForbiddenAttributesJSON []byte      `gorm:"type:json;not null" json:"forbidden_attributes"`
+	DerivativeObjectKey     string      `gorm:"size:768;not null" json:"-"`
+	DerivativeSHA256        string      `gorm:"size:64;index;not null" json:"derivative_sha256"`
+	Status                  string      `gorm:"size:32;index;not null;default:approved" json:"status"`
+	ReviewedByID            uint        `gorm:"index;not null" json:"-"`
+	CreatedAt               time.Time   `json:"created_at"`
+	UpdatedAt               time.Time   `json:"updated_at"`
+	Asset                   Asset       `json:"asset,omitempty"`
+	ModelFamily             ModelFamily `json:"model_family,omitempty"`
+}
+
+func (reference *ModelFamilyReferenceAsset) BeforeCreate(*gorm.DB) error {
+	if err := ensurePublicID(&reference.PublicID); err != nil {
+		return err
+	}
+	if len(reference.AllowedAttributesJSON) == 0 {
+		reference.AllowedAttributesJSON = []byte(`[]`)
+	}
+	if len(reference.ForbiddenAttributesJSON) == 0 {
+		reference.ForbiddenAttributesJSON = []byte(`[]`)
+	}
+	if reference.Version == 0 {
+		reference.Version = 1
+	}
+	return nil
+}

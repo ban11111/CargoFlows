@@ -251,9 +251,12 @@ cd ../web
 ../scripts/run-ai-text-e2e.sh
 ```
 
-The Go integration test sends a real Responses-format request to a local fake
-provider and verifies request sanitization, candidate persistence, token audit,
-credential clearing, and provider-call controls. The Playwright
+The local fake provider supports text Responses, the Responses image tool, and
+Images generation/edit endpoints. It returns deterministic PNGs and records only
+sanitized request facts (model, action, input count, mask/parent presence and safe
+metadata), never prompts, image bytes, bearer credentials, or object locators.
+The Go integration tests verify request sanitization, candidate/image decoding,
+masked multipart edits, token audit, credential clearing, and provider-call controls. The Playwright
 harness starts a clean MySQL/API/live worker/fake-provider stack, configures the
 fake credential through the administrator page, and exercises the real Web,
 authentication, API, encrypted credential, queue, provider, persistence, edit,

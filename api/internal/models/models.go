@@ -116,27 +116,30 @@ type PhotoSession struct {
 }
 
 type Asset struct {
-	ID             uint         `gorm:"primaryKey" json:"-"`
-	PublicID       string       `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
-	SKUID          uint         `gorm:"index;not null" json:"-"`
-	PhotoSessionID uint         `gorm:"index" json:"-"`
-	SOPViewID      uint         `gorm:"index" json:"-"`
-	UploadID       *string      `gorm:"size:36;uniqueIndex" json:"-"`
-	ObjectKey      string       `gorm:"size:500;uniqueIndex;not null" json:"-"`
-	OriginalURL    string       `gorm:"size:500;not null" json:"-"`
-	ThumbnailURL   string       `gorm:"size:500" json:"-"`
-	ReviewStatus   string       `gorm:"size:32;not null;default:pending" json:"review_status"`
-	MIMEType       string       `gorm:"size:80;not null;default:'';<-:create" json:"mime_type"`
-	Width          int          `gorm:"not null;default:0;<-:create" json:"width"`
-	Height         int          `gorm:"not null;default:0;<-:create" json:"height"`
-	ByteCount      int64        `gorm:"not null;default:0;<-:create" json:"byte_count"`
-	SHA256         string       `gorm:"size:64;not null;default:'';<-:create" json:"sha256"`
-	CapturedAt     time.Time    `json:"captured_at"`
-	CreatedAt      time.Time    `json:"created_at"`
-	UpdatedAt      time.Time    `json:"updated_at"`
-	SKU            SKU          `json:"sku"`
-	SOPView        SOPView      `json:"sop_view"`
-	PhotoSession   PhotoSession `json:"photo_session"`
+	ID                    uint         `gorm:"primaryKey" json:"-"`
+	PublicID              string       `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
+	SKUID                 uint         `gorm:"index;not null" json:"-"`
+	PhotoSessionID        uint         `gorm:"index" json:"-"`
+	SOPViewID             uint         `gorm:"index" json:"-"`
+	UploadID              *string      `gorm:"size:36;uniqueIndex" json:"-"`
+	ObjectKey             string       `gorm:"size:500;uniqueIndex;not null" json:"-"`
+	OriginalURL           string       `gorm:"size:500;not null" json:"-"`
+	ThumbnailURL          string       `gorm:"size:500" json:"-"`
+	ReviewStatus          string       `gorm:"size:32;not null;default:pending" json:"review_status"`
+	MIMEType              string       `gorm:"size:80;not null;default:'';<-:create" json:"mime_type"`
+	Width                 int          `gorm:"not null;default:0;<-:create" json:"width"`
+	Height                int          `gorm:"not null;default:0;<-:create" json:"height"`
+	ByteCount             int64        `gorm:"not null;default:0;<-:create" json:"byte_count"`
+	SHA256                string       `gorm:"size:64;not null;default:'';<-:create" json:"sha256"`
+	OriginType            string       `gorm:"size:32;index;not null;default:uploaded" json:"origin_type"`
+	SourceAIImageResultID *uint        `gorm:"uniqueIndex" json:"-"`
+	ProvenanceJSON        []byte       `gorm:"type:json;not null" json:"-"`
+	CapturedAt            time.Time    `json:"captured_at"`
+	CreatedAt             time.Time    `json:"created_at"`
+	UpdatedAt             time.Time    `json:"updated_at"`
+	SKU                   SKU          `json:"sku"`
+	SOPView               SOPView      `json:"sop_view"`
+	PhotoSession          PhotoSession `json:"photo_session"`
 }
 
 func (sku *SKU) BeforeCreate(*gorm.DB) error {
@@ -144,7 +147,16 @@ func (sku *SKU) BeforeCreate(*gorm.DB) error {
 }
 
 func (asset *Asset) BeforeCreate(*gorm.DB) error {
-	return ensurePublicID(&asset.PublicID)
+	if err := ensurePublicID(&asset.PublicID); err != nil {
+		return err
+	}
+	if asset.OriginType == "" {
+		asset.OriginType = "uploaded"
+	}
+	if len(asset.ProvenanceJSON) == 0 {
+		asset.ProvenanceJSON = []byte(`{}`)
+	}
+	return nil
 }
 
 type AssetReview struct {

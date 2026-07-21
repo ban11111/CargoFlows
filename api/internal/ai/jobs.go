@@ -42,19 +42,21 @@ var (
 	ErrTemplateVersionIDInvalid       = errors.New("template version ID must be a UUID")
 	ErrSKUIDInvalid                   = errors.New("SKU ID must be a UUID")
 	ErrAssetIDInvalid                 = errors.New("asset IDs must be UUIDs")
+	ErrStyleReferenceNotEligible      = errors.New("style references must be approved grants")
 )
 
 type CreateJobInput struct {
-	SKUID                   string
-	TemplateVersionPublicID string
-	SelectedSlotKeys        []string
-	SelectedAssetIDs        []string
-	Locale                  string
-	CreatedByID             uint
-	IdempotencyKey          string
-	UserPreference          string
-	GenerationOverrides     map[string]GenerationOverride
-	ImageCanvases           []ImageCanvas `json:"image_canvases,omitempty"`
+	SKUID                     string
+	TemplateVersionPublicID   string
+	SelectedSlotKeys          []string
+	SelectedAssetIDs          []string
+	SelectedStyleReferenceIDs []string
+	Locale                    string
+	CreatedByID               uint
+	IdempotencyKey            string
+	UserPreference            string
+	GenerationOverrides       map[string]GenerationOverride
+	ImageCanvases             []ImageCanvas `json:"image_canvases,omitempty"`
 }
 
 type ImageCanvas struct {
@@ -194,6 +196,29 @@ type ProductSnapshotV1 struct {
 	UserPreference      string                        `json:"user_preference"`
 	GenerationOverrides map[string]GenerationOverride `json:"generation_overrides"`
 	ImageCanvases       []ImageCanvas                 `json:"image_canvases,omitempty"`
+	StyleReferences     []StyleReferenceFacts         `json:"style_references,omitempty"`
+	StructureReferences []StructureReferenceFacts     `json:"structure_references,omitempty"`
+}
+
+type StyleReferenceFacts struct {
+	PublicID           string             `json:"public_id"`
+	Version            int                `json:"version"`
+	SourceSKUPublicID  string             `json:"source_sku_id"`
+	Description        LocalizedNameFacts `json:"description"`
+	DerivativeSHA256   string             `json:"derivative_sha256"`
+	ReviewedByPublicID string             `json:"reviewed_by"`
+}
+
+type StructureReferenceFacts struct {
+	PublicID            string          `json:"public_id"`
+	Version             int             `json:"version"`
+	SourceSKUPublicID   string          `json:"source_sku_id"`
+	ModelFamilyPublicID string          `json:"model_family_id"`
+	Role                string          `json:"role"`
+	AllowedAttributes   json.RawMessage `json:"allowed_attributes"`
+	ForbiddenAttributes json.RawMessage `json:"forbidden_attributes"`
+	DerivativeSHA256    string          `json:"derivative_sha256"`
+	ReviewedByPublicID  string          `json:"reviewed_by"`
 }
 
 type JobCreatorSnapshot struct {
@@ -318,6 +343,9 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 		if err := validateGenerationOverrides(selectedSlots, normalized.GenerationOverrides); err != nil {
 			return err
 		}
+		if len(normalized.SelectedStyleReferenceIDs) > 0 && !hasImageSlot(selectedSlots) {
+			return ErrStyleReferenceNotEligible
+		}
 		resolvedCanvases, err := resolveImageCanvases(selectedSlots, normalized.ImageCanvases)
 		if err != nil {
 			return err
@@ -335,7 +363,21 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 		}
 		locale := normalized.Locale
 		orderedCanvases := imageCanvasFacts(resolvedCanvases)
+		styleReferences := []StyleReferenceFacts{}
+		structureReferences := []StructureReferenceFacts{}
+		if hasImageSlot(selectedSlots) {
+			styleReferences, err = loadStyleReferences(tx, normalized.SelectedStyleReferenceIDs)
+			if err != nil {
+				return err
+			}
+			structureReferences, err = loadStructureReferences(tx, sku.ID)
+			if err != nil {
+				return err
+			}
+		}
 		snapshot := makeProductSnapshot(sku, sop, captureSOPPublicID, template, version, selectedSlots, assets, locale, normalized.UserPreference, normalized.GenerationOverrides, orderedCanvases)
+		snapshot.StyleReferences = styleReferences
+		snapshot.StructureReferences = structureReferences
 		snapshotJSON, err := json.Marshal(snapshot)
 		if err != nil {
 			return fmt.Errorf("marshal AI job snapshot: %w", err)
@@ -415,7 +457,7 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 		}
 		job.Items = items
 		job.SKU = sku
-		metadata, _ := json.Marshal(map[string]any{"snapshot_schema": ProductSnapshotSchemaV1, "slot_keys": normalized.SelectedSlotKeys, "asset_count": len(assetIDs), "request_sha256": requestHash, "image_canvases": orderedCanvases, "created_by": creatorSnapshot, "model_snapshot": modelSnapshot})
+		metadata, _ := json.Marshal(map[string]any{"snapshot_schema": ProductSnapshotSchemaV1, "slot_keys": normalized.SelectedSlotKeys, "asset_count": len(assetIDs), "style_reference_ids": normalized.SelectedStyleReferenceIDs, "structure_reference_count": len(structureReferences), "request_sha256": requestHash, "image_canvases": orderedCanvases, "created_by": creatorSnapshot, "model_snapshot": modelSnapshot})
 		jobID, actorID := job.ID, normalized.CreatedByID
 		audit := models.AIAuditEvent{PublicID: uuid.NewString(), EventType: "ai_job.created", EntityType: "ai_job", EntityPublicID: job.PublicID, ActorID: &actorID, AIJobID: &jobID, MetadataJSON: metadata}
 		if err := tx.Create(&audit).Error; err != nil {
@@ -433,6 +475,15 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 		return doc, recoveryErr
 	}
 	return JobDocument{}, err
+}
+
+func hasImageSlot(slots []models.AIContentSlot) bool {
+	for _, slot := range slots {
+		if slot.Kind == models.AIContentSlotImage {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *JobService) recoverIdempotentCreate(ctx context.Context, input CreateJobInput, requestHash string) (JobDocument, bool, error) {
@@ -497,6 +548,16 @@ func normalizeCreateJobInput(input CreateJobInput) (CreateJobInput, string, erro
 	sort.Strings(assets)
 	assets = dedupeStrings(assets)
 	input.SelectedAssetIDs = assets
+	styles := make([]string, 0, len(input.SelectedStyleReferenceIDs))
+	for _, value := range input.SelectedStyleReferenceIDs {
+		parsed, err := uuid.Parse(strings.TrimSpace(value))
+		if err != nil || parsed == uuid.Nil {
+			return input, "", ErrStyleReferenceNotEligible
+		}
+		styles = append(styles, parsed.String())
+	}
+	sort.Strings(styles)
+	input.SelectedStyleReferenceIDs = dedupeStrings(styles)
 	if input.GenerationOverrides == nil {
 		input.GenerationOverrides = map[string]GenerationOverride{}
 	}
@@ -528,15 +589,16 @@ func normalizeCreateJobInput(input CreateJobInput) (CreateJobInput, string, erro
 		canvas.SlotKeys = keys
 	}
 	canonical := struct {
-		SKUID      string                        `json:"sku_id"`
-		Template   string                        `json:"template_version_id"`
-		Slots      []string                      `json:"selected_slot_keys"`
-		Assets     []string                      `json:"selected_asset_ids"`
-		Locale     string                        `json:"locale"`
-		Preference string                        `json:"user_preference"`
-		Overrides  map[string]GenerationOverride `json:"generation_overrides"`
-		Canvases   []ImageCanvas                 `json:"image_canvases,omitempty"`
-	}{input.SKUID, input.TemplateVersionPublicID, slots, assets, input.Locale, input.UserPreference, input.GenerationOverrides, input.ImageCanvases}
+		SKUID           string                        `json:"sku_id"`
+		Template        string                        `json:"template_version_id"`
+		Slots           []string                      `json:"selected_slot_keys"`
+		Assets          []string                      `json:"selected_asset_ids"`
+		StyleReferences []string                      `json:"selected_style_reference_ids,omitempty"`
+		Locale          string                        `json:"locale"`
+		Preference      string                        `json:"user_preference"`
+		Overrides       map[string]GenerationOverride `json:"generation_overrides"`
+		Canvases        []ImageCanvas                 `json:"image_canvases,omitempty"`
+	}{input.SKUID, input.TemplateVersionPublicID, slots, assets, input.SelectedStyleReferenceIDs, input.Locale, input.UserPreference, input.GenerationOverrides, input.ImageCanvases}
 	encoded, err := json.Marshal(canonical)
 	if err != nil {
 		return input, "", err
@@ -692,7 +754,7 @@ func loadEligibleAssets(tx *gorm.DB, skuID uint, requested []string) ([]models.A
 		return []models.Asset{}, []string{}, nil
 	}
 	var assets []models.Asset
-	if err := tx.Preload("SOPView").Where("public_id IN ?", ids).Where(&models.Asset{SKUID: skuID, ReviewStatus: "approved"}).Order("public_id ASC").Find(&assets).Error; err != nil {
+	if err := tx.Preload("SOPView").Where("public_id IN ?", ids).Where(&models.Asset{SKUID: skuID, ReviewStatus: "approved"}).Where("origin_type <> ?", "ai_generated").Order("public_id ASC").Find(&assets).Error; err != nil {
 		return nil, nil, err
 	}
 	if len(assets) != len(ids) {
@@ -701,10 +763,98 @@ func loadEligibleAssets(tx *gorm.DB, skuID uint, requested []string) ([]models.A
 	return assets, ids, nil
 }
 
+func loadStyleReferences(tx *gorm.DB, requested []string) ([]StyleReferenceFacts, error) {
+	if len(requested) == 0 {
+		return []StyleReferenceFacts{}, nil
+	}
+	var grants []models.StyleReferenceGrant
+	if err := tx.Preload("Asset.SKU").Where("public_id IN ? AND status = ?", requested, "approved").Order("public_id").Find(&grants).Error; err != nil {
+		return nil, err
+	}
+	if len(grants) != len(requested) {
+		return nil, ErrStyleReferenceNotEligible
+	}
+	users, err := publicUserIDs(tx, reviewerIDsFromStyleGrants(grants))
+	if err != nil {
+		return nil, err
+	}
+	result := make([]StyleReferenceFacts, 0, len(grants))
+	for _, grant := range grants {
+		if grant.DerivativeObjectKey == "" || grant.DerivativeSHA256 == "" {
+			return nil, ErrStyleReferenceNotEligible
+		}
+		result = append(result, StyleReferenceFacts{PublicID: grant.PublicID, Version: grant.Version, SourceSKUPublicID: grant.Asset.SKU.PublicID, Description: LocalizedNameFacts{ZH: grant.DescriptionZH, EN: grant.DescriptionEN}, DerivativeSHA256: grant.DerivativeSHA256, ReviewedByPublicID: users[grant.ReviewedByID]})
+	}
+	return result, nil
+}
+
+func reviewerIDsFromStyleGrants(values []models.StyleReferenceGrant) []uint {
+	ids := make([]uint, 0, len(values))
+	for _, value := range values {
+		ids = append(ids, value.ReviewedByID)
+	}
+	return ids
+}
+func publicUserIDs(tx *gorm.DB, ids []uint) (map[uint]string, error) {
+	result := map[uint]string{}
+	if len(ids) == 0 {
+		return result, nil
+	}
+	var rows []struct {
+		ID       uint
+		PublicID string
+	}
+	if err := tx.Unscoped().Model(&models.User{}).Select("id", "public_id").Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		result[row.ID] = row.PublicID
+	}
+	return result, nil
+}
+
+func loadStructureReferences(tx *gorm.DB, targetSKUID uint) ([]StructureReferenceFacts, error) {
+	var membership models.ModelFamilyMember
+	if err := tx.Where("sk_uid = ? AND removed_at IS NULL", targetSKUID).First(&membership).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		return []StructureReferenceFacts{}, nil
+	} else if err != nil {
+		return nil, err
+	}
+	var references []models.ModelFamilyReferenceAsset
+	if err := tx.Preload("Asset.SKU").Preload("ModelFamily").Where("model_family_id = ? AND status = ?", membership.ModelFamilyID, "approved").Order("public_id").Find(&references).Error; err != nil {
+		return nil, err
+	}
+	ids := make([]uint, 0, len(references))
+	for _, value := range references {
+		ids = append(ids, value.ReviewedByID)
+	}
+	users, err := publicUserIDs(tx, ids)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]StructureReferenceFacts, 0, len(references))
+	for _, reference := range references {
+		if reference.Role != "geometry_only" && reference.Role != "viewpoint_only" && reference.Role != "detail_geometry" {
+			continue
+		}
+		if reference.DerivativeObjectKey == "" || reference.DerivativeSHA256 == "" {
+			continue
+		}
+		result = append(result, StructureReferenceFacts{PublicID: reference.PublicID, Version: reference.Version, SourceSKUPublicID: reference.Asset.SKU.PublicID, ModelFamilyPublicID: reference.ModelFamily.PublicID, Role: reference.Role, AllowedAttributes: cloneJSON(reference.AllowedAttributesJSON), ForbiddenAttributes: cloneJSON(reference.ForbiddenAttributesJSON), DerivativeSHA256: reference.DerivativeSHA256, ReviewedByPublicID: users[reference.ReviewedByID]})
+	}
+	return result, nil
+}
+
 func validateImageSlotAssets(slots []models.AIContentSlot, assets []models.Asset) error {
 	availableViews := make(map[string]struct{}, len(assets))
 	visualCount := 0
 	for _, asset := range assets {
+		// Approved AI output is a publishable channel asset, never identity or
+		// factual evidence for a later generation. Requiring a real anchor here
+		// prevents recursive product drift before any provider request is made.
+		if asset.OriginType == "ai_generated" {
+			continue
+		}
 		if asset.SOPView.PresetKey == "supplemental_info" {
 			continue
 		}

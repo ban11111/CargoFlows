@@ -158,6 +158,8 @@ type assetReviewHierarchyAsset struct {
 	SOPViewKey       string            `json:"sop_view_key"`
 	SOPViewName      localizedViewName `json:"sop_view_name"`
 	PhotoSessionCode string            `json:"photo_session_code"`
+	OriginType       string            `json:"origin_type"`
+	SourceSummary    map[string]string `json:"source_summary"`
 }
 
 type localizedViewName struct {
@@ -219,7 +221,7 @@ func (s *Server) listAssetReviewHierarchy(c *gin.Context) {
 		categories[categoryPosition].SKUs[skuPosition].Assets = append(categories[categoryPosition].SKUs[skuPosition].Assets, assetReviewHierarchyAsset{
 			PublicID: asset.PublicID, MediaURL: "/api/v1/assets/" + asset.PublicID + "/media",
 			ReviewStatus: asset.ReviewStatus, CapturedAt: asset.CapturedAt.Format(time.RFC3339),
-			SOPViewKey: asset.SOPView.PresetKey, SOPViewName: localizedViewName{ZHCN: asset.SOPView.NameZH, EN: asset.SOPView.NameEN}, PhotoSessionCode: asset.PhotoSession.Code,
+			SOPViewKey: asset.SOPView.PresetKey, SOPViewName: localizedViewName{ZHCN: asset.SOPView.NameZH, EN: asset.SOPView.NameEN}, PhotoSessionCode: asset.PhotoSession.Code, OriginType: asset.OriginType, SourceSummary: safeAssetSourceSummary(asset.ProvenanceJSON),
 		})
 	}
 
