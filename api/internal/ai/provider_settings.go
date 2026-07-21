@@ -17,6 +17,10 @@ const (
 	DefaultOpenAIImageModel           = "gpt-5.6"
 	DefaultOpenAIImageMode            = "responses"
 	DefaultOpenAIImageGenerationModel = "gpt-image-2"
+	DefaultOpenAITextTimeoutSeconds   = 300
+	DefaultOpenAIImageTimeoutSeconds  = 600
+	MinOpenAIRequestTimeoutSeconds    = 30
+	MaxOpenAIRequestTimeoutSeconds    = 1800
 )
 
 var (
@@ -26,6 +30,7 @@ var (
 	ErrProviderNotActive         = errors.New("provider is not active")
 	ErrProviderModelsUnavailable = errors.New("provider models are unavailable")
 	ErrProviderModelInvalid      = errors.New("provider model is invalid")
+	ErrProviderTimeoutInvalid    = errors.New("provider request timeout is invalid")
 )
 
 type ProviderVerification struct {
@@ -52,37 +57,46 @@ type ModelConfiguration struct {
 	ImageGenerationModel string
 }
 
+type ProviderTimeoutConfiguration struct {
+	TextRequestTimeoutSeconds  int
+	ImageRequestTimeoutSeconds int
+}
+
 type ProviderModelLister interface {
 	ListModels(ctx context.Context, apiKey string) ([]ProviderModel, error)
 }
 
 type ProviderSettingView struct {
-	Provider                  string     `json:"provider"`
-	Status                    string     `json:"status"`
-	KeyFingerprint            string     `json:"key_fingerprint"`
-	TextModel                 string     `json:"text_model"`
-	ImageModel                string     `json:"image_model"`
-	ImageAPIMode              string     `json:"image_api_mode"`
-	ImageResponsesModel       string     `json:"image_responses_model"`
-	ImageGenerationModel      string     `json:"image_generation_model"`
-	VerifiedAt                *time.Time `json:"verified_at"`
-	ImageCapabilityVerifiedAt *time.Time `json:"image_capability_verified_at"`
-	ImageResponsesVerifiedAt  *time.Time `json:"image_responses_verified_at"`
-	ImageGenerationVerifiedAt *time.Time `json:"image_generation_verified_at"`
-	LastUsedAt                *time.Time `json:"last_used_at"`
-	MaxWorkersPerJob          int        `json:"max_workers_per_job"`
-	MaxWorkersGlobal          int        `json:"max_workers_global"`
+	Provider                   string     `json:"provider"`
+	Status                     string     `json:"status"`
+	KeyFingerprint             string     `json:"key_fingerprint"`
+	TextModel                  string     `json:"text_model"`
+	ImageModel                 string     `json:"image_model"`
+	ImageAPIMode               string     `json:"image_api_mode"`
+	ImageResponsesModel        string     `json:"image_responses_model"`
+	ImageGenerationModel       string     `json:"image_generation_model"`
+	VerifiedAt                 *time.Time `json:"verified_at"`
+	ImageCapabilityVerifiedAt  *time.Time `json:"image_capability_verified_at"`
+	ImageResponsesVerifiedAt   *time.Time `json:"image_responses_verified_at"`
+	ImageGenerationVerifiedAt  *time.Time `json:"image_generation_verified_at"`
+	LastUsedAt                 *time.Time `json:"last_used_at"`
+	MaxWorkersPerJob           int        `json:"max_workers_per_job"`
+	MaxWorkersGlobal           int        `json:"max_workers_global"`
+	TextRequestTimeoutSeconds  int        `json:"text_request_timeout_seconds"`
+	ImageRequestTimeoutSeconds int        `json:"image_request_timeout_seconds"`
 }
 
 type ActiveOpenAICredential struct {
-	SettingID            uint
-	KeyFingerprint       string
-	APIKey               []byte
-	TextModel            string
-	ImageModel           string
-	ImageAPIMode         string
-	ImageResponsesModel  string
-	ImageGenerationModel string
+	SettingID                  uint
+	KeyFingerprint             string
+	APIKey                     []byte
+	TextModel                  string
+	ImageModel                 string
+	ImageAPIMode               string
+	ImageResponsesModel        string
+	ImageGenerationModel       string
+	TextRequestTimeoutSeconds  int
+	ImageRequestTimeoutSeconds int
 }
 
 type ProviderSettingsService struct {
@@ -104,7 +118,7 @@ func (s *ProviderSettingsService) Get(ctx context.Context) (ProviderSettingView,
 	var row models.OpenAIProviderSetting
 	err = s.db.WithContext(ctx).Where("provider = ?", openAIProvider).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return withWorkerConcurrency(ProviderSettingView{Provider: openAIProvider, Status: "unconfigured", TextModel: DefaultOpenAITextModel, ImageModel: DefaultOpenAIImageModel, ImageAPIMode: DefaultOpenAIImageMode, ImageResponsesModel: DefaultOpenAIImageModel, ImageGenerationModel: DefaultOpenAIImageGenerationModel}, workerSetting), nil
+		return withWorkerConcurrency(ProviderSettingView{Provider: openAIProvider, Status: "unconfigured", TextModel: DefaultOpenAITextModel, ImageModel: DefaultOpenAIImageModel, ImageAPIMode: DefaultOpenAIImageMode, ImageResponsesModel: DefaultOpenAIImageModel, ImageGenerationModel: DefaultOpenAIImageGenerationModel, TextRequestTimeoutSeconds: DefaultOpenAITextTimeoutSeconds, ImageRequestTimeoutSeconds: DefaultOpenAIImageTimeoutSeconds}, workerSetting), nil
 	}
 	if err != nil {
 		return ProviderSettingView{}, err
@@ -115,6 +129,22 @@ func (s *ProviderSettingsService) Get(ctx context.Context) (ProviderSettingView,
 func (s *ProviderSettingsService) UpdateWorkers(ctx context.Context, actorID uint, value WorkerConcurrency) (ProviderSettingView, error) {
 	if _, err := s.workers.Update(ctx, actorID, value); err != nil {
 		return ProviderSettingView{}, err
+	}
+	return s.Get(ctx)
+}
+
+func (s *ProviderSettingsService) UpdateTimeouts(ctx context.Context, actorID uint, value ProviderTimeoutConfiguration) (ProviderSettingView, error) {
+	if !validProviderTimeout(value.TextRequestTimeoutSeconds) || !validProviderTimeout(value.ImageRequestTimeoutSeconds) {
+		return ProviderSettingView{}, ErrProviderTimeoutInvalid
+	}
+	result := s.db.WithContext(ctx).Model(&models.OpenAIProviderSetting{}).
+		Where("provider = ? AND status = ?", openAIProvider, "active").
+		Updates(map[string]any{"text_request_timeout_seconds": value.TextRequestTimeoutSeconds, "image_request_timeout_seconds": value.ImageRequestTimeoutSeconds, "updated_by_id": actorID})
+	if result.Error != nil {
+		return ProviderSettingView{}, result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ProviderSettingView{}, ErrProviderNotActive
 	}
 	return s.Get(ctx)
 }
@@ -229,20 +259,22 @@ func (s *ProviderSettingsService) Configure(ctx context.Context, actorID uint, a
 		err := tx.Where("provider = ?", openAIProvider).First(&saved).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			saved = models.OpenAIProviderSetting{
-				Provider:             openAIProvider,
-				EncryptedAPIKey:      sealed.Ciphertext,
-				EncryptionNonce:      sealed.Nonce,
-				EncryptionKeyVersion: sealed.KeyVersion,
-				KeyFingerprint:       fingerprint(apiKey),
-				Status:               "active",
-				TextModel:            DefaultOpenAITextModel,
-				ImageModel:           DefaultOpenAIImageModel,
-				ImageAPIMode:         DefaultOpenAIImageMode,
-				ImageResponsesModel:  DefaultOpenAIImageModel,
-				ImageGenerationModel: DefaultOpenAIImageGenerationModel,
-				VerifiedAt:           &verifiedAt,
-				CreatedByID:          actorID,
-				UpdatedByID:          actorID,
+				Provider:                   openAIProvider,
+				EncryptedAPIKey:            sealed.Ciphertext,
+				EncryptionNonce:            sealed.Nonce,
+				EncryptionKeyVersion:       sealed.KeyVersion,
+				KeyFingerprint:             fingerprint(apiKey),
+				Status:                     "active",
+				TextModel:                  DefaultOpenAITextModel,
+				ImageModel:                 DefaultOpenAIImageModel,
+				ImageAPIMode:               DefaultOpenAIImageMode,
+				ImageResponsesModel:        DefaultOpenAIImageModel,
+				ImageGenerationModel:       DefaultOpenAIImageGenerationModel,
+				TextRequestTimeoutSeconds:  DefaultOpenAITextTimeoutSeconds,
+				ImageRequestTimeoutSeconds: DefaultOpenAIImageTimeoutSeconds,
+				VerifiedAt:                 &verifiedAt,
+				CreatedByID:                actorID,
+				UpdatedByID:                actorID,
 			}
 			return tx.Create(&saved).Error
 		}
@@ -319,11 +351,13 @@ func (s *ProviderSettingsService) DecryptActiveCredential(ctx context.Context) (
 	}
 	return ActiveOpenAICredential{
 		SettingID: row.ID, KeyFingerprint: row.KeyFingerprint, APIKey: plain,
-		TextModel:            configuredModel(row.TextModel, DefaultOpenAITextModel),
-		ImageModel:           configuredModel(row.ImageModel, activeImageModel(row)),
-		ImageAPIMode:         configuredImageMode(row.ImageAPIMode),
-		ImageResponsesModel:  configuredModel(row.ImageResponsesModel, DefaultOpenAIImageModel),
-		ImageGenerationModel: configuredModel(row.ImageGenerationModel, DefaultOpenAIImageGenerationModel),
+		TextModel:                  configuredModel(row.TextModel, DefaultOpenAITextModel),
+		ImageModel:                 configuredModel(row.ImageModel, activeImageModel(row)),
+		ImageAPIMode:               configuredImageMode(row.ImageAPIMode),
+		ImageResponsesModel:        configuredModel(row.ImageResponsesModel, DefaultOpenAIImageModel),
+		ImageGenerationModel:       configuredModel(row.ImageGenerationModel, DefaultOpenAIImageGenerationModel),
+		TextRequestTimeoutSeconds:  configuredProviderTimeout(row.TextRequestTimeoutSeconds, DefaultOpenAITextTimeoutSeconds),
+		ImageRequestTimeoutSeconds: configuredProviderTimeout(row.ImageRequestTimeoutSeconds, DefaultOpenAIImageTimeoutSeconds),
 	}, nil
 }
 
@@ -332,6 +366,17 @@ func configuredImageMode(value string) string {
 		return "images"
 	}
 	return "responses"
+}
+
+func validProviderTimeout(value int) bool {
+	return value >= MinOpenAIRequestTimeoutSeconds && value <= MaxOpenAIRequestTimeoutSeconds
+}
+
+func configuredProviderTimeout(value, fallback int) int {
+	if validProviderTimeout(value) {
+		return value
+	}
+	return fallback
 }
 
 func activeImageModel(row models.OpenAIProviderSetting) string {
@@ -372,19 +417,21 @@ func fingerprint(apiKey string) string {
 
 func providerSettingView(row models.OpenAIProviderSetting) ProviderSettingView {
 	return ProviderSettingView{
-		Provider:                  row.Provider,
-		Status:                    row.Status,
-		KeyFingerprint:            row.KeyFingerprint,
-		TextModel:                 configuredModel(row.TextModel, DefaultOpenAITextModel),
-		ImageModel:                configuredModel(row.ImageModel, activeImageModel(row)),
-		ImageAPIMode:              configuredImageMode(row.ImageAPIMode),
-		ImageResponsesModel:       configuredModel(row.ImageResponsesModel, DefaultOpenAIImageModel),
-		ImageGenerationModel:      configuredModel(row.ImageGenerationModel, DefaultOpenAIImageGenerationModel),
-		VerifiedAt:                row.VerifiedAt,
-		ImageCapabilityVerifiedAt: row.ImageCapabilityVerifiedAt,
-		ImageResponsesVerifiedAt:  row.ImageResponsesVerifiedAt,
-		ImageGenerationVerifiedAt: row.ImageGenerationVerifiedAt,
-		LastUsedAt:                row.LastUsedAt,
+		Provider:                   row.Provider,
+		Status:                     row.Status,
+		KeyFingerprint:             row.KeyFingerprint,
+		TextModel:                  configuredModel(row.TextModel, DefaultOpenAITextModel),
+		ImageModel:                 configuredModel(row.ImageModel, activeImageModel(row)),
+		ImageAPIMode:               configuredImageMode(row.ImageAPIMode),
+		ImageResponsesModel:        configuredModel(row.ImageResponsesModel, DefaultOpenAIImageModel),
+		ImageGenerationModel:       configuredModel(row.ImageGenerationModel, DefaultOpenAIImageGenerationModel),
+		TextRequestTimeoutSeconds:  configuredProviderTimeout(row.TextRequestTimeoutSeconds, DefaultOpenAITextTimeoutSeconds),
+		ImageRequestTimeoutSeconds: configuredProviderTimeout(row.ImageRequestTimeoutSeconds, DefaultOpenAIImageTimeoutSeconds),
+		VerifiedAt:                 row.VerifiedAt,
+		ImageCapabilityVerifiedAt:  row.ImageCapabilityVerifiedAt,
+		ImageResponsesVerifiedAt:   row.ImageResponsesVerifiedAt,
+		ImageGenerationVerifiedAt:  row.ImageGenerationVerifiedAt,
+		LastUsedAt:                 row.LastUsedAt,
 	}
 }
 

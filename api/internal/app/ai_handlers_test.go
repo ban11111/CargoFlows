@@ -158,6 +158,34 @@ func TestOpenAIWorkerSettingsValidatePersistAndRemainSuperAdminOnly(t *testing.T
 	}
 }
 
+func TestOpenAITimeoutSettingsValidatePersistAndRemainSuperAdminOnly(t *testing.T) {
+	db := newTestDB(t)
+	server, admin, operator := authenticatedAIRouter(t, db, &handlerVerifier{authenticated: true})
+	configured := aiRequest(t, server, server.token(t, admin), http.MethodPut, "/api/v1/settings/openai", `{"api_key":"sk-proj-timeout-settings-ABCD"}`)
+	if configured.Code != http.StatusOK || !strings.Contains(configured.Body.String(), `"text_request_timeout_seconds":300`) || !strings.Contains(configured.Body.String(), `"image_request_timeout_seconds":600`) {
+		t.Fatalf("configure defaults status/body = %d %s", configured.Code, configured.Body.String())
+	}
+	updated := aiRequest(t, server, server.token(t, admin), http.MethodPatch, "/api/v1/settings/openai/timeouts", `{"text_request_timeout_seconds":420,"image_request_timeout_seconds":900}`)
+	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"text_request_timeout_seconds":420`) || !strings.Contains(updated.Body.String(), `"image_request_timeout_seconds":900`) {
+		t.Fatalf("PATCH status/body = %d %s", updated.Code, updated.Body.String())
+	}
+	for _, body := range []string{
+		`{"text_request_timeout_seconds":29,"image_request_timeout_seconds":900}`,
+		`{"text_request_timeout_seconds":420,"image_request_timeout_seconds":1801}`,
+		`{"text_request_timeout_seconds":420}`,
+		`{"text_request_timeout_seconds":420.5,"image_request_timeout_seconds":900}`,
+	} {
+		response := aiRequest(t, server, server.token(t, admin), http.MethodPatch, "/api/v1/settings/openai/timeouts", body)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("invalid PATCH %s status/body = %d %s", body, response.Code, response.Body.String())
+		}
+	}
+	forbidden := aiRequest(t, server, server.token(t, operator), http.MethodPatch, "/api/v1/settings/openai/timeouts", `{"text_request_timeout_seconds":420,"image_request_timeout_seconds":900}`)
+	if forbidden.Code != http.StatusForbidden {
+		t.Fatalf("operator PATCH status/body = %d %s", forbidden.Code, forbidden.Body.String())
+	}
+}
+
 func TestOpenAIModelsAreFetchedForSuperAdminWithActiveCredential(t *testing.T) {
 	db := newTestDB(t)
 	verifier := &handlerVerifier{authenticated: true, models: []ai.ProviderModel{{ID: "gpt-5.6", OwnedBy: "openai"}}}
@@ -264,6 +292,25 @@ func TestTextResultReviewAndApplicationRoutesAreOperatorSafe(t *testing.T) {
 	history := aiRequest(t, server, token, http.MethodGet, "/api/v1/skus/"+sku.PublicID+"/platform-content?platform=lazada&locale=zh-CN", "")
 	if history.Code != http.StatusOK || !strings.Contains(history.Body.String(), "Edited route title") {
 		t.Fatalf("history status/body=%d %s", history.Code, history.Body.String())
+	}
+	if err := db.Model(&item).Updates(map[string]any{"status": models.AIJobItemFailed, "safe_error": "temporary failure", "failure_code": "openai_unavailable", "completed_at": time.Now().UTC()}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&job).Updates(map[string]any{"status": models.AIJobFailed, "completed_at": time.Now().UTC()}).Error; err != nil {
+		t.Fatal(err)
+	}
+	regeneratePath := "/api/v1/ai-jobs/" + job.PublicID + "/items/" + item.PublicID + "/regenerate-text"
+	regenerated := aiRequest(t, server, token, http.MethodPost, regeneratePath, "")
+	if regenerated.Code != http.StatusAccepted || !strings.Contains(regenerated.Body.String(), `"status":"queued"`) || strings.Contains(regenerated.Body.String(), "temporary failure") {
+		t.Fatalf("regenerate status/body=%d %s", regenerated.Code, regenerated.Body.String())
+	}
+	regenerateConflict := aiRequest(t, server, token, http.MethodPost, regeneratePath, "")
+	if regenerateConflict.Code != http.StatusConflict {
+		t.Fatalf("regenerate conflict status/body=%d %s", regenerateConflict.Code, regenerateConflict.Body.String())
+	}
+	regenerateForbidden := aiRequest(t, server, server.token(t, viewer), http.MethodPost, regeneratePath, "")
+	if regenerateForbidden.Code != http.StatusForbidden {
+		t.Fatalf("viewer regenerate status/body=%d %s", regenerateForbidden.Code, regenerateForbidden.Body.String())
 	}
 }
 
@@ -698,7 +745,8 @@ func TestAIOpenAPIHasExactAdminPathsAndNeverExposesCredentialMaterial(t *testing
 			"get":   {"200", "401", "403", "409", "502", "503"},
 			"patch": {"200", "400", "401", "403", "409", "422", "502", "503"},
 		},
-		"/settings/openai/workers": {"patch": {"200", "400", "401", "403", "500", "503"}},
+		"/settings/openai/workers":  {"patch": {"200", "400", "401", "403", "500", "503"}},
+		"/settings/openai/timeouts": {"patch": {"200", "400", "401", "403", "409", "500", "503"}},
 		"/ai-content-templates": {
 			"get":  {"200", "400", "401", "403", "500"},
 			"post": {"201", "400", "401", "403", "500"},
@@ -733,7 +781,7 @@ func TestAIOpenAPIHasExactAdminPathsAndNeverExposesCredentialMaterial(t *testing
 	}
 
 	schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
-	for _, name := range []string{"OpenAISetting", "OpenAISettingRequest", "OpenAIModel", "OpenAIModelSelectionRequest", "AIContentTemplate", "AIContentTemplateVersion", "AIContentSlot", "AIContentTemplateMutationRequest", "AITemplateValidationResponse"} {
+	for _, name := range []string{"OpenAISetting", "OpenAISettingRequest", "OpenAIModel", "OpenAIModelSelectionRequest", "OpenAITimeoutSettingRequest", "AIContentTemplate", "AIContentTemplateVersion", "AIContentSlot", "AIContentTemplateMutationRequest", "AITemplateValidationResponse"} {
 		if _, ok := schemas[name]; !ok {
 			t.Errorf("missing schema %s", name)
 		}

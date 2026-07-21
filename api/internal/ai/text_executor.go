@@ -108,7 +108,8 @@ func (executor *TextExecutor) Execute(ctx context.Context, leased LeasedItem) er
 		persistErr := executor.markProviderFailure(ctx, prepared.execution.ID, models.AIExecutionFailed, "OpenAI dispatch failed before a confirmed call", "")
 		return errors.Join(err, persistErr)
 	}
-	response, providerErr := executor.provider.Generate(ctx, credential.APIKey, TextRequest{
+	providerCtx, cancelProvider := context.WithTimeout(ctx, time.Duration(configuredProviderTimeout(credential.TextRequestTimeoutSeconds, DefaultOpenAITextTimeoutSeconds))*time.Second)
+	response, providerErr := executor.provider.Generate(providerCtx, credential.APIKey, TextRequest{
 		Model:  runtimeModel,
 		Prompt: prepared.prompt,
 		Inputs: inputs,
@@ -118,6 +119,7 @@ func (executor *TextExecutor) Execute(ctx context.Context, leased LeasedItem) er
 			"execution_id": prepared.execution.PublicID,
 		},
 	})
+	cancelProvider()
 	clearBytes(credential.APIKey)
 	if providerErr != nil {
 		status, safeError := providerFailureState(providerErr)
@@ -185,7 +187,16 @@ func (executor *TextExecutor) prepare(ctx context.Context, leased LeasedItem) (p
 		}
 
 		var existing models.AIExecution
-		err = tx.Where("ai_job_item_id = ?", item.ID).Order("attempt_number DESC, id DESC").First(&existing).Error
+		err = tx.Where("ai_job_item_id = ? AND attempt_number = ?", item.ID, item.AttemptCount).First(&existing).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			startNew, checkErr := shouldStartRegeneratedTextExecution(tx, item)
+			if checkErr != nil {
+				return checkErr
+			}
+			if !startNew {
+				err = tx.Where("ai_job_item_id = ?", item.ID).Order("attempt_number DESC, id DESC").First(&existing).Error
+			}
+		}
 		if err == nil {
 			prepared = preparedTextExecution{execution: existing, prompt: prompt, jobPublicID: job.PublicID, itemPublicID: item.PublicID, sourceKeys: sourceKeys, modelSnapshot: modelSnapshot}
 			if existing.CompiledPromptSHA256 != prompt.SHA256 {
@@ -236,6 +247,28 @@ func (executor *TextExecutor) prepare(ctx context.Context, leased LeasedItem) (p
 		return prepared, errors.Join(ErrExecutionNeedsAttention, persistErr)
 	}
 	return prepared, err
+}
+
+func shouldStartRegeneratedTextExecution(tx *gorm.DB, item models.AIJobItem) (bool, error) {
+	var audit models.AIAuditEvent
+	err := tx.Where("ai_job_item_id = ? AND event_type = ?", item.ID, "ai_job_item.text_regeneration_requested").Order("id DESC").First(&audit).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var metadata struct {
+		RequestedAttemptNumber int `json:"requested_attempt_number"`
+	}
+	if err := json.Unmarshal(audit.MetadataJSON, &metadata); err != nil || metadata.RequestedAttemptNumber <= 0 || item.AttemptCount < metadata.RequestedAttemptNumber {
+		return false, err
+	}
+	var count int64
+	if err := tx.Model(&models.AIExecution{}).Where("ai_job_item_id = ? AND attempt_number >= ?", item.ID, metadata.RequestedAttemptNumber).Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count == 0, nil
 }
 
 func textInformationSourceKeys(tx *gorm.DB, job models.AIJob, snapshot ProductSnapshotV1) ([]string, error) {
@@ -516,8 +549,14 @@ func (executor *TextExecutor) upsertTerminalAudit(tx *gorm.DB, execution models.
 
 func providerFailureState(err error) (models.AIExecutionStatus, string) {
 	switch {
-	case errors.Is(err, ErrTextProviderAmbiguousTimeout), errors.Is(err, ErrTextProviderAmbiguousTransport):
-		return models.AIExecutionNeedsAttention, "OpenAI call outcome is ambiguous"
+	case errors.Is(err, ErrTextProviderAmbiguousTimeout):
+		return models.AIExecutionNeedsAttention, "OpenAI text request timed out after it was sent; no response was received"
+	case errors.Is(err, ErrTextProviderAmbiguousTransport):
+		var providerErr *TextProviderError
+		if errors.As(err, &providerErr) && providerErr.StatusCode >= 500 {
+			return models.AIExecutionNeedsAttention, fmt.Sprintf("OpenAI text API returned HTTP %d before a result was confirmed", providerErr.StatusCode)
+		}
+		return models.AIExecutionNeedsAttention, "Connection to OpenAI was interrupted after the text request was sent; no response was received"
 	case errors.Is(err, ErrTextProviderAuthentication):
 		return models.AIExecutionFailed, "OpenAI authentication failed"
 	case errors.Is(err, ErrTextProviderRefusal):
@@ -576,8 +615,12 @@ func failureCodeForSafeError(safe string) string {
 		return "openai_authentication_failed"
 	case strings.Contains(value, "rate limit"):
 		return "openai_rate_limited"
-	case strings.Contains(value, "ambiguous"), strings.Contains(value, "timed out"):
+	case strings.Contains(value, "timed out"), strings.Contains(value, "ambiguous"):
 		return "openai_timeout_ambiguous"
+	case strings.Contains(value, "returned http 5"):
+		return "openai_server_error_ambiguous"
+	case strings.Contains(value, "connection to openai was interrupted"):
+		return "openai_transport_ambiguous"
 	case strings.Contains(value, "moderation"), strings.Contains(value, "blocked"):
 		return "openai_moderation_blocked"
 	case strings.Contains(value, "refused"):

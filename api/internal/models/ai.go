@@ -86,27 +86,29 @@ const (
 )
 
 type OpenAIProviderSetting struct {
-	ID                        uint       `gorm:"primaryKey" json:"-"`
-	Provider                  string     `gorm:"size:32;uniqueIndex;not null" json:"provider"`
-	EncryptedAPIKey           []byte     `gorm:"type:blob;not null" json:"-"`
-	EncryptionNonce           []byte     `gorm:"type:varbinary(32);not null" json:"-"`
-	EncryptionKeyVersion      string     `gorm:"size:16;not null" json:"-"`
-	KeyFingerprint            string     `gorm:"size:16;not null" json:"key_fingerprint"`
-	Status                    string     `gorm:"size:32;not null" json:"status"`
-	TextModel                 string     `gorm:"size:200;not null;default:gpt-5.6-terra" json:"text_model"`
-	ImageModel                string     `gorm:"size:200;not null;default:gpt-5.6" json:"image_model"`
-	ImageAPIMode              string     `gorm:"size:32;not null;default:responses" json:"image_api_mode"`
-	ImageResponsesModel       string     `gorm:"size:200;not null;default:gpt-5.6" json:"image_responses_model"`
-	ImageGenerationModel      string     `gorm:"size:200;not null;default:gpt-image-2" json:"image_generation_model"`
-	VerifiedAt                *time.Time `json:"verified_at"`
-	ImageCapabilityVerifiedAt *time.Time `json:"image_capability_verified_at"`
-	ImageResponsesVerifiedAt  *time.Time `json:"image_responses_verified_at"`
-	ImageGenerationVerifiedAt *time.Time `json:"image_generation_verified_at"`
-	LastUsedAt                *time.Time `json:"last_used_at"`
-	CreatedByID               uint       `gorm:"index;not null" json:"-"`
-	UpdatedByID               uint       `gorm:"index;not null" json:"-"`
-	CreatedAt                 time.Time  `json:"created_at"`
-	UpdatedAt                 time.Time  `json:"updated_at"`
+	ID                         uint       `gorm:"primaryKey" json:"-"`
+	Provider                   string     `gorm:"size:32;uniqueIndex;not null" json:"provider"`
+	EncryptedAPIKey            []byte     `gorm:"type:blob;not null" json:"-"`
+	EncryptionNonce            []byte     `gorm:"type:varbinary(32);not null" json:"-"`
+	EncryptionKeyVersion       string     `gorm:"size:16;not null" json:"-"`
+	KeyFingerprint             string     `gorm:"size:16;not null" json:"key_fingerprint"`
+	Status                     string     `gorm:"size:32;not null" json:"status"`
+	TextModel                  string     `gorm:"size:200;not null;default:gpt-5.6-terra" json:"text_model"`
+	ImageModel                 string     `gorm:"size:200;not null;default:gpt-5.6" json:"image_model"`
+	ImageAPIMode               string     `gorm:"size:32;not null;default:responses" json:"image_api_mode"`
+	ImageResponsesModel        string     `gorm:"size:200;not null;default:gpt-5.6" json:"image_responses_model"`
+	ImageGenerationModel       string     `gorm:"size:200;not null;default:gpt-image-2" json:"image_generation_model"`
+	TextRequestTimeoutSeconds  int        `gorm:"not null;default:300" json:"text_request_timeout_seconds"`
+	ImageRequestTimeoutSeconds int        `gorm:"not null;default:600" json:"image_request_timeout_seconds"`
+	VerifiedAt                 *time.Time `json:"verified_at"`
+	ImageCapabilityVerifiedAt  *time.Time `json:"image_capability_verified_at"`
+	ImageResponsesVerifiedAt   *time.Time `json:"image_responses_verified_at"`
+	ImageGenerationVerifiedAt  *time.Time `json:"image_generation_verified_at"`
+	LastUsedAt                 *time.Time `json:"last_used_at"`
+	CreatedByID                uint       `gorm:"index;not null" json:"-"`
+	UpdatedByID                uint       `gorm:"index;not null" json:"-"`
+	CreatedAt                  time.Time  `json:"created_at"`
+	UpdatedAt                  time.Time  `json:"updated_at"`
 }
 
 type AIWorkerSetting struct {

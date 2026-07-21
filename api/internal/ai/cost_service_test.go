@@ -207,7 +207,7 @@ func TestReconciliationAllocationsConserveBucketsAndVersionOnlyOnChange(t *testi
 	assertAllocation(t, db, bucket.ID, 2, jobB.ID, "1.50000000")
 }
 
-func TestReconciliationStopsAllocationWhenUsageIsUnpriced(t *testing.T) {
+func TestReconciliationExcludesUnpricedUsageFromAllocation(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -216,19 +216,54 @@ func TestReconciliationStopsAllocationWhenUsageIsUnpriced(t *testing.T) {
 		t.Fatal(err)
 	}
 	day := time.Date(2026, 7, 21, 0, 0, 0, 0, time.UTC)
-	createReconciliationJob(t, db, day.Add(time.Hour), "1.00000000", "priced")
+	pricedJob := createReconciliationJob(t, db, day.Add(time.Hour), "1.00000000", "priced")
 	createReconciliationJob(t, db, day.Add(2*time.Hour), "0.00000000", "unpriced")
 	bucket := models.OpenAICostBucket{BucketDate: day, ProjectID: "proj", APIKeyID: "key", LineItem: "images", ActualAmountUSD: "2.00000000", SourceJSON: []byte(`{}`), Status: "open", SyncedAt: day}
 	db.Create(&bucket)
 	if err := (&CostService{db: db}).reconcile(context.Background(), day, day.AddDate(0, 0, 1)); err != nil {
 		t.Fatal(err)
 	}
+	assertAllocation(t, db, bucket.ID, 1, pricedJob.ID, "2.00000000")
+	db.First(&bucket, bucket.ID)
+	if bucket.Status != "reconciled" {
+		t.Fatalf("status=%s", bucket.Status)
+	}
+	summary, err := (&CostService{db: db}).Summary(context.Background(), day, day.AddDate(0, 0, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summary) != 1 || summary[0].UnpricedUsageCount != 1 || summary[0].Status != "reconciled" {
+		t.Fatalf("summary=%+v", summary)
+	}
+}
+
+func TestReconciliationNeedsAttentionWhenOnlyUsageIsUnpriced(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&models.AIJob{}, &models.AIJobItem{}, &models.AIExecution{}, &models.AIUsageLedger{}, &models.OpenAICostBucket{}, &models.AIReconciliationAllocation{}); err != nil {
+		t.Fatal(err)
+	}
+	day := time.Date(2026, 7, 21, 0, 0, 0, 0, time.UTC)
+	createReconciliationJob(t, db, day.Add(time.Hour), "0.00000000", "unpriced")
+	bucket := models.OpenAICostBucket{BucketDate: day, ProjectID: "proj", APIKeyID: "key", LineItem: "images", ActualAmountUSD: "2.00000000", SourceJSON: []byte(`{}`), Status: "open", SyncedAt: day}
+	if err := db.Create(&bucket).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := (&CostService{db: db}).reconcile(context.Background(), day, day.AddDate(0, 0, 1)); err != nil {
+		t.Fatal(err)
+	}
 	var count int64
-	db.Model(&models.AIReconciliationAllocation{}).Where("open_ai_cost_bucket_id = ?", bucket.ID).Count(&count)
+	if err := db.Model(&models.AIReconciliationAllocation{}).Where("open_ai_cost_bucket_id = ?", bucket.ID).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
 	if count != 0 {
 		t.Fatalf("allocations=%d", count)
 	}
-	db.First(&bucket, bucket.ID)
+	if err := db.First(&bucket, bucket.ID).Error; err != nil {
+		t.Fatal(err)
+	}
 	if bucket.Status != "needs_attention" {
 		t.Fatalf("status=%s", bucket.Status)
 	}

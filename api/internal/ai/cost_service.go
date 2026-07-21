@@ -201,7 +201,7 @@ func (s *CostService) Sync(ctx context.Context, start, end time.Time) (int, erro
 	for path != "" {
 		body, err := s.get(ctx, string(key), path)
 		if err != nil {
-			return count, err
+			return count, fmt.Errorf("fetch OpenAI costs: %w", err)
 		}
 		var page struct {
 			Data []struct {
@@ -222,7 +222,7 @@ func (s *CostService) Sync(ctx context.Context, start, end time.Time) (int, erro
 		decoder := json.NewDecoder(strings.NewReader(string(body)))
 		decoder.UseNumber()
 		if err := decoder.Decode(&page); err != nil {
-			return count, ErrCostProviderResponse
+			return count, fmt.Errorf("decode OpenAI costs: %w", ErrCostProviderResponse)
 		}
 		now := time.Now().UTC()
 		for _, bucket := range page.Data {
@@ -248,7 +248,7 @@ func (s *CostService) Sync(ctx context.Context, start, end time.Time) (int, erro
 				raw, _ := json.Marshal(item)
 				row := models.OpenAICostBucket{BucketDate: time.Unix(bucket.StartTime, 0).UTC(), ProjectID: project, APIKeyID: keyID, LineItem: line, ActualAmountUSD: money.Format(amount), SourceJSON: raw, Status: "open", SyncedAt: now}
 				if err := s.db.WithContext(ctx).Where(models.OpenAICostBucket{BucketDate: row.BucketDate, ProjectID: project, APIKeyID: keyID, LineItem: line}).Assign(map[string]any{"actual_amount_usd": row.ActualAmountUSD, "source_json": raw, "synced_at": now}).FirstOrCreate(&row).Error; err != nil {
-					return count, err
+					return count, fmt.Errorf("persist OpenAI cost bucket: %w", err)
 				}
 				count++
 			}
@@ -260,13 +260,13 @@ func (s *CostService) Sync(ctx context.Context, start, end time.Time) (int, erro
 		}
 	}
 	if err := s.syncUsageDiagnostics(ctx, string(key), setting, start, end); err != nil {
-		return count, err
+		return count, fmt.Errorf("sync OpenAI usage diagnostics: %w", err)
 	}
 	if err := s.reconcile(ctx, start, end); err != nil {
-		return count, err
+		return count, fmt.Errorf("reconcile OpenAI costs: %w", err)
 	}
 	if err := s.db.WithContext(ctx).Model(&models.OpenAICostSetting{}).Where("id = ?", setting.ID).Update("last_synced_at", time.Now().UTC()).Error; err != nil {
-		return count, err
+		return count, fmt.Errorf("update OpenAI cost sync timestamp: %w", err)
 	}
 	return count, nil
 }
@@ -336,10 +336,6 @@ func (s *CostService) reconcile(ctx context.Context, start, end time.Time) error
 		}
 		dayStart, _ := time.Parse("2006-01-02", day)
 		dayEnd := dayStart.AddDate(0, 0, 1)
-		var unpriced int64
-		if err := s.db.Table("ai_usage_ledgers").Where("created_at >= ? AND created_at < ? AND pricing_status IN ?", dayStart, dayEnd, []string{"unpriced", "partial"}).Count(&unpriced).Error; err != nil {
-			return err
-		}
 		if err := s.db.Table("ai_usage_ledgers AS ledger").Select("item.ai_job_id AS job_id, SUM(ledger.estimated_amount_usd) AS estimated").Joins("JOIN ai_executions AS execution ON execution.id = ledger.ai_execution_id").Joins("JOIN ai_job_items AS item ON item.id = execution.ai_job_item_id").Where("ledger.created_at >= ? AND ledger.created_at < ? AND ledger.pricing_status = ?", dayStart, dayEnd, "priced").Group("item.ai_job_id").Scan(&rows).Error; err != nil {
 			return err
 		}
@@ -347,7 +343,10 @@ func (s *CostService) reconcile(ctx context.Context, start, end time.Time) error
 		for _, r := range rows {
 			estimatedTotal.Add(estimatedTotal, money.Must(r.Estimated))
 		}
-		if estimatedTotal.Sign() == 0 || unpriced > 0 {
+		// Unpriced and partially priced usage remains visible in diagnostics, but
+		// is excluded from the allocation basis. A day only needs attention when
+		// there is no positive priced estimate to use for allocation.
+		if estimatedTotal.Sign() == 0 {
 			ids := make([]uint, 0, len(dayBuckets))
 			for _, bucket := range dayBuckets {
 				ids = append(ids, bucket.ID)
@@ -459,9 +458,6 @@ func (s *CostService) Summary(ctx context.Context, start, end time.Time) ([]Cost
 			rate := new(big.Rat).Quo(difference, money.Must(row.EstimatedAmountUSD))
 			value := money.Format(rate)
 			row.DifferenceRate = &value
-		}
-		if row.UnpricedUsageCount > 0 {
-			row.Status = "needs_attention"
 		}
 		result = append(result, *row)
 	}

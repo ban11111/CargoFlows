@@ -296,6 +296,11 @@ func TestMigrateCreatesAIFoundationTables(t *testing.T) {
 			t.Fatalf("missing AI execution audit column %q", column)
 		}
 	}
+	for _, column := range []string{"text_request_timeout_seconds", "image_request_timeout_seconds"} {
+		if !db.Migrator().HasColumn(&models.OpenAIProviderSetting{}, column) {
+			t.Fatalf("missing OpenAI timeout setting column %q", column)
+		}
+	}
 	if !db.Migrator().HasIndex(&models.AIJob{}, "idx_ai_job_actor_idempotency") {
 		t.Fatal("missing actor-scoped AI job idempotency index")
 	}

@@ -169,6 +169,61 @@ func TestTextExecutorPersistsCandidatesUsageAuditAndClearsCredential(t *testing.
 	}
 }
 
+func TestTextExecutorCreatesANewExecutionForRegeneratedAttempt(t *testing.T) {
+	db, firstLease, setting := prepareTextExecutorLease(t, 1)
+	base := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
+	firstSource := &fakeActiveCredentialSource{credential: ActiveOpenAICredential{SettingID: setting.ID, KeyFingerprint: setting.KeyFingerprint, APIKey: []byte("first-temporary-key")}}
+	firstExecutor := newTextExecutorWithClock(db, firstSource, textProviderFunc(func(context.Context, []byte, TextRequest) (TextResponse, error) {
+		return TextResponse{}, errors.New("temporary provider failure")
+	}), TextExecutorConfig{Model: "fake-model"}, fixedClock{now: base.Add(10 * time.Second)})
+	if err := firstExecutor.Execute(t.Context(), firstLease); err == nil {
+		t.Fatal("first attempt unexpectedly succeeded")
+	}
+	if err := newQueueWithClock(db, fixedClock{now: base.Add(11 * time.Second)}).Fail(t.Context(), firstLease, "Text generation temporarily failed"); err != nil {
+		t.Fatal(err)
+	}
+	var job models.AIJob
+	var item models.AIJobItem
+	if err := db.First(&job, firstLease.jobID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&item, firstLease.itemID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewJobService(db).RegenerateTextItem(t.Context(), job.PublicID, item.PublicID, 1); err != nil {
+		t.Fatal(err)
+	}
+	secondLease, err := NewQueue(db).LeaseNext(t.Context(), "worker-regeneration", base.Add(20*time.Second), time.Minute)
+	if err != nil || secondLease == nil || secondLease.Attempt != 2 {
+		t.Fatalf("second lease = %#v, %v", secondLease, err)
+	}
+	secondSource := &fakeActiveCredentialSource{credential: ActiveOpenAICredential{SettingID: setting.ID, KeyFingerprint: setting.KeyFingerprint, APIKey: []byte("second-temporary-key")}}
+	secondExecutor := newTextExecutorWithClock(db, secondSource, textProviderFunc(func(context.Context, []byte, TextRequest) (TextResponse, error) {
+		return TextResponse{
+			ResponseID: "resp_regenerated", RequestID: "req_regenerated", Model: "fake-model",
+			OutputJSON: json.RawMessage(`{"candidates":[{"title":"Regenerated title","keywords":[],"source_fields":["product.name"]}]}`),
+			Usage:      TextUsage{InputTextTokens: 4, OutputTextTokens: 3, TotalTokens: 7},
+		}, nil
+	}), TextExecutorConfig{Model: "fake-model"}, fixedClock{now: base.Add(30 * time.Second)})
+	if err := secondExecutor.Execute(t.Context(), *secondLease); err != nil {
+		t.Fatal(err)
+	}
+	if err := newQueueWithClock(db, fixedClock{now: base.Add(31 * time.Second)}).Complete(t.Context(), *secondLease); err != nil {
+		t.Fatal(err)
+	}
+	var executions []models.AIExecution
+	if err := db.Where("ai_job_item_id = ?", item.ID).Order("attempt_number ASC").Find(&executions).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(executions) != 2 || executions[0].AttemptNumber != 1 || executions[1].AttemptNumber != 2 || executions[1].Status != models.AIExecutionCompleted {
+		t.Fatalf("executions = %#v", executions)
+	}
+	var result models.AITextResult
+	if err := db.Where("ai_execution_id = ?", executions[1].ID).First(&result).Error; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestTextExecutorLoadsOnlySupplementalImagesAndRecordsImageTokens(t *testing.T) {
 	db, leased, setting := prepareTextExecutorLease(t, 1)
 	var job models.AIJob
@@ -255,6 +310,24 @@ func TestTextExecutorMarksAmbiguousProviderFailureNeedsAttention(t *testing.T) {
 	db.Model(&models.AIUsageLedger{}).Count(&ledgers)
 	if results != 0 || ledgers != 0 {
 		t.Fatalf("results=%d ledgers=%d", results, ledgers)
+	}
+}
+
+func TestTextExecutorAppliesConfiguredProviderTimeout(t *testing.T) {
+	db, leased, setting := prepareTextExecutorLease(t, 1)
+	key := []byte("temporary-fake-api-key")
+	source := &fakeActiveCredentialSource{credential: ActiveOpenAICredential{SettingID: setting.ID, KeyFingerprint: setting.KeyFingerprint, APIKey: key, TextRequestTimeoutSeconds: 47}}
+	provider := textProviderFunc(func(ctx context.Context, _ []byte, _ TextRequest) (TextResponse, error) {
+		deadline, ok := ctx.Deadline()
+		remaining := time.Until(deadline)
+		if !ok || remaining < 45*time.Second || remaining > 48*time.Second {
+			t.Fatalf("provider deadline remaining = %s, present=%v", remaining, ok)
+		}
+		return TextResponse{}, &TextProviderError{Kind: ErrTextProviderAuthentication, RequestID: "req_timeout_config"}
+	})
+	executor := newTextExecutorWithClock(db, source, provider, TextExecutorConfig{Model: "fake-model"}, fixedClock{now: time.Date(2026, 7, 17, 10, 0, 10, 0, time.UTC)})
+	if err := executor.Execute(t.Context(), leased); !errors.Is(err, ErrTextProviderAuthentication) {
+		t.Fatalf("error = %v", err)
 	}
 }
 

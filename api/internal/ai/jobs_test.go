@@ -200,6 +200,69 @@ func TestCreateJobSnapshotsOnlyWhitelistedFactsAndSelectedSlots(t *testing.T) {
 	}
 }
 
+func TestRegenerateTextItemRequeuesOnlyFailedTextAndAuditsActor(t *testing.T) {
+	db, fixture := seedAIJobFixture(t)
+	service := NewJobService(db)
+	job, err := service.Create(t.Context(), CreateJobInput{
+		SKUID: fixture.SKU.PublicID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID,
+		SelectedSlotKeys: []string{"title"}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID,
+		IdempotencyKey: "job-regenerate-failed-text",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	itemID := job.Items[0].PublicID
+	completedAt := time.Now().UTC()
+	if err := db.Model(&models.AIJobItem{}).Where("public_id = ?", itemID).Updates(map[string]any{"status": models.AIJobItemFailed, "attempt_count": 2, "safe_error": "temporary provider failure", "failure_code": "openai_unavailable", "internal_error": "private", "completed_at": completedAt}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&models.AIJob{}).Where("public_id = ?", job.PublicID).Updates(map[string]any{"status": models.AIJobFailed, "completed_at": completedAt}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	regenerated, err := service.RegenerateTextItem(t.Context(), job.PublicID, itemID, fixture.Operator.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if regenerated.Status != models.AIJobQueued || regenerated.CompletedAt != nil || len(regenerated.Items) != 1 {
+		t.Fatalf("regenerated job = %#v", regenerated)
+	}
+	item := regenerated.Items[0]
+	if item.Status != models.AIJobItemQueued || item.AttemptCount != 2 || item.SafeError != "" || item.Failure != nil || item.CompletedAt != nil {
+		t.Fatalf("regenerated item = %#v", item)
+	}
+	var audit models.AIAuditEvent
+	if err := db.Where("event_type = ? AND entity_public_id = ?", "ai_job_item.text_regeneration_requested", itemID).First(&audit).Error; err != nil {
+		t.Fatal(err)
+	}
+	if audit.ActorID == nil || *audit.ActorID != fixture.Operator.ID {
+		t.Fatalf("audit actor = %#v", audit.ActorID)
+	}
+
+	if _, err := service.RegenerateTextItem(t.Context(), job.PublicID, itemID, fixture.Operator.ID); !errors.Is(err, ErrTextItemRegenerationConflict) {
+		t.Fatalf("second regeneration error = %v", err)
+	}
+}
+
+func TestRegenerateTextItemRejectsFailedImage(t *testing.T) {
+	db, fixture := seedAIJobFixture(t)
+	service := NewJobService(db)
+	job, err := service.Create(t.Context(), CreateJobInput{
+		SKUID: fixture.SKU.PublicID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID,
+		SelectedSlotKeys: []string{"hero"}, SelectedAssetIDs: []string{fixture.ApprovedAsset.PublicID}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID,
+		IdempotencyKey: "job-regenerate-failed-image",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&models.AIJobItem{}).Where("public_id = ?", job.Items[0].PublicID).Update("status", models.AIJobItemFailed).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RegenerateTextItem(t.Context(), job.PublicID, job.Items[0].PublicID, fixture.Operator.ID); !errors.Is(err, ErrTextItemRegenerationInvalid) {
+		t.Fatalf("failed image regeneration error = %v", err)
+	}
+}
+
 func TestCreateJobRequiresAndFreezesCompatibleDeviceModelForConstrainedSlots(t *testing.T) {
 	db, fixture := seedAIJobFixture(t)
 	if err := db.Model(&models.AIContentSlot{}).Where("ai_content_template_version_id = ? AND slot_key = ?", fixture.PublishedVersion.ID, "hero").Update("constraints_json", []byte(`{"required_views":["reference_front"],"requires_compatible_device_model":true}`)).Error; err != nil {

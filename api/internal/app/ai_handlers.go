@@ -100,6 +100,27 @@ func (s *Server) updateOpenAIWorkers(c *gin.Context) {
 	c.JSON(http.StatusOK, openAISettingDTOFromView(value))
 }
 
+func (s *Server) updateOpenAITimeouts(c *gin.Context) {
+	if s.ai.ProviderSettings == nil {
+		respondAIUnavailable(c)
+		return
+	}
+	var req openAITimeoutSettingRequest
+	if err := decodeJSONStrict(c, &req); err != nil || req.TextRequestTimeoutSeconds == nil || req.ImageRequestTimeoutSeconds == nil {
+		if err == nil {
+			err = errors.New("text_request_timeout_seconds and image_request_timeout_seconds are required")
+		}
+		respondAIBadRequest(c, err)
+		return
+	}
+	value, err := s.ai.ProviderSettings.UpdateTimeouts(c.Request.Context(), currentUser(c).ID, ai.ProviderTimeoutConfiguration{TextRequestTimeoutSeconds: *req.TextRequestTimeoutSeconds, ImageRequestTimeoutSeconds: *req.ImageRequestTimeoutSeconds})
+	if err != nil {
+		respondAIError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, openAISettingDTOFromView(value))
+}
+
 func (s *Server) putOpenAISetting(c *gin.Context) {
 	if s.ai.ProviderSettings == nil {
 		respondAIUnavailable(c)
@@ -195,6 +216,18 @@ func (s *Server) getAIJob(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, value)
+}
+
+func (s *Server) regenerateAITextItem(c *gin.Context) {
+	if !requireAIUUIDParam(c, "job_id") || !requireAIUUIDParam(c, "item_id") {
+		return
+	}
+	value, err := s.ai.Jobs.RegenerateTextItem(c.Request.Context(), c.Param("job_id"), c.Param("item_id"), currentUser(c).ID)
+	if err != nil {
+		respondAIError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, value)
 }
 
 func (s *Server) listAITextResults(c *gin.Context) {
@@ -719,10 +752,16 @@ func respondAIError(c *gin.Context, err error) {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "provider_model_invalid", "message": "Selected OpenAI model is not available to this credential"})
 	case errors.Is(err, ai.ErrWorkerSettingInvalid):
 		respondAIBadRequest(c, err)
+	case errors.Is(err, ai.ErrProviderTimeoutInvalid):
+		respondAIBadRequest(c, err)
 	case errors.Is(err, ai.ErrTemplateNotFound), errors.Is(err, ai.ErrTemplateVersionNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
-	case errors.Is(err, ai.ErrJobNotFound), errors.Is(err, ai.ErrSKUNotFound):
+	case errors.Is(err, ai.ErrJobNotFound), errors.Is(err, ai.ErrJobItemNotFound), errors.Is(err, ai.ErrSKUNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
+	case errors.Is(err, ai.ErrTextItemRegenerationInvalid):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "text_regeneration_invalid", "message": err.Error()})
+	case errors.Is(err, ai.ErrTextItemRegenerationConflict):
+		c.JSON(http.StatusConflict, gin.H{"code": "lifecycle_conflict", "message": err.Error()})
 	case errors.Is(err, ai.ErrTextResultNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
 	case errors.Is(err, ai.ErrImageResultNotFound), errors.Is(err, ai.ErrImageThreadNotFound):

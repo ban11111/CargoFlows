@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"cargoflows/api/internal/models"
 	"github.com/google/uuid"
@@ -106,7 +108,9 @@ func (e *ImageExecutor) Execute(ctx context.Context, leased LeasedItem) error {
 	if err := e.dispatch(ctx, leased, p, credential); err != nil {
 		return e.fail(ctx, p, models.AIExecutionFailed, "OpenAI dispatch failed before a confirmed call", "")
 	}
-	response, providerErr := e.provider.Generate(ctx, credential.APIKey, ImageRequest{Model: runtimeModel, APIMode: apiMode, Prompt: p.prompt, Inputs: inputs, Mask: mask, Metadata: map[string]string{"job_id": p.job.PublicID, "job_item_id": p.item.PublicID, "execution_id": p.execution.PublicID}})
+	providerCtx, cancelProvider := context.WithTimeout(ctx, time.Duration(configuredProviderTimeout(credential.ImageRequestTimeoutSeconds, DefaultOpenAIImageTimeoutSeconds))*time.Second)
+	response, providerErr := e.provider.Generate(providerCtx, credential.APIKey, ImageRequest{Model: runtimeModel, APIMode: apiMode, Prompt: p.prompt, Inputs: inputs, Mask: mask, Metadata: map[string]string{"job_id": p.job.PublicID, "job_item_id": p.item.PublicID, "execution_id": p.execution.PublicID}})
+	cancelProvider()
 	clearBytes(credential.APIKey)
 	if providerErr != nil {
 		status, safe := imageProviderFailureState(providerErr)
@@ -389,8 +393,14 @@ func (e *ImageExecutor) fail(ctx context.Context, p preparedImageExecution, stat
 
 func imageProviderFailureState(err error) (models.AIExecutionStatus, string) {
 	switch {
-	case errors.Is(err, ErrImageProviderAmbiguousTimeout), errors.Is(err, ErrImageProviderAmbiguousTransport):
-		return models.AIExecutionNeedsAttention, "OpenAI call outcome is ambiguous"
+	case errors.Is(err, ErrImageProviderAmbiguousTimeout):
+		return models.AIExecutionNeedsAttention, "OpenAI image request timed out after it was sent; no response was received"
+	case errors.Is(err, ErrImageProviderAmbiguousTransport):
+		var providerErr *ImageProviderError
+		if errors.As(err, &providerErr) && providerErr.StatusCode >= 500 {
+			return models.AIExecutionNeedsAttention, fmt.Sprintf("OpenAI image API returned HTTP %d before a result was confirmed", providerErr.StatusCode)
+		}
+		return models.AIExecutionNeedsAttention, "Connection to OpenAI was interrupted after the image request was sent; no response was received"
 	case errors.Is(err, ErrImageProviderAuthentication):
 		return models.AIExecutionFailed, "OpenAI authentication failed"
 	case errors.Is(err, ErrImageProviderRateLimit):

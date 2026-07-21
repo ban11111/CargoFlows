@@ -14,6 +14,7 @@ import {
   MonitorCog,
   RotateCw,
   ShieldAlert,
+  Timer,
   TriangleAlert,
 } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
@@ -48,6 +49,8 @@ const emptySetting: OpenAISetting = {
   last_used_at: null,
   max_workers_per_job: 3,
   max_workers_global: 9,
+  text_request_timeout_seconds: 300,
+  image_request_timeout_seconds: 600,
 };
 
 async function getSetting() {
@@ -70,6 +73,8 @@ function normalizeSetting(value: OpenAISetting): OpenAISetting {
     image_generation_model: value.image_generation_model ?? (legacyDirect ? legacyImage : emptySetting.image_generation_model),
     max_workers_per_job: Number.isInteger(value.max_workers_per_job) ? value.max_workers_per_job : emptySetting.max_workers_per_job,
     max_workers_global: Number.isInteger(value.max_workers_global) ? value.max_workers_global : emptySetting.max_workers_global,
+    text_request_timeout_seconds: Number.isInteger(value.text_request_timeout_seconds) ? value.text_request_timeout_seconds : emptySetting.text_request_timeout_seconds,
+    image_request_timeout_seconds: Number.isInteger(value.image_request_timeout_seconds) ? value.image_request_timeout_seconds : emptySetting.image_request_timeout_seconds,
   };
 }
 
@@ -218,6 +223,8 @@ export default function OpenAISettingsPage() {
               <Detail label={language === "zh" ? "图片调用方式" : "Image API mode"} value={setting.image_api_mode === "images" ? "Images API" : "Responses"} />
               <Detail label={language === "zh" ? "Responses 编排模型" : "Responses orchestration model"} value={setting.image_responses_model} mono />
               <Detail label={language === "zh" ? "Images API 图像模型" : "Images API image model"} value={setting.image_generation_model} mono />
+              <Detail label={language === "zh" ? "文字请求超时" : "Text request timeout"} value={`${setting.text_request_timeout_seconds} s`} mono />
+              <Detail label={language === "zh" ? "图片请求超时" : "Image request timeout"} value={`${setting.image_request_timeout_seconds} s`} mono />
               <Detail label={t("openAIVerifiedAt")} value={formatDate(setting.verified_at, language, t("openAINever"))} />
               <Detail label={t("openAIImageVerifiedAt")} value={formatDate(setting.image_capability_verified_at, language, t("openAINever"))} />
               <Detail label={t("openAILastUsedAt")} value={formatDate(setting.last_used_at, language, t("openAINever"))} />
@@ -248,6 +255,7 @@ export default function OpenAISettingsPage() {
           </Card>
 
           <WorkerSettingsCard setting={setting} />
+          {verified ? <TimeoutSettingsCard setting={setting} /> : null}
           {verified ? <ModelSettingsCard key={setting.key_fingerprint} setting={setting} /> : null}
           {configured && setting.status !== "disabled" ? <section className="rounded-lg border border-danger/30 bg-card p-5" aria-labelledby="openai-danger-title"><div className="flex items-start gap-3"><ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-danger" /><div className="min-w-0 flex-1"><h2 className="font-semibold text-danger" id="openai-danger-title">{t("openAIDangerZone")}</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">{t("openAIDangerDescription")}</p><Button className="mt-4 min-h-11" disabled={disableMutation.isPending || saveMutation.isPending} onClick={disable} variant="danger">{disableMutation.isPending ? <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <ShieldAlert className="h-4 w-4" />}{disableMutation.isPending ? t("openAIDisabling") : t("openAIDisable")}</Button>{disableMutation.isError ? <p className="mt-3 text-sm text-danger" role="alert">{t("openAIDisableError")}</p> : null}</div></div></section> : null}
         </div>
@@ -339,6 +347,74 @@ function parseWorkerLimit(value: string) {
   if (!/^\d+$/.test(value)) return null;
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= 1 && parsed <= 32 ? parsed : null;
+}
+
+function TimeoutSettingsCard({ setting }: { setting: OpenAISetting }) {
+  const { language } = useLanguage();
+  const zh = language === "zh";
+  const queryClient = useQueryClient();
+  const [textTimeout, setTextTimeout] = useState(String(setting.text_request_timeout_seconds));
+  const [imageTimeout, setImageTimeout] = useState(String(setting.image_request_timeout_seconds));
+  const [textError, setTextError] = useState(false);
+  const [imageError, setImageError] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const changed = textTimeout !== String(setting.text_request_timeout_seconds) || imageTimeout !== String(setting.image_request_timeout_seconds);
+
+  function validate() {
+    const text = parseTimeoutSeconds(textTimeout);
+    const image = parseTimeoutSeconds(imageTimeout);
+    setTextError(text === null);
+    setImageError(image === null);
+    return text !== null && image !== null ? { text_request_timeout_seconds: text, image_request_timeout_seconds: image } : null;
+  }
+
+  const saveTimeouts = useMutation({
+    mutationFn: (body: { text_request_timeout_seconds: number; image_request_timeout_seconds: number }) => safeOpenAIRequest<OpenAISetting>("/settings/openai/timeouts", { method: "PATCH", body: JSON.stringify(body) }),
+    onSuccess(next) {
+      queryClient.setQueryData(["openai-setting"], normalizeSetting(next));
+      setSaved(true);
+    },
+  });
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaved(false);
+    saveTimeouts.reset();
+    const value = validate();
+    if (value) saveTimeouts.mutate(value);
+  }
+
+  const rangeHelp = zh ? "请输入 30–1800 秒。过短容易把仍在生成的请求标记为结果不明确。" : "Enter 30–1800 seconds. Very short values can mark an in-progress generation as ambiguous.";
+  return <Card>
+    <CardHeader><CardTitle className="flex items-center gap-2"><Timer className="h-4 w-4 text-primary" />{zh ? "请求超时" : "Request timeouts"}</CardTitle></CardHeader>
+    <CardContent>
+      <form className="space-y-5" onSubmit={submit}>
+        <p className="text-sm leading-6 text-muted-foreground">{zh ? "分别控制文字和图片调用等待 OpenAI 响应的最长时间；修改后对新开始的调用生效。" : "Set how long text and image calls wait for OpenAI. Changes apply to newly started calls."}</p>
+        <div className="grid gap-5 sm:grid-cols-2">
+          <TimeoutField error={textError} help={rangeHelp} id="openai-text-timeout" label={zh ? "文字请求超时（秒）" : "Text timeout (seconds)"} onBlur={validate} onChange={(value) => { setTextTimeout(value); setTextError(false); setSaved(false); }} value={textTimeout} />
+          <TimeoutField error={imageError} help={rangeHelp} id="openai-image-timeout" label={zh ? "图片请求超时（秒）" : "Image timeout (seconds)"} onBlur={validate} onChange={(value) => { setImageTimeout(value); setImageError(false); setSaved(false); }} value={imageTimeout} />
+        </div>
+        {saveTimeouts.isError ? <p className="rounded-md border border-danger/30 bg-danger/5 p-3 text-sm text-danger" role="alert">{zh ? "超时设置未保存，请检查数值后重试。" : "Timeout settings were not saved. Check the values and retry."}</p> : null}
+        {saved ? <p className="flex items-center gap-2 text-sm text-success" role="status"><CheckCircle2 className="h-4 w-4" />{zh ? "超时设置已保存" : "Timeout settings saved"}</p> : null}
+        <div className="flex justify-end border-t border-border pt-4"><Button className="min-h-11" disabled={!changed || saveTimeouts.isPending} type="submit">{saveTimeouts.isPending ? <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <Check className="h-4 w-4" />}{saveTimeouts.isPending ? (zh ? "保存中…" : "Saving…") : (zh ? "保存超时设置" : "Save timeouts")}</Button></div>
+      </form>
+    </CardContent>
+  </Card>;
+}
+
+function TimeoutField({ error, help, id, label, onBlur, onChange, value }: { error: boolean; help: string; id: string; label: string; onBlur: () => void; onChange: (value: string) => void; value: string }) {
+  return <div className="space-y-2">
+    <Label htmlFor={id}>{label}</Label>
+    <Input aria-describedby={`${id}-help ${id}-error`} aria-invalid={error} className="h-11 tabular-nums" id={id} inputMode="numeric" max={1800} min={30} onBlur={onBlur} onChange={(event) => onChange(event.target.value)} step={1} type="number" value={value} />
+    <p className="text-sm leading-5 text-muted-foreground" id={`${id}-help`}>{help}</p>
+    {error ? <p className="text-sm text-danger" id={`${id}-error`} role="alert">30–1800</p> : null}
+  </div>;
+}
+
+function parseTimeoutSeconds(value: string) {
+  if (!/^\d+$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 30 && parsed <= 1800 ? parsed : null;
 }
 
 function ModelSettingsCard({ setting }: { setting: OpenAISetting }) {

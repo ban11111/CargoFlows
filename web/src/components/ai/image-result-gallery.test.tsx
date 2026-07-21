@@ -48,4 +48,16 @@ describe("ImageResultGallery", () => {
     expect(await screen.findByText("修改前")).toBeInTheDocument();
     expect(screen.getByText("修改后")).toBeInTheDocument();
   });
+
+  it("shows the provider failure code and request ID for a failed turn", async () => {
+    const failedThread = {
+      ...thread,
+      turns: [{ ...thread.turns[0], status: "needs_attention", safe_error: "OpenAI image API returned HTTP 502 before a result was confirmed", failure_code: "openai_server_error_ambiguous", provider_request_id: "req_failed", results: [] }],
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ data: [failedThread] }), { status: 200 }));
+    render(<ImageResultGallery active={false} jobID="job-1" language="zh" refreshKey="done" />, { wrapper: Providers });
+    expect(await screen.findByText("OpenAI API 返回 HTTP 502，但未能确认生成结果。")).toBeInTheDocument();
+    expect(screen.getByText("Code: openai_server_error_ambiguous")).toBeInTheDocument();
+    expect(screen.getByText("ID: req_failed")).toBeInTheDocument();
+  });
 });

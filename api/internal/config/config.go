@@ -44,8 +44,8 @@ func Load() Config {
 		OpenAITextModel:           getEnv("OPENAI_TEXT_MODEL", "gpt-5.6-terra"),
 		OpenAIImageToolModel:      getEnv("OPENAI_IMAGE_TOOL_MODEL", "gpt-5.6"),
 		OpenAIReasoningEffort:     getEnv("OPENAI_REASONING_EFFORT", "low"),
-		OpenAIRequestTimeout:      getDurationEnv("OPENAI_REQUEST_TIMEOUT", 120*time.Second),
-		OpenAIImageRequestTimeout: getDurationEnv("OPENAI_IMAGE_REQUEST_TIMEOUT", 180*time.Second),
+		OpenAIRequestTimeout:      getDurationEnv("OPENAI_REQUEST_TIMEOUT", 300*time.Second),
+		OpenAIImageRequestTimeout: getDurationEnv("OPENAI_IMAGE_REQUEST_TIMEOUT", 600*time.Second),
 		AIWorkerDryRun:            getEnv("AI_WORKER_DRY_RUN", "false") == "true",
 		AIWorkerPollInterval:      getDurationEnv("AI_WORKER_POLL_INTERVAL", time.Second),
 	}

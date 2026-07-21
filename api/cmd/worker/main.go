@@ -88,7 +88,7 @@ func buildExecutor(cfg config.Config, db *gorm.DB) (ai.ItemExecutor, error) {
 	}
 	settings := ai.NewProviderSettingsService(db, box, nil)
 	provider := ai.NewOpenAIResponsesClient(cfg.OpenAIBaseURL, nil, ai.OpenAIResponsesConfig{
-		Model: cfg.OpenAITextModel, ReasoningEffort: cfg.OpenAIReasoningEffort, RequestTimeout: cfg.OpenAIRequestTimeout,
+		Model: cfg.OpenAITextModel, ReasoningEffort: cfg.OpenAIReasoningEffort, RequestTimeout: maxDuration(cfg.OpenAIRequestTimeout, time.Duration(ai.MaxOpenAIRequestTimeoutSeconds)*time.Second),
 	})
 	storage, err := buildImageStorage(cfg)
 	if err != nil {
@@ -96,11 +96,18 @@ func buildExecutor(cfg config.Config, db *gorm.DB) (ai.ItemExecutor, error) {
 	}
 	text := ai.NewTextExecutor(db, settings, provider, ai.TextExecutorConfig{Model: cfg.OpenAITextModel, ReasoningEffort: cfg.OpenAIReasoningEffort, Storage: storage})
 	imageProvider := &ai.OpenAIImageProvider{
-		Responses: ai.NewOpenAIImageResponsesClient(cfg.OpenAIBaseURL, nil, ai.OpenAIImageResponsesConfig{Model: cfg.OpenAIImageToolModel, RequestTimeout: cfg.OpenAIImageRequestTimeout}),
-		Images:    ai.NewOpenAIImagesClient(cfg.OpenAIBaseURL, nil, ai.OpenAIImagesConfig{Model: ai.DefaultOpenAIImageGenerationModel, RequestTimeout: cfg.OpenAIImageRequestTimeout}),
+		Responses: ai.NewOpenAIImageResponsesClient(cfg.OpenAIBaseURL, nil, ai.OpenAIImageResponsesConfig{Model: cfg.OpenAIImageToolModel, RequestTimeout: maxDuration(cfg.OpenAIImageRequestTimeout, time.Duration(ai.MaxOpenAIRequestTimeoutSeconds)*time.Second)}),
+		Images:    ai.NewOpenAIImagesClient(cfg.OpenAIBaseURL, nil, ai.OpenAIImagesConfig{Model: ai.DefaultOpenAIImageGenerationModel, RequestTimeout: maxDuration(cfg.OpenAIImageRequestTimeout, time.Duration(ai.MaxOpenAIRequestTimeoutSeconds)*time.Second)}),
 	}
 	image := ai.NewImageExecutor(db, settings, imageProvider, storage, cfg.OpenAIImageToolModel)
 	return ai.NewKindRoutingExecutor(false, dryRun, text, image), nil
+}
+
+func maxDuration(a, b time.Duration) time.Duration {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 type runOnceWorker interface {

@@ -204,6 +204,34 @@ describe("OpenAI settings", () => {
     expect(patchBody).toEqual({ max_workers_per_job: 4, max_workers_global: 12 });
   });
 
+  it("shows longer timeout defaults and saves validated text and image timeouts", async () => {
+    let patchBody: unknown;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      if (String(input).includes("/settings/openai/timeouts") && init?.method === "PATCH") {
+        patchBody = JSON.parse(String(init.body));
+        return jsonResponse({ ...active, text_request_timeout_seconds: 420, image_request_timeout_seconds: 900 });
+      }
+      if (String(input).includes("/settings/openai/models")) return jsonResponse({ data: [] });
+      return jsonResponse({ ...active, text_request_timeout_seconds: 300, image_request_timeout_seconds: 600 });
+    });
+    render(<OpenAISettingsPage />, { wrapper: Providers });
+
+    const textTimeout = await screen.findByLabelText("文字请求超时（秒）");
+    const imageTimeout = screen.getByLabelText("图片请求超时（秒）");
+    expect(textTimeout).toHaveValue(300);
+    expect(imageTimeout).toHaveValue(600);
+
+    fireEvent.change(textTimeout, { target: { value: "29" } });
+    fireEvent.blur(textTimeout);
+    expect(await screen.findByText("30–1800")).toBeInTheDocument();
+
+    fireEvent.change(textTimeout, { target: { value: "420" } });
+    fireEvent.change(imageTimeout, { target: { value: "900" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存超时设置" }));
+    expect(await screen.findByText("超时设置已保存")).toBeInTheDocument();
+    expect(patchBody).toEqual({ text_request_timeout_seconds: 420, image_request_timeout_seconds: 900 });
+  });
+
   it("shows validation, mutation failure, success status, and clears a shown secret", async () => {
     let putCount = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {

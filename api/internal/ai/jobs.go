@@ -47,6 +47,9 @@ var (
 	ErrBrandIconNotEligible           = errors.New("brand icons must be active and belong to the SKU brand")
 	ErrExternalReferenceNotEligible   = errors.New("external references must belong to a published same-category AI reference SOP")
 	ErrCompatibleDeviceModelRequired  = errors.New("compatible device model is required for the selected output")
+	ErrJobItemNotFound                = errors.New("AI job item not found")
+	ErrTextItemRegenerationInvalid    = errors.New("only failed text items can be regenerated")
+	ErrTextItemRegenerationConflict   = errors.New("AI text item is not failed")
 )
 
 type CreateJobInput struct {
@@ -363,6 +366,66 @@ type JobListFilters struct {
 type JobService struct{ db *gorm.DB }
 
 func NewJobService(db *gorm.DB) *JobService { return &JobService{db: db} }
+
+// RegenerateTextItem requeues one failed text slot while preserving every
+// previous execution and result as immutable job history.
+func (s *JobService) RegenerateTextItem(ctx context.Context, jobPublicID, itemPublicID string, actorID uint) (JobDocument, error) {
+	var document JobDocument
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx
+		if tx.Dialector.Name() == "mysql" {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		var job models.AIJob
+		if err := query.Where("public_id = ?", jobPublicID).First(&job).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrJobNotFound
+			}
+			return err
+		}
+		var item models.AIJobItem
+		if err := query.Where("public_id = ? AND ai_job_id = ?", itemPublicID, job.ID).First(&item).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrJobItemNotFound
+			}
+			return err
+		}
+		if item.Kind != models.AIContentSlotTitle && item.Kind != models.AIContentSlotSEODescription {
+			return ErrTextItemRegenerationInvalid
+		}
+		if item.Status != models.AIJobItemFailed {
+			return ErrTextItemRegenerationConflict
+		}
+		updated := tx.Model(&models.AIJobItem{}).
+			Where("id = ? AND status = ?", item.ID, models.AIJobItemFailed).
+			Updates(map[string]any{
+				"status": models.AIJobItemQueued, "safe_error": "", "failure_code": "", "internal_error": "",
+				"lease_owner": "", "lease_expires_at": nil, "completed_at": nil,
+			})
+		if updated.Error != nil {
+			return updated.Error
+		}
+		if updated.RowsAffected != 1 {
+			return ErrTextItemRegenerationConflict
+		}
+		now := time.Now().UTC()
+		if err := aggregateJob(tx, job.ID, now); err != nil {
+			return err
+		}
+		metadata, err := json.Marshal(map[string]any{"attempt_count": item.AttemptCount, "requested_attempt_number": item.AttemptCount + 1, "previous_failure_code": item.FailureCode})
+		if err != nil {
+			return err
+		}
+		jobID, itemID := job.ID, item.ID
+		audit := models.AIAuditEvent{PublicID: uuid.NewString(), EventType: "ai_job_item.text_regeneration_requested", EntityType: "ai_job_item", EntityPublicID: item.PublicID, ActorID: &actorID, AIJobID: &jobID, AIJobItemID: &itemID, MetadataJSON: metadata}
+		if err := tx.Create(&audit).Error; err != nil {
+			return fmt.Errorf("audit AI text regeneration: %w", err)
+		}
+		document, err = documentFromPersistedJob(tx, models.AIJob{ID: job.ID})
+		return err
+	})
+	return document, err
+}
 
 func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocument, error) {
 	normalized, requestHash, err := normalizeCreateJobInput(input)
@@ -1522,7 +1585,7 @@ func recoveryActionForFailure(code string) string {
 	switch code {
 	case "openai_authentication_failed", "openai_model_incompatible", "openai_access_denied":
 		return "review_openai_settings"
-	case "openai_rate_limited", "openai_timeout_ambiguous":
+	case "openai_rate_limited", "openai_timeout_ambiguous", "openai_transport_ambiguous", "openai_server_error_ambiguous":
 		return "retry_later"
 	case "openai_moderation_blocked", "openai_refused", "invalid_input":
 		return "adjust_input"

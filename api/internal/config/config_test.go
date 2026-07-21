@@ -37,7 +37,7 @@ func TestLoadUsesAndReadsOpenAITextDefaults(t *testing.T) {
 	t.Setenv("OPENAI_REASONING_EFFORT", "")
 	t.Setenv("OPENAI_REQUEST_TIMEOUT", "")
 	cfg := Load()
-	if cfg.OpenAITextModel != "gpt-5.6-terra" || cfg.OpenAIReasoningEffort != "low" || cfg.OpenAIRequestTimeout != 120*time.Second {
+	if cfg.OpenAITextModel != "gpt-5.6-terra" || cfg.OpenAIReasoningEffort != "low" || cfg.OpenAIRequestTimeout != 300*time.Second {
 		t.Fatalf("unexpected defaults: %#v", cfg)
 	}
 	t.Setenv("OPENAI_TEXT_MODEL", "test-model")
@@ -53,7 +53,7 @@ func TestLoadUsesAndReadsOpenAIImageDefaults(t *testing.T) {
 	t.Setenv("OPENAI_IMAGE_TOOL_MODEL", "")
 	t.Setenv("OPENAI_IMAGE_REQUEST_TIMEOUT", "")
 	cfg := Load()
-	if cfg.OpenAIImageToolModel != "gpt-5.6" || cfg.OpenAIImageRequestTimeout != 180*time.Second {
+	if cfg.OpenAIImageToolModel != "gpt-5.6" || cfg.OpenAIImageRequestTimeout != 600*time.Second {
 		t.Fatalf("unexpected image defaults: %#v", cfg)
 	}
 	t.Setenv("OPENAI_IMAGE_TOOL_MODEL", "test-image-model")

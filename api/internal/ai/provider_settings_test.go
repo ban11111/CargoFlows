@@ -87,12 +87,45 @@ func TestGetReturnsUnconfiguredWithoutCreatingRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if view.Provider != "openai" || view.Status != "unconfigured" || view.KeyFingerprint != "" {
+	if view.Provider != "openai" || view.Status != "unconfigured" || view.KeyFingerprint != "" || view.TextRequestTimeoutSeconds != 300 || view.ImageRequestTimeoutSeconds != 600 {
 		t.Fatalf("unexpected view: %#v", view)
 	}
 	var count int64
 	if err := db.Model(&models.OpenAIProviderSetting{}).Count(&count).Error; err != nil || count != 0 {
 		t.Fatalf("row count = %d, err = %v", count, err)
+	}
+}
+
+func TestUpdateTimeoutsValidatesPersistsAndReachesRuntimeCredential(t *testing.T) {
+	db := providerTestDB(t)
+	service := providerService(t, db, &fakeVerifier{result: ProviderVerification{Authenticated: true}})
+	if _, err := service.Configure(t.Context(), 1, "sk-proj-timeout-settings-WXYZ"); err != nil {
+		t.Fatal(err)
+	}
+	view, err := service.UpdateTimeouts(t.Context(), 9, ProviderTimeoutConfiguration{TextRequestTimeoutSeconds: 420, ImageRequestTimeoutSeconds: 900})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.TextRequestTimeoutSeconds != 420 || view.ImageRequestTimeoutSeconds != 900 {
+		t.Fatalf("view = %#v", view)
+	}
+	credential, err := service.DecryptActiveCredential(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clearByteSlice(credential.APIKey)
+	if credential.TextRequestTimeoutSeconds != 420 || credential.ImageRequestTimeoutSeconds != 900 {
+		t.Fatalf("credential = %#v", credential)
+	}
+	if _, err := service.UpdateTimeouts(t.Context(), 10, ProviderTimeoutConfiguration{TextRequestTimeoutSeconds: 29, ImageRequestTimeoutSeconds: 1801}); !errors.Is(err, ErrProviderTimeoutInvalid) {
+		t.Fatalf("invalid timeout error = %v", err)
+	}
+	var row models.OpenAIProviderSetting
+	if err := db.First(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	if row.TextRequestTimeoutSeconds != 420 || row.ImageRequestTimeoutSeconds != 900 || row.UpdatedByID != 9 {
+		t.Fatalf("invalid update mutated row: %#v", row)
 	}
 }
 

@@ -901,6 +901,21 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '500': { $ref: '#/components/responses/InternalServerError' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /settings/openai/timeouts:
+    patch:
+      operationId: updateOpenAITimeouts
+      description: Updates text and image request timeouts used by workers. Changes apply to newly started OpenAI calls without restarting workers.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/OpenAITimeoutSettingRequest' } } }
+      responses:
+        '200': { description: Updated OpenAI request timeouts, content: { application/json: { schema: { $ref: '#/components/schemas/OpenAISetting' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: The OpenAI provider is not active, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /ai-content-templates:
     get:
       operationId: listAIContentTemplates
@@ -1153,6 +1168,19 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /ai-jobs/{job_id}/items/{item_id}/regenerate-text:
+    parameters: [ { $ref: '#/components/parameters/AIJobID' }, { $ref: '#/components/parameters/AIJobItemID' } ]
+    post:
+      operationId: regenerateAITextItem
+      responses:
+        '202': { description: Failed text slot queued for a new generation attempt while preserving execution history, content: { application/json: { schema: { $ref: '#/components/schemas/AIJob' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /ai-jobs/{job_id}/image-results:
     parameters: [ { $ref: '#/components/parameters/AIJobID' } ]
@@ -1560,7 +1588,7 @@ components:
     OpenAISetting:
       type: object
       additionalProperties: false
-      required: [provider, status, key_fingerprint, text_model, image_model, image_api_mode, image_responses_model, image_generation_model, verified_at, image_capability_verified_at, image_responses_verified_at, image_generation_verified_at, last_used_at, max_workers_per_job, max_workers_global]
+      required: [provider, status, key_fingerprint, text_model, image_model, image_api_mode, image_responses_model, image_generation_model, verified_at, image_capability_verified_at, image_responses_verified_at, image_generation_verified_at, last_used_at, max_workers_per_job, max_workers_global, text_request_timeout_seconds, image_request_timeout_seconds]
       properties:
         provider: { type: string, enum: [openai] }
         status: { type: string, enum: [unconfigured, active, invalid, disabled] }
@@ -1577,6 +1605,8 @@ components:
         last_used_at: { type: string, format: date-time, nullable: true }
         max_workers_per_job: { type: integer, minimum: 1, maximum: 32, description: Maximum concurrently running AIJobItems belonging to one AIJob. }
         max_workers_global: { type: integer, minimum: 1, maximum: 32, description: Maximum concurrently running AIJobItems across all jobs and worker instances. }
+        text_request_timeout_seconds: { type: integer, minimum: 30, maximum: 1800, default: 300, description: Maximum duration of one text Responses API call. }
+        image_request_timeout_seconds: { type: integer, minimum: 30, maximum: 1800, default: 600, description: Maximum duration of one image API call. }
     OpenAISettingRequest:
       type: object
       additionalProperties: false
@@ -1601,6 +1631,13 @@ components:
       properties:
         max_workers_per_job: { type: integer, minimum: 1, maximum: 32 }
         max_workers_global: { type: integer, minimum: 1, maximum: 32 }
+    OpenAITimeoutSettingRequest:
+      type: object
+      additionalProperties: false
+      required: [text_request_timeout_seconds, image_request_timeout_seconds]
+      properties:
+        text_request_timeout_seconds: { type: integer, minimum: 30, maximum: 1800 }
+        image_request_timeout_seconds: { type: integer, minimum: 30, maximum: 1800 }
     OpenAIModelSelectionRequest:
       type: object
       additionalProperties: false

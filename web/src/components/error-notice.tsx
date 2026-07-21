@@ -1,4 +1,4 @@
-import { AlertTriangle, RefreshCw } from "lucide-react";
+import { AlertTriangle, LoaderCircle, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
@@ -7,16 +7,20 @@ export function ErrorNotice({
   message,
   recovery,
   requestId,
+  code,
   actionLabel,
   onAction,
+  actionPending = false,
   className = "",
 }: {
   title: string;
   message: string;
   recovery?: string;
   requestId?: string;
+  code?: string;
   actionLabel?: string;
   onAction?: () => void;
+  actionPending?: boolean;
   className?: string;
 }) {
   return (
@@ -30,11 +34,12 @@ export function ErrorNotice({
         <div className="min-w-0 flex-1">
           <p className="font-semibold text-danger">{title}</p>
           <p className="mt-1 break-words text-sm leading-6 text-foreground">{message}</p>
+          {code ? <p className="mt-2 font-mono text-xs text-muted-foreground">Code: {code}</p> : null}
           {recovery ? <p className="mt-2 text-sm leading-6 text-muted-foreground">{recovery}</p> : null}
           {requestId ? <p className="mt-2 font-mono text-xs text-muted-foreground">ID: {requestId}</p> : null}
           {actionLabel && onAction ? (
-            <Button className="mt-3 min-h-11" onClick={onAction} type="button" variant="secondary">
-              <RefreshCw className="h-4 w-4" />{actionLabel}
+            <Button aria-busy={actionPending} className="mt-3 min-h-11" disabled={actionPending} onClick={onAction} type="button" variant="secondary">
+              {actionPending ? <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <RefreshCw className="h-4 w-4" />}{actionLabel}
             </Button>
           ) : null}
         </div>

@@ -1069,6 +1069,23 @@ export interface paths {
         patch: operations["updateOpenAIWorkers"];
         trace?: never;
     };
+    "/settings/openai/timeouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** @description Updates text and image request timeouts used by workers. Changes apply to newly started OpenAI calls without restarting workers. */
+        patch: operations["updateOpenAITimeouts"];
+        trace?: never;
+    };
     "/ai-content-templates": {
         parameters: {
             query?: never;
@@ -1401,6 +1418,25 @@ export interface paths {
         get: operations["listAITextResults"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-jobs/{job_id}/items/{item_id}/regenerate-text": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+                item_id: components["parameters"]["AIJobItemID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["regenerateAITextItem"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1948,6 +1984,16 @@ export interface components {
             max_workers_per_job: number;
             /** @description Maximum concurrently running AIJobItems across all jobs and worker instances. */
             max_workers_global: number;
+            /**
+             * @description Maximum duration of one text Responses API call.
+             * @default 300
+             */
+            text_request_timeout_seconds: number;
+            /**
+             * @description Maximum duration of one image API call.
+             * @default 600
+             */
+            image_request_timeout_seconds: number;
         };
         OpenAISettingRequest: {
             /** Format: password */
@@ -1964,6 +2010,10 @@ export interface components {
         OpenAIWorkerSettingRequest: {
             max_workers_per_job: number;
             max_workers_global: number;
+        };
+        OpenAITimeoutSettingRequest: {
+            text_request_timeout_seconds: number;
+            image_request_timeout_seconds: number;
         };
         OpenAIModelSelectionRequest: {
             text_model: string;
@@ -6205,6 +6255,44 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    updateOpenAITimeouts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenAITimeoutSettingRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated OpenAI request timeouts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenAISetting"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description The OpenAI provider is not active */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            500: components["responses"]["InternalServerError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
     listAIContentTemplates: {
         parameters: {
             query?: {
@@ -6916,6 +7004,36 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    regenerateAITextItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+                item_id: components["parameters"]["AIJobItemID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Failed text slot queued for a new generation attempt while preserving execution history */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIJob"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalServerError"];
         };
     };

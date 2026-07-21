@@ -20,6 +20,7 @@ const now = new Date();
 const defaultEnd = isoDate(now);
 const defaultStart = isoDate(new Date(now.getTime() - 6 * 86400000));
 const usd = (value?: string) => `$${Number(value ?? 0).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 8 })}`;
+export const unpricedUsageDetail = "仅统计，不参与任务级分摊";
 
 export function costErrorMessage(error: unknown) {
   if (error instanceof ApiError) {
@@ -62,7 +63,7 @@ export default function AICostsPage() {
   return <div className="space-y-6">
     <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end"><div><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">CargoFlows · Dual ledger</p><h1 className="text-3xl font-bold tracking-tight text-navy sm:text-4xl">AI 成本核算</h1><p className="mt-2 text-sm text-muted-foreground">任务级实时估算与 OpenAI 每日聚合实际成本分开记录、自动对账。</p></div>{admin ? <Button className="min-h-11" disabled={sync.isPending} onClick={() => sync.mutate()}>{sync.isPending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}同步实际成本</Button> : null}</div>
     <div className="rounded-xl border border-primary/20 bg-primary/[0.035] p-4 text-sm text-foreground"><strong>账务标签：</strong>“任务估算”来自冻结 token 费率；“实际分摊”来自供应商日成本桶按估算比例分配，并非 OpenAI 逐 Request ID 精确收费。正式 invoice/PDF 仍需从 Billing 控制台下载。</div>
-    <div className="grid gap-3 md:grid-cols-3"><Metric icon={<CircleDollarSign className="h-5 w-5" />} label="任务估算" value={usd(String(estimated))} detail="本地冻结费率" /><Metric icon={<Scale className="h-5 w-5" />} label="OpenAI 实际" value={usd(String(actual))} detail={`差额 ${usd(String(actual - estimated))}`} /><Metric icon={<AlertTriangle className="h-5 w-5" />} label="未定价 usage" value={unpriced.toLocaleString()} detail="存在时停止任务级分摊" warning={unpriced > 0} /></div>
+    <div className="grid gap-3 md:grid-cols-3"><Metric icon={<CircleDollarSign className="h-5 w-5" />} label="任务估算" value={usd(String(estimated))} detail="本地冻结费率" /><Metric icon={<Scale className="h-5 w-5" />} label="OpenAI 实际" value={usd(String(actual))} detail={`差额 ${usd(String(actual - estimated))}`} /><Metric icon={<AlertTriangle className="h-5 w-5" />} label="未定价 usage" value={unpriced.toLocaleString()} detail={unpricedUsageDetail} warning={unpriced > 0} /></div>
     <Card><CardHeader><CardTitle>UTC 日期对账</CardTitle></CardHeader><CardContent>
       <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:max-w-xl"><Field label="开始日期"><Input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} /></Field><Field label="结束日期"><Input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} /></Field></div>
       {error ? <p className="mb-4 rounded-lg border border-danger/30 bg-danger/5 p-3 text-sm text-danger" role="alert">{costErrorMessage(error)}</p> : null}

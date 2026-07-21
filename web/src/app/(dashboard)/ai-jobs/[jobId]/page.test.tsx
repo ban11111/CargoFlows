@@ -50,9 +50,32 @@ describe("AIJobDetailPage", () => {
     render(<AIJobDetailPage />, { wrapper: Providers });
     expect(await screen.findByText("失败原因")).toBeInTheDocument();
     expect(screen.getByText("Selected OpenAI model is incompatible with this image API mode")).toBeInTheDocument();
+    expect(screen.getByText("Code: openai_model_incompatible")).toBeInTheDocument();
     expect(screen.getByText(/检查模型与 API 路径是否兼容/)).toBeInTheDocument();
     expect(screen.getAllByText("gpt-image-2").length).toBeGreaterThan(0);
     expect(screen.getByText("ID: req_incompatible")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重新生成" })).not.toBeInTheDocument();
+  });
+
+  it("offers regeneration for a failed text slot and requeues it", async () => {
+    const failedTitle = { ...job.items[0], public_id: "item-title-failed", slot_key: "title", kind: "title", status: "failed", safe_error: "Text generation temporarily failed", failure: { code: "openai_unavailable", safe_message: "Text generation temporarily failed", recovery_action: "retry_later", model: "gpt-5.6-terra", api_mode: "responses", provider_request_id: "req_text_failed" }, slot_snapshot: { ...job.items[0].slot_snapshot, public_id: "slot-title", slot_key: "title", kind: "title", name: { zh: "商品标题", en: "Product title" } } };
+    const failedJob = { ...job, status: "failed", items: [failedTitle] };
+    const queuedJob = { ...failedJob, status: "queued", completed_at: null, items: [{ ...failedTitle, status: "queued", safe_error: "", failure: null, completed_at: null }] };
+    const requests: Array<{ path: string; method: string }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const path = String(input);
+      const method = init?.method ?? "GET";
+      requests.push({ path, method });
+      if (path.endsWith("/ai-jobs/job-1/items/item-title-failed/regenerate-text") && method === "POST") return new Response(JSON.stringify(queuedJob), { status: 202 });
+      if (path.endsWith("/ai-jobs/job-1/text-results")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      if (path.endsWith("/ai-jobs/job-1")) return new Response(JSON.stringify(failedJob), { status: 200 });
+      return new Response("not found", { status: 404 });
+    });
+    render(<AIJobDetailPage />, { wrapper: Providers });
+
+    fireEvent.click(await screen.findByRole("button", { name: "重新生成" }));
+    await waitFor(() => expect(requests.some((request) => request.path.endsWith("/ai-jobs/job-1/items/item-title-failed/regenerate-text") && request.method === "POST")).toBe(true));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "重新生成" })).not.toBeInTheDocument());
   });
 
   it("edits, approves, previews, and explicitly applies a text candidate", async () => {

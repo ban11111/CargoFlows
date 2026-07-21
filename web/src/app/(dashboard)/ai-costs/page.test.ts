@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ApiError } from "@/lib/api";
 
-import { costErrorMessage } from "./page";
+import { costErrorMessage, unpricedUsageDetail } from "./page";
 
 describe("AI cost errors", () => {
   it("turns structured synchronization failures into actionable Chinese guidance", () => {
@@ -13,5 +13,11 @@ describe("AI cost errors", () => {
 
   it("preserves a safe fallback message for unrelated failures", () => {
     expect(costErrorMessage(new ApiError("safe message", 500, "other"))).toBe("safe message");
+  });
+});
+
+describe("AI cost reconciliation copy", () => {
+  it("documents that unpriced usage is excluded instead of blocking allocation", () => {
+    expect(unpricedUsageDetail).toBe("仅统计，不参与任务级分摊");
   });
 });

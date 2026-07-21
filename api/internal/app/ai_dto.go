@@ -25,6 +25,11 @@ type openAIWorkerSettingRequest struct {
 	MaxWorkersGlobal *int `json:"max_workers_global"`
 }
 
+type openAITimeoutSettingRequest struct {
+	TextRequestTimeoutSeconds  *int `json:"text_request_timeout_seconds"`
+	ImageRequestTimeoutSeconds *int `json:"image_request_timeout_seconds"`
+}
+
 type createAIJobRequest struct {
 	SKUID                     string                           `json:"sku_id"`
 	TemplateVersionPublicID   string                           `json:"template_version_id"`
@@ -44,21 +49,23 @@ type editAITextResultRequest struct {
 }
 
 type openAISettingDTO struct {
-	Provider                  string     `json:"provider"`
-	Status                    string     `json:"status"`
-	KeyFingerprint            string     `json:"key_fingerprint"`
-	TextModel                 string     `json:"text_model"`
-	ImageModel                string     `json:"image_model"`
-	ImageAPIMode              string     `json:"image_api_mode"`
-	ImageResponsesModel       string     `json:"image_responses_model"`
-	ImageGenerationModel      string     `json:"image_generation_model"`
-	VerifiedAt                *time.Time `json:"verified_at"`
-	ImageCapabilityVerifiedAt *time.Time `json:"image_capability_verified_at"`
-	ImageResponsesVerifiedAt  *time.Time `json:"image_responses_verified_at"`
-	ImageGenerationVerifiedAt *time.Time `json:"image_generation_verified_at"`
-	LastUsedAt                *time.Time `json:"last_used_at"`
-	MaxWorkersPerJob          int        `json:"max_workers_per_job"`
-	MaxWorkersGlobal          int        `json:"max_workers_global"`
+	Provider                   string     `json:"provider"`
+	Status                     string     `json:"status"`
+	KeyFingerprint             string     `json:"key_fingerprint"`
+	TextModel                  string     `json:"text_model"`
+	ImageModel                 string     `json:"image_model"`
+	ImageAPIMode               string     `json:"image_api_mode"`
+	ImageResponsesModel        string     `json:"image_responses_model"`
+	ImageGenerationModel       string     `json:"image_generation_model"`
+	VerifiedAt                 *time.Time `json:"verified_at"`
+	ImageCapabilityVerifiedAt  *time.Time `json:"image_capability_verified_at"`
+	ImageResponsesVerifiedAt   *time.Time `json:"image_responses_verified_at"`
+	ImageGenerationVerifiedAt  *time.Time `json:"image_generation_verified_at"`
+	LastUsedAt                 *time.Time `json:"last_used_at"`
+	MaxWorkersPerJob           int        `json:"max_workers_per_job"`
+	MaxWorkersGlobal           int        `json:"max_workers_global"`
+	TextRequestTimeoutSeconds  int        `json:"text_request_timeout_seconds"`
+	ImageRequestTimeoutSeconds int        `json:"image_request_timeout_seconds"`
 }
 
 type aiContentSlotRequest struct {

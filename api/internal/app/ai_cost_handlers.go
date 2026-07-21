@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -205,6 +206,7 @@ func (s *Server) syncAIReconciliation(c *gin.Context) {
 	}
 	count, err := s.ai.Costs.Sync(c.Request.Context(), start, end)
 	if err != nil {
+		log.Printf("AI cost reconciliation sync failed: %v", err)
 		respondAIError(c, err)
 		return
 	}
