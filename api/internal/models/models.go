@@ -131,6 +131,9 @@ type SKU struct {
 	CompatibleDeviceModel string    `gorm:"size:120" json:"compatible_device_model"`
 	Barcode               string    `gorm:"size:120" json:"barcode"`
 	Stock                 int       `gorm:"not null;default:0" json:"stock"`
+	AverageUnitCostSGD    string    `gorm:"type:decimal(20,8);not null;default:0" json:"average_unit_cost_sgd"`
+	InventoryValueSGD     string    `gorm:"type:decimal(20,8);not null;default:0" json:"inventory_value_sgd"`
+	ZeroCostOpening       bool      `gorm:"not null;default:false" json:"zero_cost_opening"`
 	LowStockThreshold     int       `gorm:"not null;default:0" json:"low_stock_threshold"`
 	PlatformTitle         string    `gorm:"size:240" json:"platform_title"`
 	SellingPoints         string    `gorm:"type:text" json:"selling_points"`

@@ -169,10 +169,11 @@ func decodeOpenAITextResponse(response *http.Response, requestID string, prompt 
 		return TextResponse{}, &TextProviderError{Kind: ErrTextProviderInvalidResponse, RequestID: requestID}
 	}
 	var decoded struct {
-		ID     string `json:"id"`
-		Status string `json:"status"`
-		Model  string `json:"model"`
-		Output []struct {
+		ID          string `json:"id"`
+		Status      string `json:"status"`
+		Model       string `json:"model"`
+		ServiceTier string `json:"service_tier"`
+		Output      []struct {
 			Type    string `json:"type"`
 			Content []struct {
 				Type    string `json:"type"`
@@ -188,7 +189,8 @@ func decodeOpenAITextResponse(response *http.Response, requestID string, prompt 
 				ReasoningTokens int64 `json:"reasoning_tokens"`
 			} `json:"output_tokens_details"`
 			InputDetails struct {
-				ImageTokens int64 `json:"image_tokens"`
+				ImageTokens  int64 `json:"image_tokens"`
+				CachedTokens int64 `json:"cached_tokens"`
 			} `json:"input_tokens_details"`
 		} `json:"usage"`
 	}
@@ -214,8 +216,8 @@ func decodeOpenAITextResponse(response *http.Response, requestID string, prompt 
 		return TextResponse{}, &TextProviderError{Kind: ErrTextProviderInvalidResponse, RequestID: requestID}
 	}
 	return TextResponse{
-		ResponseID: decoded.ID, RequestID: requestID, Model: decoded.Model, OutputJSON: append(json.RawMessage(nil), outputJSON...),
-		Usage: TextUsage{InputTextTokens: decoded.Usage.InputTokens - decoded.Usage.InputDetails.ImageTokens, InputImageTokens: decoded.Usage.InputDetails.ImageTokens, OutputTextTokens: decoded.Usage.OutputTokens, TotalTokens: decoded.Usage.TotalTokens, ReasoningTokens: decoded.Usage.OutputDetails.ReasoningTokens},
+		ResponseID: decoded.ID, RequestID: requestID, Model: decoded.Model, ServiceTier: defaultString(decoded.ServiceTier, "default"), OutputJSON: append(json.RawMessage(nil), outputJSON...),
+		Usage: TextUsage{InputTextTokens: decoded.Usage.InputTokens - decoded.Usage.InputDetails.ImageTokens, CachedInputTokens: decoded.Usage.InputDetails.CachedTokens, InputImageTokens: decoded.Usage.InputDetails.ImageTokens, OutputTextTokens: decoded.Usage.OutputTokens, TotalTokens: decoded.Usage.TotalTokens, ReasoningTokens: decoded.Usage.OutputDetails.ReasoningTokens},
 	}, nil
 }
 
@@ -227,11 +229,12 @@ func validTextUsage(usage *struct {
 		ReasoningTokens int64 `json:"reasoning_tokens"`
 	} `json:"output_tokens_details"`
 	InputDetails struct {
-		ImageTokens int64 `json:"image_tokens"`
+		ImageTokens  int64 `json:"image_tokens"`
+		CachedTokens int64 `json:"cached_tokens"`
 	} `json:"input_tokens_details"`
 }) bool {
 	return usage != nil && usage.InputTokens >= 0 && usage.OutputTokens >= 0 && usage.TotalTokens >= 0 &&
-		usage.InputDetails.ImageTokens >= 0 && usage.InputDetails.ImageTokens <= usage.InputTokens &&
+		usage.InputDetails.ImageTokens >= 0 && usage.InputDetails.ImageTokens <= usage.InputTokens && usage.InputDetails.CachedTokens >= 0 && usage.InputDetails.CachedTokens <= usage.InputTokens &&
 		usage.OutputDetails.ReasoningTokens >= 0 && usage.OutputDetails.ReasoningTokens <= usage.OutputTokens &&
 		usage.TotalTokens == usage.InputTokens+usage.OutputTokens
 }

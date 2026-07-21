@@ -23,6 +23,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ErrorNotice } from "@/components/error-notice";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { OpenAICostSettings } from "@/components/openai-cost-settings";
 import { openAIKeySchema } from "@/lib/ai-schemas";
 import { ApiError, apiRequest } from "@/lib/api";
 import { useLanguage, type MessageKey } from "@/lib/i18n";
@@ -196,6 +197,8 @@ export default function OpenAISettingsPage() {
         <h1 className="text-3xl font-bold tracking-tight text-navy sm:text-4xl">{t("openAISettingsTitle")}</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">{t("openAISettingsDescription")}</p>
       </header>
+
+	  <OpenAICostSettings />
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:items-start">
         <Card className="overflow-hidden">

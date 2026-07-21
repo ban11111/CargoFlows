@@ -160,6 +160,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/inventory-transactions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listInventoryTransactions"];
+        put?: never;
+        post: operations["createInventoryTransaction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inventory-transactions/{transaction_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                transaction_id: string;
+            };
+            cookie?: never;
+        };
+        get: operations["getInventoryTransaction"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["updateInventoryTransaction"];
+        trace?: never;
+    };
+    "/inventory-transactions/{transaction_id}/post": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                transaction_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["postInventoryTransaction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inventory-transactions/{transaction_id}/reverse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                transaction_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["reverseInventoryTransaction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/brands": {
         parameters: {
             query?: never;
@@ -1071,6 +1141,150 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/settings/openai/costs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getOpenAICostSetting"];
+        put: operations["putOpenAICostSetting"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/settings/openai/costs/scopes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["listOpenAICostScopes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-cost/rates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAICostRates"];
+        put?: never;
+        post: operations["createAICostRateVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-cost/rates/reprice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["repriceAIUsage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-cost/reconciliation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAIReconciliation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-cost/analytics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAICostAnalytics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-cost/reconciliation/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["syncAIReconciliation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-cost/reconciliation/periods/{month}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["closeAIReconciliationPeriod"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-cost/reconciliation/periods/{month}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["reopenAIReconciliationPeriod"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ai-jobs": {
         parameters: {
             query?: never;
@@ -1825,6 +2039,10 @@ export interface components {
             compatible_device_model: string;
             barcode: string;
             stock: number;
+            average_unit_cost_sgd: string;
+            inventory_value_sgd: string;
+            /** @enum {string} */
+            costing_warning: "" | "zero_cost_opening";
             low_stock_threshold: number;
             platform_title: string;
             selling_points: string;
@@ -1884,6 +2102,86 @@ export interface components {
             operator_name: string;
             /** Format: date-time */
             created_at: string;
+        };
+        InventoryTransactionRequest: {
+            /** @enum {string} */
+            type: "purchase_receipt" | "sale_issue" | "customer_return" | "supplier_return" | "stock_adjustment";
+            /** Format: date */
+            business_date: string;
+            note?: string;
+            lines: components["schemas"]["InventoryTransactionLineRequest"][];
+            charges?: components["schemas"]["InventoryChargeRequest"][];
+        };
+        InventoryTransactionLineRequest: {
+            /** Format: uuid */
+            sku_id: string;
+            quantity: number;
+            /** @default CNY */
+            source_currency: string;
+            /** @default 0 */
+            source_unit_price: string;
+            /** @default 0 */
+            fx_rate_to_sgd: string;
+        };
+        InventoryChargeRequest: {
+            type: string;
+            /** @default CNY */
+            source_currency: string;
+            source_amount: string;
+            /** @default 0 */
+            fx_rate_to_sgd: string;
+        };
+        InventoryTransaction: {
+            /** Format: uuid */
+            public_id: string;
+            type: string;
+            /** @enum {string} */
+            status: "draft" | "posted";
+            /** Format: date-time */
+            business_date: string;
+            note: string;
+            /** Format: date-time */
+            posted_at?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            lines: components["schemas"]["InventoryTransactionLine"][];
+            charges: components["schemas"]["InventoryCharge"][];
+        };
+        InventoryTransactionLine: {
+            /** Format: uuid */
+            public_id: string;
+            quantity_delta: number;
+            source_currency: string;
+            source_unit_price: string;
+            fx_rate_to_sgd: string;
+            /** Format: date-time */
+            fx_rate_date?: string | null;
+            fx_rate_source: string;
+            merchandise_amount_sgd: string;
+            allocated_charges_sgd: string;
+            landed_unit_cost_sgd: string;
+            movement_cost_sgd: string;
+            quantity_before: number;
+            quantity_after: number;
+            average_cost_before_sgd: string;
+            average_cost_after_sgd: string;
+            inventory_value_before_sgd: string;
+            inventory_value_after_sgd: string;
+            sku: components["schemas"]["SKU"];
+        };
+        InventoryCharge: {
+            /** Format: uuid */
+            public_id: string;
+            type: string;
+            source_currency: string;
+            source_amount: string;
+            fx_rate_to_sgd: string;
+            /** Format: date-time */
+            fx_rate_date?: string | null;
+            fx_rate_source: string;
+            amount_sgd: string;
         };
         AIReferenceSOP: {
             /** Format: uuid */
@@ -2071,6 +2369,94 @@ export interface components {
             /** @description Image slots only; must exactly match a trimmed published allowed style. */
             style?: string;
         };
+        OpenAICostSettingRequest: {
+            admin_api_key: string;
+            project_id: string;
+            api_key_id: string;
+        };
+        OpenAICostSetting: {
+            /** @enum {string} */
+            status: "unconfigured" | "active" | "invalid" | "disabled";
+            admin_key_fingerprint: string;
+            project_id: string;
+            api_key_id: string;
+            /** Format: date-time */
+            last_synced_at: string | null;
+        };
+        OpenAICostScope: {
+            id: string;
+            name: string;
+            redacted_value?: string;
+        };
+        OpenAICostScopes: {
+            projects: components["schemas"]["OpenAICostScope"][];
+            api_keys: components["schemas"]["OpenAICostScope"][];
+        };
+        AIRateVersionRequest: {
+            /** Format: date-time */
+            effective_at: string;
+            rates: {
+                model: string;
+                /** @enum {string} */
+                api_mode: "responses" | "images";
+                service_tier: string;
+                /** @enum {string} */
+                metric: "input_text" | "cached_input" | "input_image" | "output_text" | "output_image";
+                unit_rate_usd: string;
+            }[];
+        };
+        AIRateCard: {
+            /** Format: uuid */
+            public_id: string;
+            version: number;
+            model: string;
+            /** @enum {string} */
+            api_mode: "responses" | "images";
+            service_tier: string;
+            metric: string;
+            unit_size: number;
+            unit_rate_usd: string;
+            /** Format: date-time */
+            effective_at: string;
+        };
+        AICostDateRange: {
+            /** Format: date */
+            start_date: string;
+            /** Format: date */
+            end_date: string;
+        };
+        OpenAICostBucket: {
+            /** Format: uuid */
+            public_id: string;
+            /** Format: date-time */
+            bucket_date: string;
+            project_id: string;
+            api_key_id: string;
+            line_item: string;
+            actual_amount_usd: string;
+            /** @enum {string} */
+            status: "open" | "reconciled" | "needs_attention";
+            /** Format: date-time */
+            synced_at: string;
+        };
+        AICostDaySummary: {
+            /** Format: date */
+            date: string;
+            estimated_amount_usd: string;
+            actual_amount_usd: string;
+            difference_amount_usd: string;
+            difference_rate: string | null;
+            unpriced_usage_count: number;
+            /** @enum {string} */
+            status: "pending" | "reconciled" | "needs_attention";
+            buckets: components["schemas"]["OpenAICostBucket"][];
+        };
+        AICostAnalyticsRow: {
+            dimension_value: string;
+            total_tokens: number;
+            estimated_amount_usd: string;
+            unpriced_count: number;
+        };
         AIJob: {
             /** Format: uuid */
             public_id: string;
@@ -2099,6 +2485,11 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
             items: components["schemas"]["AIJobItem"][];
+            total_tokens: number;
+            estimated_amount_usd: string;
+            reconciled_amount_usd: string;
+            /** @enum {string} */
+            reconciliation_status: "unpriced" | "pending" | "reconciled_allocation" | "needs_attention";
         };
         AIJobItem: {
             /** Format: uuid */
@@ -2151,6 +2542,17 @@ export interface components {
             /** @enum {string} */
             api_mode: "responses" | "images";
             provider_request_id: string;
+            input_text_tokens: number;
+            cached_input_tokens: number;
+            input_image_tokens: number;
+            output_text_tokens: number;
+            output_image_tokens: number;
+            reasoning_tokens: number;
+            total_tokens: number;
+            service_tier: string;
+            /** @enum {string} */
+            pricing_status: "priced" | "partial" | "unpriced" | "not_applicable";
+            estimated_amount_usd: string;
             failure_code: string;
             safe_error: string;
             /** Format: date-time */
@@ -3556,6 +3958,157 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalServerError"];
+        };
+    };
+    listInventoryTransactions: {
+        parameters: {
+            query?: {
+                type?: "purchase_receipt" | "sale_issue" | "customer_return" | "supplier_return" | "stock_adjustment";
+                status?: "draft" | "posted";
+                sku_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Inventory transactions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["InventoryTransaction"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createInventoryTransaction: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Actor-scoped create key. Reusing it with the same normalized request returns the original job; different input returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InventoryTransactionRequest"];
+            };
+        };
+        responses: {
+            /** @description Draft created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryTransaction"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+        };
+    };
+    getInventoryTransaction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                transaction_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Inventory transaction */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryTransaction"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateInventoryTransaction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                transaction_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InventoryTransactionRequest"];
+            };
+        };
+        responses: {
+            /** @description Draft updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryTransaction"];
+                };
+            };
+        };
+    };
+    postInventoryTransaction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                transaction_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Posted transaction */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryTransaction"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+        };
+    };
+    reverseInventoryTransaction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                transaction_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Posted reversal */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryTransaction"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
         };
     };
     listBrands: {
@@ -5554,6 +6107,267 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             500: components["responses"]["InternalServerError"];
+        };
+    };
+    getOpenAICostSetting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Masked organization-cost credential binding */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenAICostSetting"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    putOpenAICostSetting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenAICostSettingRequest"];
+            };
+        };
+        responses: {
+            /** @description Verified Admin key and explicit Project/API Key binding */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenAICostSetting"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listOpenAICostScopes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    admin_api_key: string;
+                    project_id?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Projects and API keys visible to the supplied Admin key */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenAICostScopes"];
+                };
+            };
+        };
+    };
+    listAICostRates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Immutable AI rate versions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AIRateCard"][];
+                    };
+                };
+            };
+        };
+    };
+    createAICostRateVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AIRateVersionRequest"];
+            };
+        };
+        responses: {
+            /** @description New immutable rate version */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    repriceAIUsage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AICostDateRange"];
+            };
+        };
+        responses: {
+            /** @description Usage ledgers repriced with frozen charge details */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    listAIReconciliation: {
+        parameters: {
+            query: {
+                start_date: string;
+                end_date: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description UTC daily estimates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AICostDaySummary"][];
+                    };
+                };
+            };
+        };
+    };
+    listAICostAnalytics: {
+        parameters: {
+            query: {
+                start_date: string;
+                end_date: string;
+                group_by?: "date" | "sku" | "user" | "model" | "template" | "platform";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Local estimated cost analytics by the selected business dimension */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        group_by: string;
+                        data: components["schemas"]["AICostAnalyticsRow"][];
+                    };
+                };
+            };
+        };
+    };
+    syncAIReconciliation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AICostDateRange"];
+            };
+        };
+        responses: {
+            /** @description Costs synchronized and allocation snapshots reconciled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    closeAIReconciliationPeriod: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                month: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    invoice_reference?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Month closed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    reopenAIReconciliationPeriod: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                month: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Month explicitly reopened */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     listAIJobs: {

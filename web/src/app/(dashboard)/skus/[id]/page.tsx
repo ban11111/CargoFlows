@@ -13,6 +13,9 @@ import { apiRequest } from "@/lib/api";
 import { categoryLabel } from "@/lib/category-label";
 import { useLanguage } from "@/lib/i18n";
 import { formatNumber } from "@/lib/utils";
+import type { components } from "@/lib/openapi-types";
+
+type InventoryTransaction = components["schemas"]["InventoryTransaction"];
 
 interface SKUDetail {
   public_id: string;
@@ -22,6 +25,9 @@ interface SKUDetail {
   compatible_device_model: string;
   barcode: string;
   stock: number;
+	average_unit_cost_sgd: string;
+	inventory_value_sgd: string;
+	costing_warning: string;
   low_stock_threshold: number;
   platform_title: string;
   selling_points: string;
@@ -49,6 +55,7 @@ export default function SkuDetailPage() {
     queryKey: ["skus", params.id],
     queryFn: () => apiRequest<SKUDetail>(`/skus/${params.id}`),
   });
+	const costHistory = useQuery({ queryKey: ["inventory-transactions", params.id], queryFn: () => apiRequest<{ data: InventoryTransaction[] }>(`/inventory-transactions?sku_id=${params.id}`) });
   const saveTags = useMutation({
     mutationFn: (tags: string[]) => {
       const sku = skuQuery.data;
@@ -128,6 +135,8 @@ export default function SkuDetailPage() {
             <Field label={language === "zh" ? "兼容设备型号" : "Compatible device model"} value={sku.compatible_device_model || "—"} />
             <Field label={t("currentStock")} value={formatNumber(sku.stock)} />
             <Field label={t("threshold")} value={formatNumber(sku.low_stock_threshold)} />
+			<Field label={language === "zh" ? "平均单位成本" : "Average unit cost"} value={`S$${Number(sku.average_unit_cost_sgd ?? 0).toFixed(8)}`} />
+			<Field label={language === "zh" ? "库存金额" : "Inventory value"} value={`S$${Number(sku.inventory_value_sgd ?? 0).toFixed(8)}`} />
           </dl>
         </section>
 
@@ -158,6 +167,8 @@ export default function SkuDetailPage() {
           </Button>
         </section>
       </div>
+
+	  <section className="rounded-xl border border-border bg-card p-5 shadow-[var(--shadow-sm)]"><div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-semibold">{language === "zh" ? "成本来源与历史" : "Cost sources and history"}</h2>{sku.costing_warning ? <Badge variant="warning">{language === "zh" ? "零成本开账" : "Zero-cost opening"}</Badge> : <Badge variant="success">{language === "zh" ? "已计价" : "Priced"}</Badge>}</div><div className="mt-4 space-y-2">{(costHistory.data?.data ?? []).map((transaction) => { const line = transaction.lines.find((item) => item.sku.public_id === sku.public_id); return line ? <article className="grid gap-2 rounded-lg border border-border p-3 text-sm sm:grid-cols-[130px_1fr_160px]" key={transaction.public_id}><div><Badge variant={transaction.status === "posted" ? "success" : "warning"}>{transaction.status}</Badge><p className="mt-1 font-mono text-xs text-muted-foreground">{transaction.business_date.slice(0, 10)}</p></div><div><p className="font-medium">{transaction.type} · {line.quantity_delta > 0 ? "+" : ""}{line.quantity_delta}</p><p className="mt-1 text-xs text-muted-foreground">{transaction.note || transaction.public_id}</p></div><div className="tabular-nums sm:text-right"><p>{language === "zh" ? "移动成本" : "Movement cost"} S${Number(line.movement_cost_sgd).toFixed(8)}</p><p className="text-xs text-muted-foreground">{language === "zh" ? "过账后均价" : "Avg after"} S${Number(line.average_cost_after_sgd).toFixed(8)}</p></div></article> : null; })}{costHistory.isSuccess && (costHistory.data?.data ?? []).length === 0 ? <p className="py-6 text-center text-sm text-muted-foreground">{language === "zh" ? "暂无库存交易" : "No inventory transactions"}</p> : null}</div></section>
     </div>
   );
 }

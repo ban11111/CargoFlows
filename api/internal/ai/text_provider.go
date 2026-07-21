@@ -26,19 +26,21 @@ type TextRequest struct {
 }
 
 type TextUsage struct {
-	InputTextTokens  int64
-	InputImageTokens int64
-	OutputTextTokens int64
-	TotalTokens      int64
-	ReasoningTokens  int64
+	InputTextTokens   int64
+	CachedInputTokens int64
+	InputImageTokens  int64
+	OutputTextTokens  int64
+	TotalTokens       int64
+	ReasoningTokens   int64
 }
 
 type TextResponse struct {
-	ResponseID string
-	RequestID  string
-	Model      string
-	OutputJSON json.RawMessage
-	Usage      TextUsage
+	ResponseID  string
+	RequestID   string
+	Model       string
+	ServiceTier string
+	OutputJSON  json.RawMessage
+	Usage       TextUsage
 }
 
 type TextProvider interface {

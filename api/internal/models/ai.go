@@ -259,11 +259,15 @@ type AIExecution struct {
 	APIMode                   string               `gorm:"size:32;index;not null;default:responses" json:"api_mode"`
 	RequestConfigJSON         []byte               `gorm:"type:json;not null" json:"request_config"`
 	InputTextTokens           int64                `gorm:"not null;default:0" json:"input_text_tokens"`
+	CachedInputTokens         int64                `gorm:"not null;default:0" json:"cached_input_tokens"`
 	InputImageTokens          int64                `gorm:"not null;default:0" json:"input_image_tokens"`
 	OutputTextTokens          int64                `gorm:"not null;default:0" json:"output_text_tokens"`
 	OutputImageTokens         int64                `gorm:"not null;default:0" json:"output_image_tokens"`
 	ReasoningTokens           int64                `gorm:"not null;default:0" json:"reasoning_tokens"`
 	TotalTokens               int64                `gorm:"not null;default:0" json:"total_tokens"`
+	ServiceTier               string               `gorm:"size:32;not null;default:default" json:"service_tier"`
+	PricingStatus             string               `gorm:"size:16;index;not null;default:unpriced" json:"pricing_status"`
+	EstimatedAmountUSD        string               `gorm:"type:decimal(20,8);not null;default:0" json:"estimated_amount_usd"`
 	ReportedAmount            *float64             `json:"reported_amount"`
 	EstimatedCost             *float64             `json:"estimated_cost"`
 	Currency                  string               `gorm:"size:8" json:"currency"`
@@ -428,20 +432,121 @@ type AIAuditEvent struct {
 }
 
 type AIUsageLedger struct {
-	ID                uint      `gorm:"primaryKey" json:"-"`
-	AIExecutionID     uint      `gorm:"uniqueIndex;not null" json:"-"`
-	Model             string    `gorm:"size:120;index;not null" json:"model"`
-	InputTextTokens   int64     `gorm:"not null;default:0" json:"input_text_tokens"`
-	InputImageTokens  int64     `gorm:"not null;default:0" json:"input_image_tokens"`
-	OutputTextTokens  int64     `gorm:"not null;default:0" json:"output_text_tokens"`
-	OutputImageTokens int64     `gorm:"not null;default:0" json:"output_image_tokens"`
-	ReasoningTokens   int64     `gorm:"not null;default:0" json:"reasoning_tokens"`
-	TotalTokens       int64     `gorm:"not null;default:0" json:"total_tokens"`
-	ReportedAmount    *float64  `json:"reported_amount"`
-	EstimatedAmount   *float64  `json:"estimated_amount"`
-	Currency          string    `gorm:"size:8;not null" json:"currency"`
-	OpenAIRequestID   string    `gorm:"size:255;index" json:"openai_request_id"`
-	CreatedAt         time.Time `gorm:"index" json:"created_at"`
+	ID                 uint            `gorm:"primaryKey" json:"-"`
+	AIExecutionID      uint            `gorm:"uniqueIndex;not null" json:"-"`
+	Model              string          `gorm:"size:120;index;not null" json:"model"`
+	InputTextTokens    int64           `gorm:"not null;default:0" json:"input_text_tokens"`
+	CachedInputTokens  int64           `gorm:"not null;default:0" json:"cached_input_tokens"`
+	InputImageTokens   int64           `gorm:"not null;default:0" json:"input_image_tokens"`
+	OutputTextTokens   int64           `gorm:"not null;default:0" json:"output_text_tokens"`
+	OutputImageTokens  int64           `gorm:"not null;default:0" json:"output_image_tokens"`
+	ReasoningTokens    int64           `gorm:"not null;default:0" json:"reasoning_tokens"`
+	TotalTokens        int64           `gorm:"not null;default:0" json:"total_tokens"`
+	ReportedAmount     *float64        `json:"reported_amount"`
+	EstimatedAmount    *float64        `json:"estimated_amount"`
+	Currency           string          `gorm:"size:8;not null" json:"currency"`
+	OpenAIRequestID    string          `gorm:"size:255;index" json:"openai_request_id"`
+	CreatedAt          time.Time       `gorm:"index" json:"created_at"`
+	PricingStatus      string          `gorm:"size:24;index;not null;default:unpriced" json:"pricing_status"`
+	EstimatedAmountUSD string          `gorm:"type:decimal(20,8);not null;default:0" json:"estimated_amount_usd"`
+	Charges            []AIUsageCharge `gorm:"foreignKey:AIUsageLedgerID" json:"charges,omitempty"`
+}
+
+type AIRateCard struct {
+	ID          uint      `gorm:"primaryKey" json:"-"`
+	PublicID    string    `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
+	Version     int       `gorm:"uniqueIndex:idx_ai_rate_version_key,priority:1;not null" json:"version"`
+	Model       string    `gorm:"size:120;uniqueIndex:idx_ai_rate_version_key,priority:2;not null" json:"model"`
+	APIMode     string    `gorm:"size:32;uniqueIndex:idx_ai_rate_version_key,priority:3;not null" json:"api_mode"`
+	ServiceTier string    `gorm:"size:32;uniqueIndex:idx_ai_rate_version_key,priority:4;not null;default:default" json:"service_tier"`
+	Metric      string    `gorm:"size:40;uniqueIndex:idx_ai_rate_version_key,priority:5;not null" json:"metric"`
+	UnitSize    int64     `gorm:"not null;default:1000000" json:"unit_size"`
+	UnitRateUSD string    `gorm:"type:decimal(20,8);not null" json:"unit_rate_usd"`
+	EffectiveAt time.Time `gorm:"index;not null" json:"effective_at"`
+	CreatedByID uint      `gorm:"index;not null" json:"-"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+func (value *AIRateCard) BeforeCreate(*gorm.DB) error { return ensurePublicID(&value.PublicID) }
+
+type AIUsageCharge struct {
+	ID              uint       `gorm:"primaryKey" json:"-"`
+	AIUsageLedgerID uint       `gorm:"index;uniqueIndex:idx_ai_usage_metric,priority:1;not null" json:"-"`
+	AIRateCardID    uint       `gorm:"index;not null" json:"-"`
+	Metric          string     `gorm:"size:40;uniqueIndex:idx_ai_usage_metric,priority:2;not null" json:"metric"`
+	Quantity        int64      `gorm:"not null" json:"quantity"`
+	UnitSize        int64      `gorm:"not null" json:"unit_size"`
+	UnitRateUSD     string     `gorm:"type:decimal(20,8);not null" json:"unit_rate_usd"`
+	AmountUSD       string     `gorm:"type:decimal(20,8);not null" json:"amount_usd"`
+	RateCard        AIRateCard `gorm:"foreignKey:AIRateCardID" json:"rate_card"`
+	CreatedAt       time.Time  `json:"created_at"`
+}
+
+type OpenAICostSetting struct {
+	ID                   uint       `gorm:"primaryKey" json:"-"`
+	Provider             string     `gorm:"size:32;uniqueIndex;not null;default:openai" json:"provider"`
+	EncryptedAdminAPIKey []byte     `gorm:"type:blob;not null" json:"-"`
+	EncryptionNonce      []byte     `gorm:"type:varbinary(32);not null" json:"-"`
+	EncryptionKeyVersion string     `gorm:"size:16;not null" json:"-"`
+	AdminKeyFingerprint  string     `gorm:"size:16;not null" json:"admin_key_fingerprint"`
+	ProjectID            string     `gorm:"size:120;index;not null" json:"project_id"`
+	APIKeyID             string     `gorm:"size:120;index;not null" json:"api_key_id"`
+	Status               string     `gorm:"size:24;not null;default:active" json:"status"`
+	LastSyncedAt         *time.Time `json:"last_synced_at"`
+	CreatedByID          uint       `gorm:"index;not null" json:"-"`
+	UpdatedByID          uint       `gorm:"index;not null" json:"-"`
+	CreatedAt            time.Time  `json:"created_at"`
+	UpdatedAt            time.Time  `json:"updated_at"`
+}
+
+type OpenAICostBucket struct {
+	ID              uint      `gorm:"primaryKey" json:"-"`
+	PublicID        string    `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
+	BucketDate      time.Time `gorm:"type:date;uniqueIndex:idx_openai_cost_bucket,priority:1;not null" json:"bucket_date"`
+	ProjectID       string    `gorm:"size:120;uniqueIndex:idx_openai_cost_bucket,priority:2;not null" json:"project_id"`
+	APIKeyID        string    `gorm:"size:120;uniqueIndex:idx_openai_cost_bucket,priority:3;not null" json:"api_key_id"`
+	LineItem        string    `gorm:"size:180;uniqueIndex:idx_openai_cost_bucket,priority:4;not null" json:"line_item"`
+	ActualAmountUSD string    `gorm:"type:decimal(20,8);not null" json:"actual_amount_usd"`
+	SourceJSON      []byte    `gorm:"type:json;not null" json:"source"`
+	Status          string    `gorm:"size:32;index;not null;default:open" json:"status"`
+	SyncedAt        time.Time `json:"synced_at"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+func (value *OpenAICostBucket) BeforeCreate(*gorm.DB) error { return ensurePublicID(&value.PublicID) }
+
+type OpenAIUsageBucket struct {
+	ID         uint      `gorm:"primaryKey" json:"-"`
+	BucketDate time.Time `gorm:"type:date;uniqueIndex:idx_openai_usage_bucket,priority:1;not null" json:"bucket_date"`
+	ProjectID  string    `gorm:"size:120;uniqueIndex:idx_openai_usage_bucket,priority:2;not null" json:"project_id"`
+	APIKeyID   string    `gorm:"size:120;uniqueIndex:idx_openai_usage_bucket,priority:3;not null" json:"api_key_id"`
+	UsageType  string    `gorm:"size:32;uniqueIndex:idx_openai_usage_bucket,priority:4;not null" json:"usage_type"`
+	SourceJSON []byte    `gorm:"type:json;not null" json:"source"`
+	SyncedAt   time.Time `json:"synced_at"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+type AIReconciliationAllocation struct {
+	ID                 uint      `gorm:"primaryKey" json:"-"`
+	Version            int       `gorm:"uniqueIndex:idx_ai_recon_allocation,priority:1;not null" json:"version"`
+	OpenAICostBucketID uint      `gorm:"index;uniqueIndex:idx_ai_recon_allocation,priority:2;not null" json:"-"`
+	AIJobID            uint      `gorm:"index;uniqueIndex:idx_ai_recon_allocation,priority:3;not null" json:"-"`
+	EstimatedAmountUSD string    `gorm:"type:decimal(20,8);not null" json:"estimated_amount_usd"`
+	AllocatedAmountUSD string    `gorm:"type:decimal(20,8);not null" json:"allocated_amount_usd"`
+	CreatedAt          time.Time `json:"created_at"`
+}
+
+type AIReconciliationPeriod struct {
+	ID               uint       `gorm:"primaryKey" json:"-"`
+	Month            string     `gorm:"size:7;uniqueIndex;not null" json:"month"`
+	Status           string     `gorm:"size:16;index;not null;default:open" json:"status"`
+	InvoiceReference string     `gorm:"size:180" json:"invoice_reference"`
+	ClosedByID       *uint      `gorm:"index" json:"-"`
+	ClosedAt         *time.Time `json:"closed_at"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 type AITextResultState string

@@ -153,6 +153,50 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
+  /inventory-transactions:
+    get:
+      operationId: listInventoryTransactions
+      parameters:
+        - { in: query, name: type, schema: { type: string, enum: [purchase_receipt, sale_issue, customer_return, supplier_return, stock_adjustment] } }
+        - { in: query, name: status, schema: { type: string, enum: [draft, posted] } }
+        - { in: query, name: sku_id, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Inventory transactions, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/InventoryTransaction' } } } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createInventoryTransaction
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/InventoryTransactionRequest' } } } }
+      responses:
+        '201': { description: Draft created, content: { application/json: { schema: { $ref: '#/components/schemas/InventoryTransaction' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /inventory-transactions/{transaction_id}:
+    parameters: [ { in: path, name: transaction_id, required: true, schema: { type: string, format: uuid } } ]
+    get:
+      operationId: getInventoryTransaction
+      responses:
+        '200': { description: Inventory transaction, content: { application/json: { schema: { $ref: '#/components/schemas/InventoryTransaction' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateInventoryTransaction
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/InventoryTransactionRequest' } } } }
+      responses:
+        '200': { description: Draft updated, content: { application/json: { schema: { $ref: '#/components/schemas/InventoryTransaction' } } } }
+  /inventory-transactions/{transaction_id}/post:
+    parameters: [ { in: path, name: transaction_id, required: true, schema: { type: string, format: uuid } } ]
+    post:
+      operationId: postInventoryTransaction
+      responses:
+        '200': { description: Posted transaction, content: { application/json: { schema: { $ref: '#/components/schemas/InventoryTransaction' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /inventory-transactions/{transaction_id}/reverse:
+    parameters: [ { in: path, name: transaction_id, required: true, schema: { type: string, format: uuid } } ]
+    post:
+      operationId: reverseInventoryTransaction
+      responses:
+        '201': { description: Posted reversal, content: { application/json: { schema: { $ref: '#/components/schemas/InventoryTransaction' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
   /brands:
     get:
       operationId: listBrands
@@ -924,6 +968,76 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '500': { $ref: '#/components/responses/InternalServerError' }
+  /settings/openai/costs:
+    get:
+      operationId: getOpenAICostSetting
+      responses:
+        '200': { description: Masked organization-cost credential binding, content: { application/json: { schema: { $ref: '#/components/schemas/OpenAICostSetting' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      operationId: putOpenAICostSetting
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/OpenAICostSettingRequest' } } } }
+      responses:
+        '200': { description: Verified Admin key and explicit Project/API Key binding, content: { application/json: { schema: { $ref: '#/components/schemas/OpenAICostSetting' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /settings/openai/costs/scopes:
+    post:
+      operationId: listOpenAICostScopes
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [admin_api_key], properties: { admin_api_key: { type: string, writeOnly: true }, project_id: { type: string } } } } } }
+      responses:
+        '200': { description: Projects and API keys visible to the supplied Admin key, content: { application/json: { schema: { $ref: '#/components/schemas/OpenAICostScopes' } } } }
+  /ai-cost/rates:
+    get:
+      operationId: listAICostRates
+      responses:
+        '200': { description: Immutable AI rate versions, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/AIRateCard' } } } } } } }
+    post:
+      operationId: createAICostRateVersion
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AIRateVersionRequest' } } } }
+      responses:
+        '201': { description: New immutable rate version }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /ai-cost/rates/reprice:
+    post:
+      operationId: repriceAIUsage
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AICostDateRange' } } } }
+      responses:
+        '200': { description: Usage ledgers repriced with frozen charge details }
+  /ai-cost/reconciliation:
+    get:
+      operationId: listAIReconciliation
+      parameters:
+        - { in: query, name: start_date, required: true, schema: { type: string, format: date } }
+        - { in: query, name: end_date, required: true, schema: { type: string, format: date } }
+      responses:
+        '200': { description: UTC daily estimates, supplier actuals, differences, and line-item buckets, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/AICostDaySummary' } } } } } } }
+  /ai-cost/analytics:
+    get:
+      operationId: listAICostAnalytics
+      parameters:
+        - { in: query, name: start_date, required: true, schema: { type: string, format: date } }
+        - { in: query, name: end_date, required: true, schema: { type: string, format: date } }
+        - { in: query, name: group_by, schema: { type: string, enum: [date, sku, user, model, template, platform], default: date } }
+      responses:
+        '200': { description: Local estimated cost analytics by the selected business dimension, content: { application/json: { schema: { type: object, required: [group_by, data], properties: { group_by: { type: string }, data: { type: array, items: { $ref: '#/components/schemas/AICostAnalyticsRow' } } } } } } }
+  /ai-cost/reconciliation/sync:
+    post:
+      operationId: syncAIReconciliation
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AICostDateRange' } } } }
+      responses:
+        '200': { description: Costs synchronized and allocation snapshots reconciled }
+  /ai-cost/reconciliation/periods/{month}/close:
+    post:
+      operationId: closeAIReconciliationPeriod
+      parameters: [ { in: path, name: month, required: true, schema: { type: string, pattern: '^\d{4}-\d{2}$' } } ]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { invoice_reference: { type: string } } } } } }
+      responses: { '200': { description: Month closed } }
+  /ai-cost/reconciliation/periods/{month}/reopen:
+    post:
+      operationId: reopenAIReconciliationPeriod
+      parameters: [ { in: path, name: month, required: true, schema: { type: string, pattern: '^\d{4}-\d{2}$' } } ]
+      responses: { '200': { description: Month explicitly reopened } }
   /ai-jobs:
     get:
       operationId: listAIJobs
@@ -1557,7 +1671,7 @@ components:
     SKU:
       type: object
       additionalProperties: false
-      required: [public_id, code, color, size, compatible_device_model, barcode, stock, low_stock_threshold, platform_title, selling_points, status, created_at, updated_at, product, tags]
+      required: [public_id, code, color, size, compatible_device_model, barcode, stock, average_unit_cost_sgd, inventory_value_sgd, costing_warning, low_stock_threshold, platform_title, selling_points, status, created_at, updated_at, product, tags]
       properties:
         public_id: { type: string, format: uuid }
         code: { type: string }
@@ -1566,6 +1680,9 @@ components:
         compatible_device_model: { type: string, description: Canonical compatible device model used by device-dependent AI outputs. }
         barcode: { type: string }
         stock: { type: integer }
+        average_unit_cost_sgd: { type: string, pattern: '^-?[0-9]+\.[0-9]{8}$' }
+        inventory_value_sgd: { type: string, pattern: '^-?[0-9]+\.[0-9]{8}$' }
+        costing_warning: { type: string, enum: ['', zero_cost_opening] }
         low_stock_threshold: { type: integer }
         platform_title: { type: string }
         selling_points: { type: string }
@@ -1628,6 +1745,83 @@ components:
         note: { type: string }
         operator_name: { type: string }
         created_at: { type: string, format: date-time }
+    InventoryTransactionRequest:
+      type: object
+      additionalProperties: false
+      required: [type, business_date, lines]
+      properties:
+        type: { type: string, enum: [purchase_receipt, sale_issue, customer_return, supplier_return, stock_adjustment] }
+        business_date: { type: string, format: date }
+        note: { type: string }
+        lines: { type: array, minItems: 1, items: { $ref: '#/components/schemas/InventoryTransactionLineRequest' } }
+        charges: { type: array, items: { $ref: '#/components/schemas/InventoryChargeRequest' } }
+    InventoryTransactionLineRequest:
+      type: object
+      additionalProperties: false
+      required: [sku_id, quantity]
+      properties:
+        sku_id: { type: string, format: uuid }
+        quantity: { type: integer, not: { const: 0 } }
+        source_currency: { type: string, minLength: 3, maxLength: 3, default: CNY }
+        source_unit_price: { type: string, default: '0' }
+        fx_rate_to_sgd: { type: string, default: '0' }
+    InventoryChargeRequest:
+      type: object
+      additionalProperties: false
+      required: [type, source_amount]
+      properties:
+        type: { type: string }
+        source_currency: { type: string, minLength: 3, maxLength: 3, default: CNY }
+        source_amount: { type: string }
+        fx_rate_to_sgd: { type: string, default: '0' }
+    InventoryTransaction:
+      type: object
+      required: [public_id, type, status, business_date, note, created_at, updated_at, lines, charges]
+      properties:
+        public_id: { type: string, format: uuid }
+        type: { type: string }
+        status: { type: string, enum: [draft, posted] }
+        business_date: { type: string, format: date-time }
+        note: { type: string }
+        posted_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        lines: { type: array, items: { $ref: '#/components/schemas/InventoryTransactionLine' } }
+        charges: { type: array, items: { $ref: '#/components/schemas/InventoryCharge' } }
+    InventoryTransactionLine:
+      type: object
+      required: [public_id, quantity_delta, source_currency, source_unit_price, fx_rate_to_sgd, fx_rate_source, merchandise_amount_sgd, allocated_charges_sgd, landed_unit_cost_sgd, movement_cost_sgd, quantity_before, quantity_after, average_cost_before_sgd, average_cost_after_sgd, inventory_value_before_sgd, inventory_value_after_sgd, sku]
+      properties:
+        public_id: { type: string, format: uuid }
+        quantity_delta: { type: integer }
+        source_currency: { type: string }
+        source_unit_price: { type: string }
+        fx_rate_to_sgd: { type: string }
+        fx_rate_date: { type: string, format: date-time, nullable: true }
+        fx_rate_source: { type: string }
+        merchandise_amount_sgd: { type: string }
+        allocated_charges_sgd: { type: string }
+        landed_unit_cost_sgd: { type: string }
+        movement_cost_sgd: { type: string }
+        quantity_before: { type: integer }
+        quantity_after: { type: integer }
+        average_cost_before_sgd: { type: string }
+        average_cost_after_sgd: { type: string }
+        inventory_value_before_sgd: { type: string }
+        inventory_value_after_sgd: { type: string }
+        sku: { $ref: '#/components/schemas/SKU' }
+    InventoryCharge:
+      type: object
+      required: [public_id, type, source_currency, source_amount, fx_rate_to_sgd, fx_rate_source, amount_sgd]
+      properties:
+        public_id: { type: string, format: uuid }
+        type: { type: string }
+        source_currency: { type: string }
+        source_amount: { type: string }
+        fx_rate_to_sgd: { type: string }
+        fx_rate_date: { type: string, format: date-time, nullable: true }
+        fx_rate_source: { type: string }
+        amount_sgd: { type: string }
     AIReferenceSOP:
       type: object
       additionalProperties: false
@@ -1802,10 +1996,109 @@ components:
         size: { type: string, enum: [1024x1024, 1536x1024, 1024x1536], description: Image slots only. }
         quality: { type: string, enum: [low, medium, high, auto], description: Image slots only. }
         style: { type: string, minLength: 1, maxLength: 80, description: Image slots only; must exactly match a trimmed published allowed style. }
+    OpenAICostSettingRequest:
+      type: object
+      additionalProperties: false
+      required: [admin_api_key, project_id, api_key_id]
+      properties:
+        admin_api_key: { type: string, writeOnly: true }
+        project_id: { type: string }
+        api_key_id: { type: string }
+    OpenAICostSetting:
+      type: object
+      additionalProperties: false
+      required: [status, admin_key_fingerprint, project_id, api_key_id, last_synced_at]
+      properties:
+        status: { type: string, enum: [unconfigured, active, invalid, disabled] }
+        admin_key_fingerprint: { type: string }
+        project_id: { type: string }
+        api_key_id: { type: string }
+        last_synced_at: { type: string, format: date-time, nullable: true }
+    OpenAICostScope:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        redacted_value: { type: string }
+    OpenAICostScopes:
+      type: object
+      required: [projects, api_keys]
+      properties:
+        projects: { type: array, items: { $ref: '#/components/schemas/OpenAICostScope' } }
+        api_keys: { type: array, items: { $ref: '#/components/schemas/OpenAICostScope' } }
+    AIRateVersionRequest:
+      type: object
+      required: [effective_at, rates]
+      properties:
+        effective_at: { type: string, format: date-time }
+        rates:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [model, api_mode, service_tier, metric, unit_rate_usd]
+            properties:
+              model: { type: string }
+              api_mode: { type: string, enum: [responses, images] }
+              service_tier: { type: string }
+              metric: { type: string, enum: [input_text, cached_input, input_image, output_text, output_image] }
+              unit_rate_usd: { type: string }
+    AIRateCard:
+      type: object
+      required: [public_id, version, model, api_mode, service_tier, metric, unit_size, unit_rate_usd, effective_at]
+      properties:
+        public_id: { type: string, format: uuid }
+        version: { type: integer, minimum: 1 }
+        model: { type: string }
+        api_mode: { type: string, enum: [responses, images] }
+        service_tier: { type: string }
+        metric: { type: string }
+        unit_size: { type: integer }
+        unit_rate_usd: { type: string }
+        effective_at: { type: string, format: date-time }
+    AICostDateRange:
+      type: object
+      required: [start_date, end_date]
+      properties:
+        start_date: { type: string, format: date }
+        end_date: { type: string, format: date }
+    OpenAICostBucket:
+      type: object
+      required: [public_id, bucket_date, project_id, api_key_id, line_item, actual_amount_usd, status, synced_at]
+      properties:
+        public_id: { type: string, format: uuid }
+        bucket_date: { type: string, format: date-time }
+        project_id: { type: string }
+        api_key_id: { type: string }
+        line_item: { type: string }
+        actual_amount_usd: { type: string }
+        status: { type: string, enum: [open, reconciled, needs_attention] }
+        synced_at: { type: string, format: date-time }
+    AICostDaySummary:
+      type: object
+      required: [date, estimated_amount_usd, actual_amount_usd, difference_amount_usd, difference_rate, unpriced_usage_count, status, buckets]
+      properties:
+        date: { type: string, format: date }
+        estimated_amount_usd: { type: string }
+        actual_amount_usd: { type: string }
+        difference_amount_usd: { type: string }
+        difference_rate: { type: string, nullable: true }
+        unpriced_usage_count: { type: integer, minimum: 0 }
+        status: { type: string, enum: [pending, reconciled, needs_attention] }
+        buckets: { type: array, items: { $ref: '#/components/schemas/OpenAICostBucket' } }
+    AICostAnalyticsRow:
+      type: object
+      required: [dimension_value, total_tokens, estimated_amount_usd, unpriced_count]
+      properties:
+        dimension_value: { type: string }
+        total_tokens: { type: integer, minimum: 0 }
+        estimated_amount_usd: { type: string }
+        unpriced_count: { type: integer, minimum: 0 }
     AIJob:
       type: object
       additionalProperties: false
-      required: [public_id, sku_id, template_version_id, target_platform, locale, status, snapshot_schema, input_snapshot, created_by, created_by_snapshot, model_snapshot, started_at, completed_at, cancelled_at, created_at, updated_at, items]
+      required: [public_id, sku_id, template_version_id, target_platform, locale, status, snapshot_schema, input_snapshot, created_by, created_by_snapshot, model_snapshot, started_at, completed_at, cancelled_at, created_at, updated_at, items, total_tokens, estimated_amount_usd, reconciled_amount_usd, reconciliation_status]
       properties:
         public_id: { type: string, format: uuid }
         sku_id: { type: string, format: uuid }
@@ -1824,6 +2117,10 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         items: { type: array, items: { $ref: '#/components/schemas/AIJobItem' } }
+        total_tokens: { type: integer, minimum: 0 }
+        estimated_amount_usd: { type: string }
+        reconciled_amount_usd: { type: string }
+        reconciliation_status: { type: string, enum: [unpriced, pending, reconciled_allocation, needs_attention] }
     AIJobItem:
       type: object
       additionalProperties: false
@@ -1863,7 +2160,7 @@ components:
     AIJobExecution:
       type: object
       additionalProperties: false
-      required: [public_id, operation, status, attempt_number, requested_model, actual_model, api_mode, provider_request_id, failure_code, safe_error, started_at, completed_at]
+      required: [public_id, operation, status, attempt_number, requested_model, actual_model, api_mode, provider_request_id, input_text_tokens, cached_input_tokens, input_image_tokens, output_text_tokens, output_image_tokens, reasoning_tokens, total_tokens, service_tier, pricing_status, estimated_amount_usd, failure_code, safe_error, started_at, completed_at]
       properties:
         public_id: { type: string, format: uuid }
         operation: { type: string, enum: [generate, edit, restart, text_generate] }
@@ -1873,6 +2170,16 @@ components:
         actual_model: { type: string }
         api_mode: { type: string, enum: [responses, images] }
         provider_request_id: { type: string }
+        input_text_tokens: { type: integer, minimum: 0 }
+        cached_input_tokens: { type: integer, minimum: 0 }
+        input_image_tokens: { type: integer, minimum: 0 }
+        output_text_tokens: { type: integer, minimum: 0 }
+        output_image_tokens: { type: integer, minimum: 0 }
+        reasoning_tokens: { type: integer, minimum: 0 }
+        total_tokens: { type: integer, minimum: 0 }
+        service_tier: { type: string }
+        pricing_status: { type: string, enum: [priced, partial, unpriced, not_applicable] }
+        estimated_amount_usd: { type: string }
         failure_code: { type: string }
         safe_error: { type: string }
         started_at: { type: string, format: date-time, nullable: true }

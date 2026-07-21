@@ -4,6 +4,7 @@ import {
   Bot,
   Boxes,
   Camera,
+	CircleDollarSign,
   ClipboardCheck,
   FileStack,
   GalleryVerticalEnd,
@@ -17,6 +18,7 @@ import {
   Settings2,
   Ship,
   Users,
+	Warehouse,
   X,
 } from "lucide-react";
 import type { Route } from "next";
@@ -33,6 +35,7 @@ type NavGroup = "navGroupOperations" | "navGroupIntelligence" | "navGroupSystem"
 
 const navItems: Array<{ href: Route; labelKey: MessageKey; icon: typeof Package; group: NavGroup; permission?: "admin" | "super" }> = [
   { href: "/skus", labelKey: "navSku", icon: Package, group: "navGroupOperations" },
+	{ href: "/inventory", labelKey: "navInventory", icon: Warehouse, group: "navGroupOperations" },
 	{ href: "/brands", labelKey: "navBrands", icon: Shapes, group: "navGroupOperations", permission: "admin" },
   { href: "/model-families", labelKey: "navModelFamilies", icon: Boxes, group: "navGroupOperations" },
   { href: "/capture", labelKey: "navCapture", icon: Camera, group: "navGroupOperations" },
@@ -42,6 +45,7 @@ const navItems: Array<{ href: Route; labelKey: MessageKey; icon: typeof Package;
   { href: "/ai-templates", labelKey: "navAIContentTemplates", icon: FileStack, group: "navGroupIntelligence" },
   { href: "/ai-reference-sops", labelKey: "navAIReferenceSOPs", icon: GalleryVerticalEnd, group: "navGroupIntelligence", permission: "admin" },
   { href: "/ai-jobs", labelKey: "navAi", icon: Bot, group: "navGroupIntelligence" },
+	{ href: "/ai-costs", labelKey: "navAICosts", icon: CircleDollarSign, group: "navGroupIntelligence" },
   { href: "/settings/openai", labelKey: "navOpenAISettings", icon: Settings2, group: "navGroupSystem", permission: "super" },
   { href: "/users", labelKey: "navUsers", icon: Users, group: "navGroupSystem", permission: "admin" },
 ];
