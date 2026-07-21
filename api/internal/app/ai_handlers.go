@@ -693,7 +693,18 @@ func templateValidationDTO(issues []ai.ValidationIssue) aiTemplateValidationDTO 
 }
 
 func respondAIError(c *gin.Context, err error) {
+	var costAPIError *ai.CostAPIError
 	switch {
+	case errors.Is(err, ai.ErrCostSettingInvalid):
+		respondAIBadRequest(c, err)
+	case errors.Is(err, ai.ErrCostSettingNotConfigured):
+		c.JSON(http.StatusConflict, gin.H{"code": "openai_cost_not_configured", "message": "Configure an OpenAI Admin API key and Project before synchronizing costs"})
+	case errors.Is(err, ai.ErrCostPeriodClosed):
+		c.JSON(http.StatusConflict, gin.H{"code": "openai_cost_period_closed", "message": err.Error()})
+	case errors.Is(err, ai.ErrCostProviderResponse):
+		c.JSON(http.StatusBadGateway, gin.H{"code": "openai_cost_invalid_response", "message": "OpenAI returned an invalid cost or usage response"})
+	case errors.As(err, &costAPIError):
+		respondOpenAICostAPIError(c, costAPIError)
 	case errors.Is(err, ai.ErrInvalidAPIKey):
 		respondAIBadRequest(c, err)
 	case errors.Is(err, ai.ErrCredentialVerification):
@@ -743,6 +754,30 @@ func respondAIError(c *gin.Context, err error) {
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "unexpected server error"})
 	}
+}
+
+func respondOpenAICostAPIError(c *gin.Context, err *ai.CostAPIError) {
+	status := http.StatusBadGateway
+	code := "openai_cost_unavailable"
+	message := "OpenAI cost and usage APIs are unavailable"
+	switch err.StatusCode {
+	case http.StatusBadRequest:
+		code = "openai_cost_request_rejected"
+		message = "OpenAI rejected the cost or usage query"
+	case http.StatusUnauthorized, http.StatusForbidden:
+		status = http.StatusUnprocessableEntity
+		code = "openai_cost_permission_denied"
+		message = "The OpenAI Admin API key cannot access organization costs for this Project"
+	case http.StatusTooManyRequests:
+		status = http.StatusServiceUnavailable
+		code = "openai_cost_rate_limited"
+		message = "OpenAI cost synchronization is temporarily rate limited"
+	}
+	payload := gin.H{"code": code, "message": message}
+	if err.RequestID != "" {
+		payload["request_id"] = err.RequestID
+	}
+	c.JSON(status, payload)
 }
 
 func respondAIBadRequest(c *gin.Context, err error) {

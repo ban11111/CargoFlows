@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -24,7 +25,8 @@ type CostSettingView struct {
 	Status              string     `json:"status"`
 	AdminKeyFingerprint string     `json:"admin_key_fingerprint"`
 	ProjectID           string     `json:"project_id"`
-	APIKeyID            string     `json:"api_key_id"`
+	APIKeyID            string     `json:"api_key_id,omitempty"`
+	Scope               string     `json:"scope"`
 	LastSyncedAt        *time.Time `json:"last_synced_at"`
 }
 type CostScope struct {
@@ -35,6 +37,33 @@ type CostScope struct {
 type CostScopes struct {
 	Projects []CostScope `json:"projects"`
 	APIKeys  []CostScope `json:"api_keys"`
+}
+
+const (
+	CostScopeProject           = "project"
+	projectScopeLegacyAPIKeyID = "__project__"
+	unattributedCostAPIKeyID   = "unattributed"
+)
+
+var (
+	ErrCostSettingNotConfigured = errors.New("OpenAI cost synchronization is not configured")
+	ErrCostSettingInvalid       = errors.New("admin_api_key and project_id are required")
+	ErrCostPeriodClosed         = errors.New("date range contains a closed reconciliation month; reopen it before syncing")
+	ErrCostProviderResponse     = errors.New("OpenAI cost API returned an invalid response")
+)
+
+// CostAPIError records only safe provider metadata. Provider response bodies
+// are intentionally neither stored nor returned to callers.
+type CostAPIError struct {
+	StatusCode int
+	RequestID  string
+}
+
+func (err *CostAPIError) Error() string {
+	if err.StatusCode == 0 {
+		return "OpenAI cost API is unavailable"
+	}
+	return fmt.Sprintf("OpenAI cost API returned HTTP %d", err.StatusCode)
 }
 
 type CostService struct {
@@ -55,20 +84,28 @@ func (s *CostService) Get(ctx context.Context) (CostSettingView, error) {
 	var row models.OpenAICostSetting
 	err := s.db.WithContext(ctx).Where("provider = ?", "openai").First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return CostSettingView{Status: "unconfigured"}, nil
+		return CostSettingView{Status: "unconfigured", Scope: CostScopeProject}, nil
 	}
 	if err != nil {
 		return CostSettingView{}, err
 	}
-	return CostSettingView{Status: row.Status, AdminKeyFingerprint: row.AdminKeyFingerprint, ProjectID: row.ProjectID, APIKeyID: row.APIKeyID, LastSyncedAt: row.LastSyncedAt}, nil
-}
-func (s *CostService) Configure(ctx context.Context, actorID uint, adminKey, projectID, apiKeyID string) (CostSettingView, error) {
-	adminKey, projectID, apiKeyID = strings.TrimSpace(adminKey), strings.TrimSpace(projectID), strings.TrimSpace(apiKeyID)
-	if len(adminKey) < 20 || projectID == "" || apiKeyID == "" {
-		return CostSettingView{}, errors.New("admin_api_key, project_id, and api_key_id are required")
+	view := CostSettingView{Status: row.Status, AdminKeyFingerprint: row.AdminKeyFingerprint, ProjectID: row.ProjectID, Scope: CostScopeProject, LastSyncedAt: row.LastSyncedAt}
+	if row.APIKeyID != projectScopeLegacyAPIKeyID {
+		view.APIKeyID = row.APIKeyID
 	}
-	if _, err := s.get(ctx, adminKey, "/organization/costs?start_time="+strconv.FormatInt(time.Now().UTC().AddDate(0, 0, -1).Unix(), 10)+"&limit=1"); err != nil {
-		return CostSettingView{}, errors.New("OpenAI Admin API key verification failed")
+	return view, nil
+}
+func (s *CostService) Configure(ctx context.Context, actorID uint, adminKey, projectID, _ string) (CostSettingView, error) {
+	adminKey, projectID = strings.TrimSpace(adminKey), strings.TrimSpace(projectID)
+	if len(adminKey) < 20 || projectID == "" {
+		return CostSettingView{}, ErrCostSettingInvalid
+	}
+	verification := url.Values{}
+	verification.Set("start_time", strconv.FormatInt(time.Now().UTC().AddDate(0, 0, -1).Unix(), 10))
+	verification.Set("limit", "1")
+	verification.Add("project_ids", projectID)
+	if _, err := s.get(ctx, adminKey, queryPath("/organization/costs", verification)); err != nil {
+		return CostSettingView{}, err
 	}
 	sealed, err := s.box.Seal([]byte(adminKey))
 	if err != nil {
@@ -84,7 +121,7 @@ func (s *CostService) Configure(ctx context.Context, actorID uint, adminKey, pro
 		}
 		row.EncryptedAdminAPIKey, row.EncryptionNonce, row.EncryptionKeyVersion = sealed.Ciphertext, sealed.Nonce, sealed.KeyVersion
 		row.AdminKeyFingerprint = fingerprint(adminKey)
-		row.ProjectID, row.APIKeyID, row.Status, row.UpdatedByID = projectID, apiKeyID, "active", actorID
+		row.ProjectID, row.APIKeyID, row.Status, row.UpdatedByID = projectID, projectScopeLegacyAPIKeyID, "active", actorID
 		if row.ID == 0 {
 			return tx.Create(&row).Error
 		}
@@ -103,12 +140,14 @@ func (s *CostService) ListScopes(ctx context.Context, adminKey, projectID string
 	}
 	var projectPage struct{ Data []struct{ ID, Name string } }
 	if json.Unmarshal(projectsBody, &projectPage) != nil {
-		return CostScopes{}, errors.New("invalid OpenAI projects response")
+		return CostScopes{}, ErrCostProviderResponse
 	}
 	result := CostScopes{Projects: make([]CostScope, 0, len(projectPage.Data)), APIKeys: []CostScope{}}
 	for _, p := range projectPage.Data {
 		result.Projects = append(result.Projects, CostScope{ID: p.ID, Name: p.Name})
 	}
+	// Keep API-key discovery available during rolling deployments. New clients
+	// do not require it, and Configure intentionally ignores the submitted ID.
 	if projectID != "" {
 		keysBody, err := s.get(ctx, adminKey, "/organization/projects/"+url.PathEscape(projectID)+"/api_keys?limit=100")
 		if err != nil {
@@ -122,10 +161,10 @@ func (s *CostService) ListScopes(ctx context.Context, adminKey, projectID string
 			}
 		}
 		if err := json.Unmarshal(keysBody, &keyPage); err != nil {
-			return CostScopes{}, err
+			return CostScopes{}, ErrCostProviderResponse
 		}
-		for _, k := range keyPage.Data {
-			result.APIKeys = append(result.APIKeys, CostScope{ID: k.ID, Name: k.Name, RedactedValue: k.RedactedValue})
+		for _, key := range keyPage.Data {
+			result.APIKeys = append(result.APIKeys, CostScope{ID: key.ID, Name: key.Name, RedactedValue: key.RedactedValue})
 		}
 	}
 	return result, nil
@@ -145,9 +184,18 @@ func (s *CostService) Sync(ctx context.Context, start, end time.Time) (int, erro
 		return 0, err
 	}
 	if closed > 0 {
-		return 0, errors.New("date range contains a closed reconciliation month; reopen it before syncing")
+		return 0, ErrCostPeriodClosed
 	}
-	basePath := "/organization/costs?start_time=" + strconv.FormatInt(start.Unix(), 10) + "&end_time=" + strconv.FormatInt(end.Unix(), 10) + "&bucket_width=1d&limit=180&group_by=project_id&group_by=api_key_id&group_by=line_item&project_ids=" + url.QueryEscape(setting.ProjectID) + "&api_key_ids=" + url.QueryEscape(setting.APIKeyID)
+	costParams := url.Values{}
+	costParams.Set("start_time", strconv.FormatInt(start.Unix(), 10))
+	costParams.Set("end_time", strconv.FormatInt(end.Unix(), 10))
+	costParams.Set("bucket_width", "1d")
+	costParams.Set("limit", "180")
+	costParams.Add("group_by", "project_id")
+	costParams.Add("group_by", "api_key_id")
+	costParams.Add("group_by", "line_item")
+	costParams.Add("project_ids", setting.ProjectID)
+	basePath := queryPath("/organization/costs", costParams)
 	path := basePath
 	count := 0
 	for path != "" {
@@ -174,19 +222,19 @@ func (s *CostService) Sync(ctx context.Context, start, end time.Time) (int, erro
 		decoder := json.NewDecoder(strings.NewReader(string(body)))
 		decoder.UseNumber()
 		if err := decoder.Decode(&page); err != nil {
-			return count, err
+			return count, ErrCostProviderResponse
 		}
 		now := time.Now().UTC()
 		for _, bucket := range page.Data {
 			for _, item := range bucket.Results {
-				project, keyID := setting.ProjectID, setting.APIKeyID
+				project, keyID := setting.ProjectID, unattributedCostAPIKeyID
 				if item.ProjectID != nil {
-					project = *item.ProjectID
+					project = strings.TrimSpace(*item.ProjectID)
 				}
-				if item.APIKeyID != nil {
-					keyID = *item.APIKeyID
+				if item.APIKeyID != nil && strings.TrimSpace(*item.APIKeyID) != "" {
+					keyID = strings.TrimSpace(*item.APIKeyID)
 				}
-				if project != setting.ProjectID || keyID != setting.APIKeyID {
+				if project != setting.ProjectID {
 					continue
 				}
 				line := "unclassified"
@@ -195,7 +243,7 @@ func (s *CostService) Sync(ctx context.Context, start, end time.Time) (int, erro
 				}
 				amount, err := money.Parse(item.Amount.Value.String())
 				if err != nil {
-					return count, err
+					return count, ErrCostProviderResponse
 				}
 				raw, _ := json.Marshal(item)
 				row := models.OpenAICostBucket{BucketDate: time.Unix(bucket.StartTime, 0).UTC(), ProjectID: project, APIKeyID: keyID, LineItem: line, ActualAmountUSD: money.Format(amount), SourceJSON: raw, Status: "open", SyncedAt: now}
@@ -211,12 +259,13 @@ func (s *CostService) Sync(ctx context.Context, start, end time.Time) (int, erro
 			path = ""
 		}
 	}
-	now := time.Now().UTC()
-	_ = s.db.Model(&models.OpenAICostSetting{}).Where("id = ?", setting.ID).Update("last_synced_at", now).Error
 	if err := s.syncUsageDiagnostics(ctx, string(key), setting, start, end); err != nil {
 		return count, err
 	}
 	if err := s.reconcile(ctx, start, end); err != nil {
+		return count, err
+	}
+	if err := s.db.WithContext(ctx).Model(&models.OpenAICostSetting{}).Where("id = ?", setting.ID).Update("last_synced_at", time.Now().UTC()).Error; err != nil {
 		return count, err
 	}
 	return count, nil
@@ -224,7 +273,15 @@ func (s *CostService) Sync(ctx context.Context, start, end time.Time) (int, erro
 
 func (s *CostService) syncUsageDiagnostics(ctx context.Context, key string, setting models.OpenAICostSetting, start, end time.Time) error {
 	for _, usageType := range []string{"completions", "images"} {
-		basePath := "/organization/usage/" + usageType + "?start_time=" + strconv.FormatInt(start.Unix(), 10) + "&end_time=" + strconv.FormatInt(end.Unix(), 10) + "&bucket_width=1d&limit=180&group_by=project_id&group_by=api_key_id&project_ids=" + url.QueryEscape(setting.ProjectID) + "&api_key_ids=" + url.QueryEscape(setting.APIKeyID)
+		usageParams := url.Values{}
+		usageParams.Set("start_time", strconv.FormatInt(start.Unix(), 10))
+		usageParams.Set("end_time", strconv.FormatInt(end.Unix(), 10))
+		usageParams.Set("bucket_width", "1d")
+		usageParams.Set("limit", "31")
+		usageParams.Add("group_by", "project_id")
+		usageParams.Add("group_by", "api_key_id")
+		usageParams.Add("project_ids", setting.ProjectID)
+		basePath := queryPath("/organization/usage/"+usageType, usageParams)
 		path := basePath
 		for path != "" {
 			body, err := s.get(ctx, key, path)
@@ -237,7 +294,7 @@ func (s *CostService) syncUsageDiagnostics(ctx context.Context, key string, sett
 				NextPage string            `json:"next_page"`
 			}
 			if err := json.Unmarshal(body, &page); err != nil {
-				return err
+				return ErrCostProviderResponse
 			}
 			now := time.Now().UTC()
 			for _, raw := range page.Data {
@@ -247,7 +304,7 @@ func (s *CostService) syncUsageDiagnostics(ctx context.Context, key string, sett
 				if json.Unmarshal(raw, &header) != nil || header.StartTime == 0 {
 					continue
 				}
-				row := models.OpenAIUsageBucket{BucketDate: time.Unix(header.StartTime, 0).UTC(), ProjectID: setting.ProjectID, APIKeyID: setting.APIKeyID, UsageType: usageType, SourceJSON: raw, SyncedAt: now}
+				row := models.OpenAIUsageBucket{BucketDate: time.Unix(header.StartTime, 0).UTC(), ProjectID: setting.ProjectID, APIKeyID: projectScopeLegacyAPIKeyID, UsageType: usageType, SourceJSON: raw, SyncedAt: now}
 				if err := s.db.WithContext(ctx).Where(models.OpenAIUsageBucket{BucketDate: row.BucketDate, ProjectID: row.ProjectID, APIKeyID: row.APIKeyID, UsageType: usageType}).Assign(map[string]any{"source_json": raw, "synced_at": now}).FirstOrCreate(&row).Error; err != nil {
 					return err
 				}
@@ -444,6 +501,9 @@ func (s *CostService) ClosePeriod(ctx context.Context, month, invoice string, ac
 func (s *CostService) active(ctx context.Context) (models.OpenAICostSetting, []byte, error) {
 	var row models.OpenAICostSetting
 	if err := s.db.WithContext(ctx).Where("provider = ? AND status = ?", "openai", "active").First(&row).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return row, nil, ErrCostSettingNotConfigured
+		}
 		return row, nil, err
 	}
 	plain, err := s.box.Open(secrets.EncryptedValue{Ciphertext: row.EncryptedAdminAPIKey, Nonce: row.EncryptionNonce, KeyVersion: row.EncryptionKeyVersion})
@@ -457,12 +517,23 @@ func (s *CostService) get(ctx context.Context, key, path string) ([]byte, error)
 	request.Header.Set("Authorization", "Bearer "+key)
 	response, err := s.client.Do(request)
 	if err != nil {
-		return nil, err
+		log.Printf("OpenAI cost API request failed before response")
+		return nil, &CostAPIError{}
 	}
 	defer response.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(response.Body, 4<<20))
+	body, readErr := io.ReadAll(io.LimitReader(response.Body, 4<<20))
+	if readErr != nil {
+		log.Printf("OpenAI cost API response could not be read: status=%d request_id=%q", response.StatusCode, strings.TrimSpace(response.Header.Get("x-request-id")))
+		return nil, &CostAPIError{}
+	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("OpenAI costs API returned %s", response.Status)
+		requestID := strings.TrimSpace(response.Header.Get("x-request-id"))
+		log.Printf("OpenAI cost API request failed: status=%d request_id=%q", response.StatusCode, requestID)
+		return nil, &CostAPIError{StatusCode: response.StatusCode, RequestID: requestID}
 	}
 	return body, nil
+}
+
+func queryPath(endpoint string, values url.Values) string {
+	return endpoint + "?" + values.Encode()
 }

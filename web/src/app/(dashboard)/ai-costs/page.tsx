@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { apiRequest } from "@/lib/api";
+import { ApiError, apiRequest } from "@/lib/api";
 import { isAdministrator, useCurrentUser } from "@/lib/auth";
 
 type Rate = { id: number; version: number; model: string; api_mode: string; service_tier: string; metric: string; unit_size: number; unit_rate_usd: string; effective_at: string };
@@ -20,6 +20,22 @@ const now = new Date();
 const defaultEnd = isoDate(now);
 const defaultStart = isoDate(new Date(now.getTime() - 6 * 86400000));
 const usd = (value?: string) => `$${Number(value ?? 0).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 8 })}`;
+
+export function costErrorMessage(error: unknown) {
+  if (error instanceof ApiError) {
+    const messages: Record<string, string> = {
+      openai_cost_not_configured: "请先到 OpenAI 设置配置 Admin API Key 和 CargoFlows 独占 Project。",
+      openai_cost_permission_denied: "Admin API Key 没有该 Project 的组织成本读取权限，请重新验证凭据。",
+      openai_cost_request_rejected: "OpenAI 拒绝了成本查询，请检查日期范围后重试。",
+      openai_cost_rate_limited: "OpenAI 成本查询暂时受到速率限制，请稍后重试。",
+      openai_cost_invalid_response: "OpenAI 返回了无法识别的成本数据，请稍后重试。",
+      openai_cost_unavailable: "OpenAI 成本与用量接口暂时不可用，请稍后重试。",
+      openai_cost_period_closed: "所选日期包含已关闭账期，请先显式重新开启该月份。",
+    };
+    return messages[error.code] ?? error.message;
+  }
+  return error instanceof Error ? error.message : "无法载入 AI 成本数据";
+}
 
 export default function AICostsPage() {
   const client = useQueryClient();
@@ -49,7 +65,7 @@ export default function AICostsPage() {
     <div className="grid gap-3 md:grid-cols-3"><Metric icon={<CircleDollarSign className="h-5 w-5" />} label="任务估算" value={usd(String(estimated))} detail="本地冻结费率" /><Metric icon={<Scale className="h-5 w-5" />} label="OpenAI 实际" value={usd(String(actual))} detail={`差额 ${usd(String(actual - estimated))}`} /><Metric icon={<AlertTriangle className="h-5 w-5" />} label="未定价 usage" value={unpriced.toLocaleString()} detail="存在时停止任务级分摊" warning={unpriced > 0} /></div>
     <Card><CardHeader><CardTitle>UTC 日期对账</CardTitle></CardHeader><CardContent>
       <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:max-w-xl"><Field label="开始日期"><Input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} /></Field><Field label="结束日期"><Input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} /></Field></div>
-      {error ? <p className="mb-4 rounded-lg border border-danger/30 bg-danger/5 p-3 text-sm text-danger" role="alert">{error.message}</p> : null}
+      {error ? <p className="mb-4 rounded-lg border border-danger/30 bg-danger/5 p-3 text-sm text-danger" role="alert">{costErrorMessage(error)}</p> : null}
       <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b text-xs uppercase tracking-wide text-muted-foreground"><tr><th className="px-3 py-3">UTC 日期</th><th className="px-3 py-3">任务估算</th><th className="px-3 py-3">OpenAI 实际</th><th className="px-3 py-3">差额 / 差异率</th><th className="px-3 py-3">Line item</th><th className="px-3 py-3">状态</th></tr></thead><tbody>{days.map((day) => <tr className="border-b border-border/70 align-top" key={day.date}><td className="px-3 py-4 font-mono">{day.date}</td><td className="px-3 py-4 tabular-nums">{usd(day.estimated_amount_usd)}</td><td className="px-3 py-4 tabular-nums">{usd(day.actual_amount_usd)}</td><td className="px-3 py-4 tabular-nums">{usd(day.difference_amount_usd)}<span className="block text-xs text-muted-foreground">{day.difference_rate == null ? "—" : `${(Number(day.difference_rate) * 100).toFixed(2)}%`}</span></td><td className="px-3 py-4"><div className="space-y-1">{day.buckets.map((bucket) => <p key={bucket.public_id}><span className="font-medium">{bucket.line_item}</span> <span className="tabular-nums text-muted-foreground">{usd(bucket.actual_amount_usd)}</span></p>)}</div></td><td className="px-3 py-4"><Badge variant={day.status === "reconciled" ? "success" : day.status === "needs_attention" ? "warning" : "neutral"}>{day.status}</Badge></td></tr>)}</tbody></table>{summary.isLoading ? <div className="h-28 animate-pulse rounded-lg bg-muted" /> : null}{summary.isSuccess && days.length === 0 ? <p className="py-10 text-center text-sm text-muted-foreground">该日期范围尚无供应商成本桶。</p> : null}</div>
     </CardContent></Card>
     <Card><CardHeader><CardTitle>不可变费率版本</CardTitle></CardHeader><CardContent className="space-y-5">

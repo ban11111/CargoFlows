@@ -1032,15 +1032,21 @@ paths:
       operationId: putOpenAICostSetting
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/OpenAICostSettingRequest' } } } }
       responses:
-        '200': { description: Verified Admin key and explicit Project/API Key binding, content: { application/json: { schema: { $ref: '#/components/schemas/OpenAICostSetting' } } } }
+        '200': { description: Verified Admin key and project-wide cost binding, content: { application/json: { schema: { $ref: '#/components/schemas/OpenAICostSetting' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /settings/openai/costs/scopes:
     post:
       operationId: listOpenAICostScopes
       requestBody: { required: true, content: { application/json: { schema: { type: object, required: [admin_api_key], properties: { admin_api_key: { type: string, writeOnly: true }, project_id: { type: string } } } } } }
       responses:
-        '200': { description: Projects and API keys visible to the supplied Admin key, content: { application/json: { schema: { $ref: '#/components/schemas/OpenAICostScopes' } } } }
+        '200': { description: Projects and compatibility API-key metadata visible to the supplied Admin key, content: { application/json: { schema: { $ref: '#/components/schemas/OpenAICostScopes' } } } }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /ai-cost/rates:
     get:
       operationId: listAICostRates
@@ -1081,6 +1087,12 @@ paths:
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AICostDateRange' } } } }
       responses:
         '200': { description: Costs synchronized and allocation snapshots reconciled }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /ai-cost/reconciliation/periods/{month}/close:
     post:
       operationId: closeAIReconciliationPeriod
@@ -1490,6 +1502,8 @@ components:
     Conflict: { description: Lifecycle conflict, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
     PreconditionRequired: { description: X-SOP-Version-Updated-At is required for draft aggregate mutations, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
     ValidationFailed: { description: SOP aggregate validation failed, content: { application/json: { schema: { $ref: '#/components/schemas/ValidationResponse' } } } }
+    UnprocessableEntity: { description: Provider credential or request cannot be accepted, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+    BadGateway: { description: Upstream provider rejected the request or returned an invalid response, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
     VariantIdentityValidationFailed: { description: Variant identity validation failed, content: { application/json: { schema: { $ref: '#/components/schemas/VariantIdentityValidationResponse' } } } }
     InternalServerError: { description: Unexpected database or server error, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
     ServiceUnavailable: { description: Required service or server dependency unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
@@ -2145,20 +2159,21 @@ components:
     OpenAICostSettingRequest:
       type: object
       additionalProperties: false
-      required: [admin_api_key, project_id, api_key_id]
+      required: [admin_api_key, project_id]
       properties:
         admin_api_key: { type: string, writeOnly: true }
         project_id: { type: string }
-        api_key_id: { type: string }
+        api_key_id: { type: string, deprecated: true, description: Accepted for compatibility and ignored; synchronization covers the entire Project. }
     OpenAICostSetting:
       type: object
       additionalProperties: false
-      required: [status, admin_key_fingerprint, project_id, api_key_id, last_synced_at]
+      required: [status, admin_key_fingerprint, project_id, scope, last_synced_at]
       properties:
         status: { type: string, enum: [unconfigured, active, invalid, disabled] }
         admin_key_fingerprint: { type: string }
         project_id: { type: string }
-        api_key_id: { type: string }
+        api_key_id: { type: string, deprecated: true, description: Legacy binding metadata; omitted for project-wide settings. }
+        scope: { type: string, enum: [project] }
         last_synced_at: { type: string, format: date-time, nullable: true }
     OpenAICostScope:
       type: object
@@ -3088,7 +3103,7 @@ components:
     ErrorResponse:
       type: object
       required: [code, message]
-      properties: { code: { type: string }, message: { type: string } }
+      properties: { code: { type: string }, message: { type: string }, request_id: { type: string, description: Safe upstream request identifier when available. } }
     AuthErrorResponse:
       type: object
       required: [message]

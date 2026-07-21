@@ -2529,14 +2529,24 @@ export interface components {
         OpenAICostSettingRequest: {
             admin_api_key: string;
             project_id: string;
-            api_key_id: string;
+            /**
+             * @deprecated
+             * @description Accepted for compatibility and ignored; synchronization covers the entire Project.
+             */
+            api_key_id?: string;
         };
         OpenAICostSetting: {
             /** @enum {string} */
             status: "unconfigured" | "active" | "invalid" | "disabled";
             admin_key_fingerprint: string;
             project_id: string;
-            api_key_id: string;
+            /**
+             * @deprecated
+             * @description Legacy binding metadata; omitted for project-wide settings.
+             */
+            api_key_id?: string;
+            /** @enum {string} */
+            scope: "project";
             /** Format: date-time */
             last_synced_at: string | null;
         };
@@ -3440,6 +3450,8 @@ export interface components {
         ErrorResponse: {
             code: string;
             message: string;
+            /** @description Safe upstream request identifier when available. */
+            request_id?: string;
         };
         AuthErrorResponse: {
             message: string;
@@ -3714,6 +3726,24 @@ export interface components {
             };
             content: {
                 "application/json": components["schemas"]["ValidationResponse"];
+            };
+        };
+        /** @description Provider credential or request cannot be accepted */
+        UnprocessableEntity: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
+            };
+        };
+        /** @description Upstream provider rejected the request or returned an invalid response */
+        BadGateway: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorResponse"];
             };
         };
         /** @description Variant identity validation failed */
@@ -6511,7 +6541,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Verified Admin key and explicit Project/API Key binding */
+            /** @description Verified Admin key and project-wide cost binding */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6522,6 +6552,9 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+            502: components["responses"]["BadGateway"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listOpenAICostScopes: {
@@ -6540,7 +6573,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Projects and API keys visible to the supplied Admin key */
+            /** @description Projects and compatibility API-key metadata visible to the supplied Admin key */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6549,6 +6582,9 @@ export interface operations {
                     "application/json": components["schemas"]["OpenAICostScopes"];
                 };
             };
+            422: components["responses"]["UnprocessableEntity"];
+            502: components["responses"]["BadGateway"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listAICostRates: {
@@ -6690,6 +6726,12 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["BadRequest"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            502: components["responses"]["BadGateway"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     closeAIReconciliationPeriod: {

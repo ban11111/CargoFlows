@@ -276,6 +276,39 @@ func TestRespondAIErrorUsesStructuredCompatibleDeviceModelCode(t *testing.T) {
 	}
 }
 
+func TestRespondAIErrorMapsOpenAICostFailures(t *testing.T) {
+	tests := []struct {
+		name      string
+		err       error
+		status    int
+		code      string
+		requestID string
+	}{
+		{name: "invalid setting", err: ai.ErrCostSettingInvalid, status: http.StatusBadRequest, code: "invalid_request"},
+		{name: "not configured", err: ai.ErrCostSettingNotConfigured, status: http.StatusConflict, code: "openai_cost_not_configured"},
+		{name: "closed period", err: ai.ErrCostPeriodClosed, status: http.StatusConflict, code: "openai_cost_period_closed"},
+		{name: "invalid provider response", err: ai.ErrCostProviderResponse, status: http.StatusBadGateway, code: "openai_cost_invalid_response"},
+		{name: "bad request", err: &ai.CostAPIError{StatusCode: http.StatusBadRequest, RequestID: "req_bad"}, status: http.StatusBadGateway, code: "openai_cost_request_rejected", requestID: "req_bad"},
+		{name: "forbidden", err: &ai.CostAPIError{StatusCode: http.StatusForbidden}, status: http.StatusUnprocessableEntity, code: "openai_cost_permission_denied"},
+		{name: "rate limited", err: &ai.CostAPIError{StatusCode: http.StatusTooManyRequests}, status: http.StatusServiceUnavailable, code: "openai_cost_rate_limited"},
+		{name: "provider failure", err: &ai.CostAPIError{StatusCode: http.StatusInternalServerError}, status: http.StatusBadGateway, code: "openai_cost_unavailable"},
+		{name: "transport failure", err: &ai.CostAPIError{}, status: http.StatusBadGateway, code: "openai_cost_unavailable"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			context, _ := gin.CreateTestContext(recorder)
+			respondAIError(context, test.err)
+			if recorder.Code != test.status || !strings.Contains(recorder.Body.String(), `"code":"`+test.code+`"`) {
+				t.Fatalf("response = %d %s", recorder.Code, recorder.Body.String())
+			}
+			if test.requestID != "" && !strings.Contains(recorder.Body.String(), `"request_id":"`+test.requestID+`"`) {
+				t.Fatalf("request id missing: %s", recorder.Body.String())
+			}
+		})
+	}
+}
+
 func TestAIContentTemplateAdminLifecycleUsesPublicDTOs(t *testing.T) {
 	db := newTestDB(t)
 	server, admin, operator := authenticatedAIRouter(t, db, &handlerVerifier{authenticated: true})
