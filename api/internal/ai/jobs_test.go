@@ -36,6 +36,7 @@ func seedAIJobFixture(t *testing.T) (*gorm.DB, aiJobFixture) {
 		&models.CaptureSOP{}, &models.SOPVersion{}, &models.SOPView{}, &models.PhotoSession{}, &models.Asset{},
 		&models.AIContentTemplate{}, &models.AIContentTemplateVersion{}, &models.AIContentSlot{}, &models.AIJob{}, &models.AIJobItem{}, &models.AIExecution{}, &models.AIAuditEvent{},
 		&models.ModelFamily{}, &models.ModelFamilyMember{}, &models.StyleReferenceGrant{}, &models.ModelFamilyReferenceAsset{},
+		&models.AIReferenceSOP{}, &models.AIReferenceSOPVersion{}, &models.AIReferenceItem{},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -193,6 +194,72 @@ func TestCreateJobSnapshotsOnlyWhitelistedFactsAndSelectedSlots(t *testing.T) {
 	}
 	if snapshot.SelectedAssets[0].View.CameraPositionDirection.Z != 1 || snapshot.SelectedAssets[0].View.Instruction.EN != "Front capture" || snapshot.SelectedAssets[0].View.Composition.AspectRatio != "1:1" {
 		t.Fatalf("asset-specific view was not snapshotted: %#v", snapshot.SelectedAssets[0].View)
+	}
+}
+
+func TestCreateJobFreezesPublishedSameCategoryExternalReferences(t *testing.T) {
+	db, fixture := seedAIJobFixture(t)
+	var product models.Product
+	if err := db.First(&product, fixture.SKU.ProductID).Error; err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	sop := models.AIReferenceSOP{PublicID: uuid.NewString(), CategoryID: product.CategoryID, CreatedByID: fixture.Operator.ID}
+	if err := db.Create(&sop).Error; err != nil {
+		t.Fatal(err)
+	}
+	version := models.AIReferenceSOPVersion{PublicID: uuid.NewString(), AIReferenceSOPID: sop.ID, VersionNumber: 1, NameZH: "套机效果", NameEN: "Fitted effect", Status: models.SOPVersionPublished, PublishedByID: &fixture.Operator.ID, PublishedAt: &now}
+	if err := db.Create(&version).Error; err != nil {
+		t.Fatal(err)
+	}
+	usage := models.AIReferenceItem{PublicID: uuid.NewString(), AIReferenceSOPVersionID: version.ID, SortOrder: 1, Purpose: models.AIReferenceUsageEffect, CaptionZH: "装机比例", CaptionEN: "Fitted proportions", AllowedGuidanceZH: "仅参考比例", AllowedGuidanceEN: "Proportions only", ForbiddenGuidanceZH: "禁止继承品牌", ForbiddenGuidanceEN: "No branding", SourceName: "Competitor", ObjectKey: "external/usage.png", MIMEType: "image/png", Width: 100, Height: 100, ByteCount: 10, SHA256: strings.Repeat("a", 64), RightsConfirmed: true, CreatedByID: fixture.Operator.ID}
+	if err := db.Create(&usage).Error; err != nil {
+		t.Fatal(err)
+	}
+	job, err := NewJobService(db).Create(t.Context(), CreateJobInput{SKUID: fixture.SKU.PublicID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"hero"}, SelectedAssetIDs: []string{fixture.ApprovedAsset.PublicID}, SelectedReferenceItemIDs: []string{usage.PublicID}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-external-reference"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot ProductSnapshotV1
+	if err := json.Unmarshal(job.InputSnapshot, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.ReferenceSOPs) != 1 || len(snapshot.ExternalReferences) != 1 || snapshot.ExternalReferences[0].Purpose != models.AIReferenceUsageEffect || snapshot.ExternalReferences[0].SHA256 != strings.Repeat("a", 64) {
+		t.Fatalf("external reference was not frozen: %#v", snapshot)
+	}
+	if err := db.Model(&usage).Updates(map[string]any{"caption_zh": "changed", "sha256": strings.Repeat("b", 64)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	var persisted models.AIJob
+	if err := db.First(&persisted, "public_id = ?", job.PublicID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(persisted.InputSnapshotJSON), "changed") || !strings.Contains(string(persisted.InputSnapshotJSON), strings.Repeat("a", 64)) {
+		t.Fatal("persisted snapshot changed with the live reference")
+	}
+}
+
+func TestTextOnlyJobRejectsVisualExternalReference(t *testing.T) {
+	db, fixture := seedAIJobFixture(t)
+	var product models.Product
+	if err := db.First(&product, fixture.SKU.ProductID).Error; err != nil {
+		t.Fatal(err)
+	}
+	sop := models.AIReferenceSOP{CategoryID: product.CategoryID, CreatedByID: fixture.Operator.ID}
+	if err := db.Create(&sop).Error; err != nil {
+		t.Fatal(err)
+	}
+	version := models.AIReferenceSOPVersion{AIReferenceSOPID: sop.ID, VersionNumber: 1, NameZH: "风格", NameEN: "Style", Status: models.SOPVersionPublished, PublishedByID: &fixture.Operator.ID}
+	if err := db.Create(&version).Error; err != nil {
+		t.Fatal(err)
+	}
+	item := models.AIReferenceItem{AIReferenceSOPVersionID: version.ID, SortOrder: 1, Purpose: models.AIReferenceVisualStyle, CaptionZH: "风格", CaptionEN: "Style", AllowedGuidanceZH: "灯光", AllowedGuidanceEN: "Lighting", ForbiddenGuidanceZH: "商品", ForbiddenGuidanceEN: "Product", SourceName: "Source", ObjectKey: "external/style.png", MIMEType: "image/png", Width: 1, Height: 1, ByteCount: 1, SHA256: strings.Repeat("c", 64), RightsConfirmed: true, CreatedByID: fixture.Operator.ID}
+	if err := db.Create(&item).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewJobService(db).Create(t.Context(), CreateJobInput{SKUID: fixture.SKU.PublicID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"title"}, SelectedAssetIDs: []string{}, SelectedReferenceItemIDs: []string{item.PublicID}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-text-visual-ref"})
+	if !errors.Is(err, ErrExternalReferenceNotEligible) {
+		t.Fatalf("expected external reference rejection, got %v", err)
 	}
 }
 

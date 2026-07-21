@@ -244,12 +244,11 @@ func textInformationSourceKeys(tx *gorm.DB, job models.AIJob, snapshot ProductSn
 			ids = append(ids, asset.PublicID)
 		}
 	}
-	if len(ids) == 0 {
-		return nil, nil
-	}
 	var assets []models.Asset
-	if err := tx.Where("public_id IN ? AND sk_uid = ? AND review_status = ?", ids, job.SKUID, "approved").Find(&assets).Error; err != nil || len(assets) != len(ids) {
-		return nil, invalidExecutionInput("supplemental source asset is unavailable")
+	if len(ids) > 0 {
+		if err := tx.Where("public_id IN ? AND sk_uid = ? AND review_status = ?", ids, job.SKUID, "approved").Find(&assets).Error; err != nil || len(assets) != len(ids) {
+			return nil, invalidExecutionInput("supplemental source asset is unavailable")
+		}
 	}
 	byID := make(map[string]models.Asset, len(assets))
 	for _, asset := range assets {
@@ -262,6 +261,16 @@ func textInformationSourceKeys(tx *gorm.DB, job models.AIJob, snapshot ProductSn
 			return nil, invalidExecutionInput("supplemental source asset mismatch")
 		}
 		keys = append(keys, asset.ObjectKey)
+	}
+	for _, reference := range snapshot.ExternalReferences {
+		if reference.Purpose != models.AIReferenceCopyInspiration {
+			continue
+		}
+		var item models.AIReferenceItem
+		if err := tx.Where("public_id = ? AND sha256 = ?", reference.PublicID, reference.SHA256).First(&item).Error; err != nil || item.ObjectKey == "" {
+			return nil, invalidExecutionInput("frozen copy inspiration is unavailable")
+		}
+		keys = append(keys, item.ObjectKey)
 	}
 	return keys, nil
 }

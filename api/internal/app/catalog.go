@@ -13,12 +13,13 @@ import (
 )
 
 type categorySummary struct {
-	ID              uint   `json:"id"`
-	Name            string `json:"name"`
-	NameEN          string `json:"name_en"`
-	IsSystem        bool   `json:"is_system"`
-	SKUCount        int64  `json:"sku_count"`
-	CaptureSOPCount int64  `json:"capture_sop_count"`
+	ID                  uint   `json:"id"`
+	Name                string `json:"name"`
+	NameEN              string `json:"name_en"`
+	IsSystem            bool   `json:"is_system"`
+	SKUCount            int64  `json:"sku_count"`
+	CaptureSOPCount     int64  `json:"capture_sop_count"`
+	AIReferenceSOPCount int64  `json:"ai_reference_sop_count"`
 }
 
 func (s *Server) listCategories(c *gin.Context) {
@@ -30,16 +31,18 @@ func (s *Server) listCategories(c *gin.Context) {
 
 	result := make([]categorySummary, 0, len(categories))
 	for _, category := range categories {
-		var skuCount, captureSOPCount int64
+		var skuCount, captureSOPCount, aiReferenceSOPCount int64
 		_ = s.db.Model(&models.Product{}).Where("category_id = ?", category.ID).Count(&skuCount).Error
 		_ = s.db.Model(&models.CaptureSOP{}).Where("category_id = ?", category.ID).Count(&captureSOPCount).Error
+		_ = s.db.Model(&models.AIReferenceSOP{}).Where("category_id = ?", category.ID).Count(&aiReferenceSOPCount).Error
 		result = append(result, categorySummary{
-			ID:              category.ID,
-			Name:            category.Name,
-			NameEN:          category.NameEN,
-			IsSystem:        category.IsSystem,
-			SKUCount:        skuCount,
-			CaptureSOPCount: captureSOPCount,
+			ID:                  category.ID,
+			Name:                category.Name,
+			NameEN:              category.NameEN,
+			IsSystem:            category.IsSystem,
+			SKUCount:            skuCount,
+			CaptureSOPCount:     captureSOPCount,
+			AIReferenceSOPCount: aiReferenceSOPCount,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"data": result})
@@ -82,11 +85,12 @@ func (s *Server) deleteCategory(c *gin.Context) {
 		return
 	}
 
-	var productCount, captureSOPCount int64
+	var productCount, captureSOPCount, aiReferenceSOPCount int64
 	_ = s.db.Model(&models.Product{}).Where("category_id = ?", category.ID).Count(&productCount).Error
 	_ = s.db.Model(&models.CaptureSOP{}).Where("category_id = ?", category.ID).Count(&captureSOPCount).Error
-	if productCount > 0 || captureSOPCount > 0 {
-		c.JSON(http.StatusConflict, gin.H{"message": "category is in use by SKU or capture SOPs"})
+	_ = s.db.Model(&models.AIReferenceSOP{}).Where("category_id = ?", category.ID).Count(&aiReferenceSOPCount).Error
+	if productCount > 0 || captureSOPCount > 0 || aiReferenceSOPCount > 0 {
+		c.JSON(http.StatusConflict, gin.H{"message": "category is in use by SKU, capture SOPs, or AI reference SOPs"})
 		return
 	}
 	if err := s.db.Delete(&category).Error; err != nil {

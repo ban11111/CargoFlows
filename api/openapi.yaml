@@ -1133,6 +1133,138 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '500': { $ref: '#/components/responses/InternalServerError' }
+  /ai-reference-sops:
+    get:
+      operationId: listAIReferenceSOPs
+      parameters:
+        - { in: query, name: category_id, schema: { type: integer, minimum: 1 } }
+        - { in: query, name: include_all, schema: { type: boolean, default: false } }
+      responses:
+        '200': { description: Published or administrator lifecycle AI reference SOPs, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/AIReferenceSOP' } } } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      operationId: createAIReferenceSOP
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AIReferenceSOPMutation' } } } }
+      responses:
+        '201': { description: Created reference SOP, content: { application/json: { schema: { $ref: '#/components/schemas/AIReferenceSOP' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /ai-reference-sops/{sop_id}:
+    get:
+      operationId: getAIReferenceSOP
+      parameters: [ { in: path, name: sop_id, required: true, schema: { type: string, format: uuid } } ]
+      responses:
+        '200': { description: Reference SOP, content: { application/json: { schema: { $ref: '#/components/schemas/AIReferenceSOP' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /ai-reference-sops/{sop_id}/versions:
+    post:
+      operationId: copyAIReferenceSOPVersion
+      parameters: [ { in: path, name: sop_id, required: true, schema: { type: string, format: uuid } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [source_version_id]
+              properties:
+                source_version_id: { type: string, format: uuid }
+      responses:
+        '201': { description: Copied draft version, content: { application/json: { schema: { $ref: '#/components/schemas/AIReferenceSOPVersion' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { description: Source version could not be copied, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+  /ai-reference-sop-versions/{version_id}:
+    get:
+      operationId: getAIReferenceSOPVersion
+      parameters: [ { in: path, name: version_id, required: true, schema: { type: string, format: uuid } } ]
+      responses:
+        '200': { description: Reference SOP version, content: { application/json: { schema: { $ref: '#/components/schemas/AIReferenceSOPVersion' } } } }
+    patch:
+      operationId: updateAIReferenceSOPVersion
+      parameters: [ { in: path, name: version_id, required: true, schema: { type: string, format: uuid } } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AIReferenceSOPVersionMutation' } } } }
+      responses:
+        '200': { description: Updated draft, content: { application/json: { schema: { $ref: '#/components/schemas/AIReferenceSOPVersion' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /ai-reference-sop-versions/{version_id}/items/upload-url:
+    post:
+      operationId: createAIReferenceItemUploadURL
+      parameters: [ { in: path, name: version_id, required: true, schema: { type: string, format: uuid } } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateAIReferenceItemUploadRequest' } } } }
+      responses:
+        '200': { description: Short-lived signed private-object upload instructions, content: { application/json: { schema: { $ref: '#/components/schemas/AIReferenceItemUploadTicket' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /ai-reference-sop-versions/{version_id}/items/complete:
+    post:
+      operationId: completeAIReferenceItemUpload
+      parameters: [ { in: path, name: version_id, required: true, schema: { type: string, format: uuid } } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CompleteAIReferenceItemUploadRequest' } } } }
+      responses:
+        '201': { description: Validated, normalized reference item, content: { application/json: { schema: { $ref: '#/components/schemas/AIReferenceItem' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /ai-reference-sop-versions/{version_id}/items/{item_id}:
+    delete:
+      operationId: deleteAIReferenceItem
+      parameters:
+        - { in: path, name: version_id, required: true, schema: { type: string, format: uuid } }
+        - { in: path, name: item_id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Draft reference item deleted }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /ai-reference-sop-versions/{version_id}/item-order:
+    put:
+      operationId: reorderAIReferenceItems
+      parameters: [ { in: path, name: version_id, required: true, schema: { type: string, format: uuid } } ]
+      requestBody: { $ref: '#/components/requestBodies/UUIDOrder' }
+      responses:
+        '200': { description: Reordered draft version, content: { application/json: { schema: { $ref: '#/components/schemas/AIReferenceSOPVersion' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /ai-reference-sop-versions/{version_id}/publish:
+    post:
+      operationId: publishAIReferenceSOPVersion
+      parameters: [ { in: path, name: version_id, required: true, schema: { type: string, format: uuid } } ]
+      responses:
+        '200': { description: Published immutable version, content: { application/json: { schema: { $ref: '#/components/schemas/AIReferenceSOPVersion' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: Publish validation failed, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+  /ai-reference-sop-versions/{version_id}/archive:
+    post:
+      operationId: archiveAIReferenceSOPVersion
+      parameters: [ { in: path, name: version_id, required: true, schema: { type: string, format: uuid } } ]
+      responses:
+        '200': { description: Archived version, content: { application/json: { schema: { $ref: '#/components/schemas/AIReferenceSOPVersion' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: Lifecycle transition failed, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+  /ai-reference-sop-versions/{version_id}/restore:
+    post:
+      operationId: restoreAIReferenceSOPVersion
+      parameters: [ { in: path, name: version_id, required: true, schema: { type: string, format: uuid } } ]
+      responses:
+        '200': { description: Restored published version, content: { application/json: { schema: { $ref: '#/components/schemas/AIReferenceSOPVersion' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: Lifecycle transition failed, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+  /ai-reference-items/{item_id}/media:
+    get:
+      operationId: getAIReferenceItemMedia
+      parameters:
+        - { in: path, name: item_id, required: true, schema: { type: string, format: uuid } }
+        - { in: query, name: thumbnail, schema: { type: boolean, default: false }, description: Return the private 640px thumbnail derivative. }
+      responses:
+        '200': { description: Authenticated private reference image, content: { image/png: { schema: { type: string, format: binary } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
@@ -1471,6 +1603,136 @@ components:
         note: { type: string }
         operator_name: { type: string }
         created_at: { type: string, format: date-time }
+    AIReferenceSOP:
+      type: object
+      additionalProperties: false
+      required: [public_id, category_id, category, versions, created_at, updated_at]
+      properties:
+        public_id: { type: string, format: uuid }
+        category_id: { type: integer, minimum: 1 }
+        category: { $ref: '#/components/schemas/SKUCategory' }
+        versions: { type: array, items: { $ref: '#/components/schemas/AIReferenceSOPVersion' } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AIReferenceSOPVersion:
+      type: object
+      additionalProperties: false
+      required: [public_id, version_number, name_zh, name_en, description_zh, description_en, status, items, created_at, updated_at]
+      properties:
+        public_id: { type: string, format: uuid }
+        version_number: { type: integer, minimum: 1 }
+        name_zh: { type: string, minLength: 1, maxLength: 160 }
+        name_en: { type: string, minLength: 1, maxLength: 160 }
+        description_zh: { type: string }
+        description_en: { type: string }
+        status: { type: string, enum: [draft, published, archived] }
+        published_at: { type: string, format: date-time, nullable: true }
+        archived_at: { type: string, format: date-time, nullable: true }
+        items: { type: array, items: { $ref: '#/components/schemas/AIReferenceItem' } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AIReferenceItem:
+      type: object
+      additionalProperties: false
+      required: [public_id, sort_order, purpose, caption_zh, caption_en, allowed_guidance_zh, allowed_guidance_en, forbidden_guidance_zh, forbidden_guidance_en, source_name, source_url, mime_type, width, height, byte_count, sha256, rights_confirmed, created_at, updated_at]
+      properties:
+        public_id: { type: string, format: uuid }
+        sort_order: { type: integer, minimum: 1 }
+        purpose: { type: string, enum: [visual_style, usage_effect, copy_inspiration] }
+        caption_zh: { type: string }
+        caption_en: { type: string }
+        allowed_guidance_zh: { type: string }
+        allowed_guidance_en: { type: string }
+        forbidden_guidance_zh: { type: string }
+        forbidden_guidance_en: { type: string }
+        source_name: { type: string }
+        source_url: { type: string }
+        mime_type: { type: string, enum: [image/png] }
+        width: { type: integer, minimum: 1 }
+        height: { type: integer, minimum: 1 }
+        byte_count: { type: integer, minimum: 1 }
+        sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+        rights_confirmed: { type: boolean, enum: [true] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AIReferenceSOPMutation:
+      type: object
+      additionalProperties: false
+      required: [category_id, name_zh, name_en, description_zh, description_en]
+      properties:
+        category_id: { type: integer, minimum: 1 }
+        name_zh: { type: string, minLength: 1, maxLength: 160 }
+        name_en: { type: string, minLength: 1, maxLength: 160 }
+        description_zh: { type: string, minLength: 1 }
+        description_en: { type: string, minLength: 1 }
+    AIReferenceSOPVersionMutation:
+      type: object
+      additionalProperties: false
+      required: [name_zh, name_en, description_zh, description_en]
+      properties:
+        name_zh: { type: string, minLength: 1, maxLength: 160 }
+        name_en: { type: string, minLength: 1, maxLength: 160 }
+        description_zh: { type: string, minLength: 1 }
+        description_en: { type: string, minLength: 1 }
+    CreateAIReferenceItemRequest:
+      type: object
+      additionalProperties: false
+      required: [purpose, caption_zh, caption_en, allowed_guidance_zh, allowed_guidance_en, forbidden_guidance_zh, forbidden_guidance_en, source_name, rights_confirmed, image]
+      properties:
+        purpose: { type: string, enum: [visual_style, usage_effect, copy_inspiration] }
+        caption_zh: { type: string, minLength: 1 }
+        caption_en: { type: string, minLength: 1 }
+        allowed_guidance_zh: { type: string, minLength: 1 }
+        allowed_guidance_en: { type: string, minLength: 1 }
+        forbidden_guidance_zh: { type: string, minLength: 1 }
+        forbidden_guidance_en: { type: string, minLength: 1 }
+        source_name: { type: string, minLength: 1 }
+        source_url: { type: string, format: uri }
+        rights_confirmed: { type: boolean }
+        image: { type: string, format: binary }
+        product_exclusion_mask: { type: string, format: binary, description: Required for visual_style. }
+    CreateAIReferenceItemUploadRequest:
+      type: object
+      additionalProperties: false
+      required: [purpose, file_name, content_type]
+      properties:
+        purpose: { type: string, enum: [visual_style, usage_effect, copy_inspiration] }
+        file_name: { type: string, minLength: 1, maxLength: 255 }
+        content_type: { type: string, enum: [image/jpeg, image/png, image/webp] }
+        mask_file_name: { type: string, maxLength: 255, description: Required for visual_style. }
+        mask_content_type: { type: string, enum: [image/png], description: Required for visual_style. }
+    AIReferenceSignedUpload:
+      type: object
+      additionalProperties: false
+      required: [method, upload_url, headers]
+      properties:
+        method: { type: string, enum: [PUT] }
+        upload_url: { type: string, format: uri }
+        headers: { type: object, additionalProperties: { type: string } }
+    AIReferenceItemUploadTicket:
+      type: object
+      additionalProperties: false
+      required: [completion_token, expires_in, image]
+      properties:
+        completion_token: { type: string, format: uuid, description: Opaque, one-time completion token. }
+        expires_in: { type: integer, enum: [900] }
+        image: { $ref: '#/components/schemas/AIReferenceSignedUpload' }
+        mask: { $ref: '#/components/schemas/AIReferenceSignedUpload', description: Present only for visual_style. }
+    CompleteAIReferenceItemUploadRequest:
+      type: object
+      additionalProperties: false
+      required: [completion_token, caption_zh, caption_en, allowed_guidance_zh, allowed_guidance_en, forbidden_guidance_zh, forbidden_guidance_en, source_name, rights_confirmed]
+      properties:
+        completion_token: { type: string, format: uuid }
+        caption_zh: { type: string, minLength: 1, maxLength: 500 }
+        caption_en: { type: string, minLength: 1, maxLength: 500 }
+        allowed_guidance_zh: { type: string, minLength: 1 }
+        allowed_guidance_en: { type: string, minLength: 1 }
+        forbidden_guidance_zh: { type: string, minLength: 1 }
+        forbidden_guidance_en: { type: string, minLength: 1 }
+        source_name: { type: string, minLength: 1, maxLength: 240 }
+        source_url: { type: string, format: uri, maxLength: 1000 }
+        rights_confirmed: { type: boolean, enum: [true] }
     CreateAIJobRequest:
       type: object
       additionalProperties: false
@@ -1482,6 +1744,7 @@ components:
         selected_asset_ids: { type: array, items: { type: string, format: uuid }, description: Duplicate public UUIDs are accepted and normalized to one ordered reference. }
         selected_style_reference_ids: { type: array, uniqueItems: true, items: { type: string, format: uuid }, description: Optional administrator-approved cross-SKU style grants. }
         selected_brand_icon_ids: { type: array, maxItems: 8, uniqueItems: true, items: { type: string, format: uuid }, description: Optional active icons belonging to the target SKU brand. }
+        selected_reference_item_ids: { type: array, uniqueItems: true, items: { type: string, format: uuid }, description: Optional items from published same-category AI reference SOPs. }
         locale: { type: string, minLength: 2, maxLength: 32, pattern: '^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$' }
         user_preference: { type: string, maxLength: 1000, description: Optional L4 user instruction stored immutably in the job snapshot. }
         generation_overrides:
@@ -1922,6 +2185,8 @@ components:
         style_references: { type: array, items: { $ref: '#/components/schemas/AISnapshotStyleReference' } }
         structure_references: { type: array, items: { $ref: '#/components/schemas/AISnapshotStructureReference' } }
         brand_icons: { type: array, maxItems: 8, items: { $ref: '#/components/schemas/AISnapshotBrandIcon' } }
+        reference_sops: { type: array, items: { $ref: '#/components/schemas/AISnapshotReferenceSOP' } }
+        external_references: { type: array, items: { $ref: '#/components/schemas/AISnapshotExternalReference' } }
     AISnapshotBrandIcon:
       type: object
       additionalProperties: false
@@ -1935,6 +2200,32 @@ components:
         height: { type: integer, minimum: 1 }
         byte_count: { type: integer, minimum: 1 }
         sha256: { type: string }
+    AISnapshotReferenceSOP:
+      type: object
+      additionalProperties: false
+      required: [public_id, version_public_id, version_number, category_id, name]
+      properties:
+        public_id: { type: string, format: uuid }
+        version_public_id: { type: string, format: uuid }
+        version_number: { type: integer, minimum: 1 }
+        category_id: { type: integer, minimum: 1 }
+        name: { $ref: '#/components/schemas/AISnapshotLocalizedText' }
+    AISnapshotExternalReference:
+      type: object
+      additionalProperties: false
+      required: [public_id, sop_public_id, version_public_id, purpose, caption, allowed_guidance, forbidden_guidance, source_name, sha256, reviewed_by]
+      properties:
+        public_id: { type: string, format: uuid }
+        sop_public_id: { type: string, format: uuid }
+        version_public_id: { type: string, format: uuid }
+        purpose: { type: string, enum: [visual_style, usage_effect, copy_inspiration] }
+        caption: { $ref: '#/components/schemas/AISnapshotLocalizedText' }
+        allowed_guidance: { $ref: '#/components/schemas/AISnapshotLocalizedText' }
+        forbidden_guidance: { $ref: '#/components/schemas/AISnapshotLocalizedText' }
+        source_name: { type: string }
+        source_url: { type: string, format: uri }
+        sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+        reviewed_by: { type: string, format: uuid }
     AISnapshotStyleReference:
       type: object
       additionalProperties: false

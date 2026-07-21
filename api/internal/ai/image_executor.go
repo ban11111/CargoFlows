@@ -264,6 +264,13 @@ func (e *ImageExecutor) prepare(ctx context.Context, leased LeasedItem) (prepare
 			}
 			keys = append(keys, stored.DerivativeObjectKey)
 		}
+		for _, reference := range snapshot.ExternalReferences {
+			var stored models.AIReferenceItem
+			if err := tx.Where("public_id = ? AND sha256 = ?", reference.PublicID, reference.SHA256).First(&stored).Error; err != nil || stored.ObjectKey == "" {
+				return invalidExecutionInput("frozen external reference is unavailable")
+			}
+			keys = append(keys, stored.ObjectKey)
+		}
 		result = preparedImageExecution{execution: execution, turn: turn, prompt: prompt, job: job, item: item, sourceKeys: keys, parentKey: parentKey, maskKey: turn.MaskObjectKey}
 		return nil
 	})
