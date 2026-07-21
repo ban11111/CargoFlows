@@ -1375,6 +1375,198 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ai-reference-sops": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listAIReferenceSOPs"];
+        put?: never;
+        post: operations["createAIReferenceSOP"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-reference-sops/{sop_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getAIReferenceSOP"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-reference-sops/{sop_id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["copyAIReferenceSOPVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-reference-sop-versions/{version_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getAIReferenceSOPVersion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["updateAIReferenceSOPVersion"];
+        trace?: never;
+    };
+    "/ai-reference-sop-versions/{version_id}/items/upload-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createAIReferenceItemUploadURL"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-reference-sop-versions/{version_id}/items/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["completeAIReferenceItemUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-reference-sop-versions/{version_id}/items/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["deleteAIReferenceItem"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-reference-sop-versions/{version_id}/item-order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["reorderAIReferenceItems"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-reference-sop-versions/{version_id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["publishAIReferenceSOPVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-reference-sop-versions/{version_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["archiveAIReferenceSOPVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-reference-sop-versions/{version_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["restoreAIReferenceSOPVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-reference-items/{item_id}/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["getAIReferenceItemMedia"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1664,6 +1856,148 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
+        AIReferenceSOP: {
+            /** Format: uuid */
+            public_id: string;
+            category_id: number;
+            category: components["schemas"]["SKUCategory"];
+            versions: components["schemas"]["AIReferenceSOPVersion"][];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        AIReferenceSOPVersion: {
+            /** Format: uuid */
+            public_id: string;
+            version_number: number;
+            name_zh: string;
+            name_en: string;
+            description_zh: string;
+            description_en: string;
+            /** @enum {string} */
+            status: "draft" | "published" | "archived";
+            /** Format: date-time */
+            published_at?: string | null;
+            /** Format: date-time */
+            archived_at?: string | null;
+            items: components["schemas"]["AIReferenceItem"][];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        AIReferenceItem: {
+            /** Format: uuid */
+            public_id: string;
+            sort_order: number;
+            /** @enum {string} */
+            purpose: "visual_style" | "usage_effect" | "copy_inspiration";
+            caption_zh: string;
+            caption_en: string;
+            allowed_guidance_zh: string;
+            allowed_guidance_en: string;
+            forbidden_guidance_zh: string;
+            forbidden_guidance_en: string;
+            source_name: string;
+            source_url: string;
+            /** @enum {string} */
+            mime_type: "image/png";
+            width: number;
+            height: number;
+            byte_count: number;
+            sha256: string;
+            /** @enum {boolean} */
+            rights_confirmed: true;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        AIReferenceSOPMutation: {
+            category_id: number;
+            name_zh: string;
+            name_en: string;
+            description_zh: string;
+            description_en: string;
+        };
+        AIReferenceSOPVersionMutation: {
+            name_zh: string;
+            name_en: string;
+            description_zh: string;
+            description_en: string;
+        };
+        CreateAIReferenceItemRequest: {
+            /** @enum {string} */
+            purpose: "visual_style" | "usage_effect" | "copy_inspiration";
+            caption_zh: string;
+            caption_en: string;
+            allowed_guidance_zh: string;
+            allowed_guidance_en: string;
+            forbidden_guidance_zh: string;
+            forbidden_guidance_en: string;
+            source_name: string;
+            /** Format: uri */
+            source_url?: string;
+            rights_confirmed: boolean;
+            /** Format: binary */
+            image: string;
+            /**
+             * Format: binary
+             * @description Required for visual_style.
+             */
+            product_exclusion_mask?: string;
+        };
+        CreateAIReferenceItemUploadRequest: {
+            /** @enum {string} */
+            purpose: "visual_style" | "usage_effect" | "copy_inspiration";
+            file_name: string;
+            /** @enum {string} */
+            content_type: "image/jpeg" | "image/png" | "image/webp";
+            /** @description Required for visual_style. */
+            mask_file_name?: string;
+            /**
+             * @description Required for visual_style.
+             * @enum {string}
+             */
+            mask_content_type?: "image/png";
+        };
+        AIReferenceSignedUpload: {
+            /** @enum {string} */
+            method: "PUT";
+            /** Format: uri */
+            upload_url: string;
+            headers: {
+                [key: string]: string;
+            };
+        };
+        AIReferenceItemUploadTicket: {
+            /**
+             * Format: uuid
+             * @description Opaque
+             */
+            completion_token: string;
+            /** @enum {integer} */
+            expires_in: 900;
+            image: components["schemas"]["AIReferenceSignedUpload"];
+            /** @description Present only for visual_style. */
+            mask?: components["schemas"]["AIReferenceSignedUpload"];
+        };
+        CompleteAIReferenceItemUploadRequest: {
+            /** Format: uuid */
+            completion_token: string;
+            caption_zh: string;
+            caption_en: string;
+            allowed_guidance_zh: string;
+            allowed_guidance_en: string;
+            forbidden_guidance_zh: string;
+            forbidden_guidance_en: string;
+            source_name: string;
+            /** Format: uri */
+            source_url?: string;
+            /** @enum {boolean} */
+            rights_confirmed: true;
+        };
         CreateAIJobRequest: {
             /** Format: uuid */
             sku_id: string;
@@ -1676,6 +2010,8 @@ export interface components {
             selected_style_reference_ids?: string[];
             /** @description Optional active icons belonging to the target SKU brand. */
             selected_brand_icon_ids?: string[];
+            /** @description Optional items from published same-category AI reference SOPs. */
+            selected_reference_item_ids?: string[];
             locale: string;
             /** @description Optional L4 user instruction stored immutably in the job snapshot. */
             user_preference?: string;
@@ -2136,6 +2472,8 @@ export interface components {
             style_references?: components["schemas"]["AISnapshotStyleReference"][];
             structure_references?: components["schemas"]["AISnapshotStructureReference"][];
             brand_icons?: components["schemas"]["AISnapshotBrandIcon"][];
+            reference_sops?: components["schemas"]["AISnapshotReferenceSOP"][];
+            external_references?: components["schemas"]["AISnapshotExternalReference"][];
         };
         AISnapshotBrandIcon: {
             /** Format: uuid */
@@ -2148,6 +2486,34 @@ export interface components {
             height: number;
             byte_count: number;
             sha256: string;
+        };
+        AISnapshotReferenceSOP: {
+            /** Format: uuid */
+            public_id: string;
+            /** Format: uuid */
+            version_public_id: string;
+            version_number: number;
+            category_id: number;
+            name: components["schemas"]["AISnapshotLocalizedText"];
+        };
+        AISnapshotExternalReference: {
+            /** Format: uuid */
+            public_id: string;
+            /** Format: uuid */
+            sop_public_id: string;
+            /** Format: uuid */
+            version_public_id: string;
+            /** @enum {string} */
+            purpose: "visual_style" | "usage_effect" | "copy_inspiration";
+            caption: components["schemas"]["AISnapshotLocalizedText"];
+            allowed_guidance: components["schemas"]["AISnapshotLocalizedText"];
+            forbidden_guidance: components["schemas"]["AISnapshotLocalizedText"];
+            source_name: string;
+            /** Format: uri */
+            source_url?: string;
+            sha256: string;
+            /** Format: uuid */
+            reviewed_by: string;
         };
         AISnapshotStyleReference: {
             /** Format: uuid */
@@ -5790,6 +6156,402 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             500: components["responses"]["InternalServerError"];
+        };
+    };
+    listAIReferenceSOPs: {
+        parameters: {
+            query?: {
+                category_id?: number;
+                include_all?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Published or administrator lifecycle AI reference SOPs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AIReferenceSOP"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createAIReferenceSOP: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AIReferenceSOPMutation"];
+            };
+        };
+        responses: {
+            /** @description Created reference SOP */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIReferenceSOP"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getAIReferenceSOP: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sop_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reference SOP */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIReferenceSOP"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    copyAIReferenceSOPVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sop_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    source_version_id: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Copied draft version */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIReferenceSOPVersion"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            /** @description Source version could not be copied */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getAIReferenceSOPVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reference SOP version */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIReferenceSOPVersion"];
+                };
+            };
+        };
+    };
+    updateAIReferenceSOPVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AIReferenceSOPVersionMutation"];
+            };
+        };
+        responses: {
+            /** @description Updated draft */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIReferenceSOPVersion"];
+                };
+            };
+            409: components["responses"]["Conflict"];
+        };
+    };
+    createAIReferenceItemUploadURL: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAIReferenceItemUploadRequest"];
+            };
+        };
+        responses: {
+            /** @description Short-lived signed private-object upload instructions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIReferenceItemUploadTicket"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    completeAIReferenceItemUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompleteAIReferenceItemUploadRequest"];
+            };
+        };
+        responses: {
+            /** @description Validated */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIReferenceItem"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteAIReferenceItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Draft reference item deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    reorderAIReferenceItems: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: components["requestBodies"]["UUIDOrder"];
+        responses: {
+            /** @description Reordered draft version */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIReferenceSOPVersion"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    publishAIReferenceSOPVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Published immutable version */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIReferenceSOPVersion"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            /** @description Publish validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    archiveAIReferenceSOPVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Archived version */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIReferenceSOPVersion"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            /** @description Lifecycle transition failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    restoreAIReferenceSOPVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Restored published version */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIReferenceSOPVersion"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            /** @description Lifecycle transition failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getAIReferenceItemMedia: {
+        parameters: {
+            query?: {
+                /** @description Return the private 640px thumbnail derivative. */
+                thumbnail?: boolean;
+            };
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authenticated private reference image */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                };
+            };
+            404: components["responses"]["NotFound"];
         };
     };
 }

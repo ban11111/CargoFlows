@@ -23,7 +23,7 @@ func newTestDB(t *testing.T) *gorm.DB {
 
 func TestMigrateCreatesVersionedSOPTables(t *testing.T) {
 	db := newTestDB(t)
-	for _, model := range []any{&models.CaptureSOP{}, &models.SOPVersion{}, &models.SOPView{}, &models.SOPViewReferenceImage{}, &models.SOPReferenceUpload{}} {
+	for _, model := range []any{&models.CaptureSOP{}, &models.SOPVersion{}, &models.SOPView{}, &models.SOPViewReferenceImage{}, &models.SOPReferenceUpload{}, &models.AIReferenceSOP{}, &models.AIReferenceSOPVersion{}, &models.AIReferenceItem{}, &models.AIReferenceUpload{}} {
 		if !db.Migrator().HasTable(model) {
 			t.Fatalf("missing table for %T", model)
 		}

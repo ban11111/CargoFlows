@@ -44,6 +44,7 @@ var (
 	ErrAssetIDInvalid                 = errors.New("asset IDs must be UUIDs")
 	ErrStyleReferenceNotEligible      = errors.New("style references must be approved grants")
 	ErrBrandIconNotEligible           = errors.New("brand icons must be active and belong to the SKU brand")
+	ErrExternalReferenceNotEligible   = errors.New("external references must belong to a published same-category AI reference SOP")
 )
 
 type CreateJobInput struct {
@@ -53,6 +54,7 @@ type CreateJobInput struct {
 	SelectedAssetIDs          []string
 	SelectedStyleReferenceIDs []string
 	SelectedBrandIconIDs      []string
+	SelectedReferenceItemIDs  []string
 	Locale                    string
 	CreatedByID               uint
 	IdempotencyKey            string
@@ -201,6 +203,8 @@ type ProductSnapshotV1 struct {
 	StyleReferences     []StyleReferenceFacts         `json:"style_references,omitempty"`
 	StructureReferences []StructureReferenceFacts     `json:"structure_references,omitempty"`
 	BrandIcons          []BrandIconFacts              `json:"brand_icons,omitempty"`
+	ReferenceSOPs       []ReferenceSOPFacts           `json:"reference_sops,omitempty"`
+	ExternalReferences  []ExternalReferenceFacts      `json:"external_references,omitempty"`
 }
 
 type BrandIconFacts struct {
@@ -212,6 +216,28 @@ type BrandIconFacts struct {
 	Height    int    `json:"height"`
 	ByteCount int64  `json:"byte_count"`
 	SHA256    string `json:"sha256"`
+}
+
+type ReferenceSOPFacts struct {
+	PublicID        string             `json:"public_id"`
+	VersionPublicID string             `json:"version_public_id"`
+	VersionNumber   int                `json:"version_number"`
+	CategoryID      uint               `json:"category_id"`
+	Name            LocalizedNameFacts `json:"name"`
+}
+
+type ExternalReferenceFacts struct {
+	PublicID           string                    `json:"public_id"`
+	SOPPublicID        string                    `json:"sop_public_id"`
+	VersionPublicID    string                    `json:"version_public_id"`
+	Purpose            models.AIReferencePurpose `json:"purpose"`
+	Caption            LocalizedNameFacts        `json:"caption"`
+	AllowedGuidance    LocalizedNameFacts        `json:"allowed_guidance"`
+	ForbiddenGuidance  LocalizedNameFacts        `json:"forbidden_guidance"`
+	SourceName         string                    `json:"source_name"`
+	SourceURL          string                    `json:"source_url,omitempty"`
+	SHA256             string                    `json:"sha256"`
+	ReviewedByPublicID string                    `json:"reviewed_by"`
 }
 
 type StyleReferenceFacts struct {
@@ -363,6 +389,17 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 		if len(normalized.SelectedBrandIconIDs) > 0 && !hasImageSlot(selectedSlots) {
 			return ErrBrandIconNotEligible
 		}
+		referenceSOPs, externalReferences, err := loadExternalReferences(tx, sku.Product.CategoryID, normalized.SelectedReferenceItemIDs)
+		if err != nil {
+			return err
+		}
+		if !hasImageSlot(selectedSlots) {
+			for _, reference := range externalReferences {
+				if reference.Purpose != models.AIReferenceCopyInspiration {
+					return ErrExternalReferenceNotEligible
+				}
+			}
+		}
 		resolvedCanvases, err := resolveImageCanvases(selectedSlots, normalized.ImageCanvases)
 		if err != nil {
 			return err
@@ -401,6 +438,8 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 		snapshot.StyleReferences = styleReferences
 		snapshot.StructureReferences = structureReferences
 		snapshot.BrandIcons = brandIcons
+		snapshot.ReferenceSOPs = referenceSOPs
+		snapshot.ExternalReferences = externalReferences
 		snapshotJSON, err := json.Marshal(snapshot)
 		if err != nil {
 			return fmt.Errorf("marshal AI job snapshot: %w", err)
@@ -480,7 +519,7 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 		}
 		job.Items = items
 		job.SKU = sku
-		metadata, _ := json.Marshal(map[string]any{"snapshot_schema": ProductSnapshotSchemaV1, "slot_keys": normalized.SelectedSlotKeys, "asset_count": len(assetIDs), "brand_icon_ids": normalized.SelectedBrandIconIDs, "style_reference_ids": normalized.SelectedStyleReferenceIDs, "structure_reference_count": len(structureReferences), "request_sha256": requestHash, "image_canvases": orderedCanvases, "created_by": creatorSnapshot, "model_snapshot": modelSnapshot})
+		metadata, _ := json.Marshal(map[string]any{"snapshot_schema": ProductSnapshotSchemaV1, "slot_keys": normalized.SelectedSlotKeys, "asset_count": len(assetIDs), "brand_icon_ids": normalized.SelectedBrandIconIDs, "style_reference_ids": normalized.SelectedStyleReferenceIDs, "external_reference_ids": normalized.SelectedReferenceItemIDs, "structure_reference_count": len(structureReferences), "request_sha256": requestHash, "image_canvases": orderedCanvases, "created_by": creatorSnapshot, "model_snapshot": modelSnapshot})
 		jobID, actorID := job.ID, normalized.CreatedByID
 		audit := models.AIAuditEvent{PublicID: uuid.NewString(), EventType: "ai_job.created", EntityType: "ai_job", EntityPublicID: job.PublicID, ActorID: &actorID, AIJobID: &jobID, MetadataJSON: metadata}
 		if err := tx.Create(&audit).Error; err != nil {
@@ -594,6 +633,16 @@ func normalizeCreateJobInput(input CreateJobInput) (CreateJobInput, string, erro
 	if len(input.SelectedBrandIconIDs) > 8 {
 		return input, "", ErrBrandIconNotEligible
 	}
+	references := make([]string, 0, len(input.SelectedReferenceItemIDs))
+	for _, value := range input.SelectedReferenceItemIDs {
+		parsed, err := uuid.Parse(strings.TrimSpace(value))
+		if err != nil || parsed == uuid.Nil {
+			return input, "", ErrExternalReferenceNotEligible
+		}
+		references = append(references, parsed.String())
+	}
+	sort.Strings(references)
+	input.SelectedReferenceItemIDs = dedupeStrings(references)
 	if input.GenerationOverrides == nil {
 		input.GenerationOverrides = map[string]GenerationOverride{}
 	}
@@ -625,17 +674,18 @@ func normalizeCreateJobInput(input CreateJobInput) (CreateJobInput, string, erro
 		canvas.SlotKeys = keys
 	}
 	canonical := struct {
-		SKUID           string                        `json:"sku_id"`
-		Template        string                        `json:"template_version_id"`
-		Slots           []string                      `json:"selected_slot_keys"`
-		Assets          []string                      `json:"selected_asset_ids"`
-		StyleReferences []string                      `json:"selected_style_reference_ids,omitempty"`
-		BrandIcons      []string                      `json:"selected_brand_icon_ids,omitempty"`
-		Locale          string                        `json:"locale"`
-		Preference      string                        `json:"user_preference"`
-		Overrides       map[string]GenerationOverride `json:"generation_overrides"`
-		Canvases        []ImageCanvas                 `json:"image_canvases,omitempty"`
-	}{input.SKUID, input.TemplateVersionPublicID, slots, assets, input.SelectedStyleReferenceIDs, input.SelectedBrandIconIDs, input.Locale, input.UserPreference, input.GenerationOverrides, input.ImageCanvases}
+		SKUID              string                        `json:"sku_id"`
+		Template           string                        `json:"template_version_id"`
+		Slots              []string                      `json:"selected_slot_keys"`
+		Assets             []string                      `json:"selected_asset_ids"`
+		StyleReferences    []string                      `json:"selected_style_reference_ids,omitempty"`
+		BrandIcons         []string                      `json:"selected_brand_icon_ids,omitempty"`
+		ExternalReferences []string                      `json:"selected_reference_item_ids,omitempty"`
+		Locale             string                        `json:"locale"`
+		Preference         string                        `json:"user_preference"`
+		Overrides          map[string]GenerationOverride `json:"generation_overrides"`
+		Canvases           []ImageCanvas                 `json:"image_canvases,omitempty"`
+	}{input.SKUID, input.TemplateVersionPublicID, slots, assets, input.SelectedStyleReferenceIDs, input.SelectedBrandIconIDs, input.SelectedReferenceItemIDs, input.Locale, input.UserPreference, input.GenerationOverrides, input.ImageCanvases}
 	encoded, err := json.Marshal(canonical)
 	if err != nil {
 		return input, "", err
@@ -847,6 +897,74 @@ func loadBrandIcons(tx *gorm.DB, brandID *uint, requested []string) ([]BrandIcon
 		result = append(result, BrandIconFacts{PublicID: icon.PublicID, Name: icon.Name, Notes: icon.Notes, MIMEType: icon.MIMEType, Width: icon.Width, Height: icon.Height, ByteCount: icon.ByteCount, SHA256: icon.SHA256})
 	}
 	return result, nil
+}
+
+func loadExternalReferences(tx *gorm.DB, categoryID uint, requested []string) ([]ReferenceSOPFacts, []ExternalReferenceFacts, error) {
+	if len(requested) == 0 {
+		return []ReferenceSOPFacts{}, []ExternalReferenceFacts{}, nil
+	}
+	var items []models.AIReferenceItem
+	if err := tx.Where("public_id IN ?", requested).Order("public_id").Find(&items).Error; err != nil || len(items) != len(requested) {
+		return nil, nil, ErrExternalReferenceNotEligible
+	}
+	versionIDs := make([]uint, 0, len(items))
+	for _, item := range items {
+		versionIDs = append(versionIDs, item.AIReferenceSOPVersionID)
+	}
+	var versions []models.AIReferenceSOPVersion
+	if err := tx.Where("id IN ? AND status = ?", versionIDs, models.SOPVersionPublished).Find(&versions).Error; err != nil {
+		return nil, nil, err
+	}
+	versionsByID := make(map[uint]models.AIReferenceSOPVersion, len(versions))
+	sopIDs := make([]uint, 0, len(versions))
+	publisherIDs := make([]uint, 0, len(versions))
+	for _, version := range versions {
+		versionsByID[version.ID] = version
+		sopIDs = append(sopIDs, version.AIReferenceSOPID)
+		if version.PublishedByID != nil {
+			publisherIDs = append(publisherIDs, *version.PublishedByID)
+		}
+	}
+	var sops []models.AIReferenceSOP
+	if err := tx.Where("id IN ? AND category_id = ?", sopIDs, categoryID).Find(&sops).Error; err != nil {
+		return nil, nil, err
+	}
+	sopsByID := make(map[uint]models.AIReferenceSOP, len(sops))
+	for _, sop := range sops {
+		sopsByID[sop.ID] = sop
+	}
+	users, err := publicUserIDs(tx, publisherIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	frozenSOPs := make([]ReferenceSOPFacts, 0)
+	seenVersions := map[uint]bool{}
+	references := make([]ExternalReferenceFacts, 0, len(items))
+	for _, item := range items {
+		version, ok := versionsByID[item.AIReferenceSOPVersionID]
+		if !ok {
+			return nil, nil, ErrExternalReferenceNotEligible
+		}
+		sop, ok := sopsByID[version.AIReferenceSOPID]
+		if !ok || !validExternalReferencePurpose(item.Purpose) || item.ObjectKey == "" || item.SHA256 == "" || !item.RightsConfirmed {
+			return nil, nil, ErrExternalReferenceNotEligible
+		}
+		reviewer := ""
+		if version.PublishedByID != nil {
+			reviewer = users[*version.PublishedByID]
+		}
+		if !seenVersions[version.ID] {
+			frozenSOPs = append(frozenSOPs, ReferenceSOPFacts{PublicID: sop.PublicID, VersionPublicID: version.PublicID, VersionNumber: version.VersionNumber, CategoryID: sop.CategoryID, Name: LocalizedNameFacts{ZH: version.NameZH, EN: version.NameEN}})
+			seenVersions[version.ID] = true
+		}
+		references = append(references, ExternalReferenceFacts{PublicID: item.PublicID, SOPPublicID: sop.PublicID, VersionPublicID: version.PublicID, Purpose: item.Purpose, Caption: LocalizedNameFacts{ZH: item.CaptionZH, EN: item.CaptionEN}, AllowedGuidance: LocalizedNameFacts{ZH: item.AllowedGuidanceZH, EN: item.AllowedGuidanceEN}, ForbiddenGuidance: LocalizedNameFacts{ZH: item.ForbiddenGuidanceZH, EN: item.ForbiddenGuidanceEN}, SourceName: item.SourceName, SourceURL: item.SourceURL, SHA256: item.SHA256, ReviewedByPublicID: reviewer})
+	}
+	sort.Slice(frozenSOPs, func(i, j int) bool { return frozenSOPs[i].VersionPublicID < frozenSOPs[j].VersionPublicID })
+	return frozenSOPs, references, nil
+}
+
+func validExternalReferencePurpose(value models.AIReferencePurpose) bool {
+	return value == models.AIReferenceVisualStyle || value == models.AIReferenceUsageEffect || value == models.AIReferenceCopyInspiration
 }
 
 func reviewerIDsFromStyleGrants(values []models.StyleReferenceGrant) []uint {

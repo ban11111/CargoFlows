@@ -242,3 +242,15 @@ func TestCompileImagePromptGolden(t *testing.T) {
 		}
 	}
 }
+
+func TestCompileImagePromptLabelsExternalReferencesAsUntrustedInspiration(t *testing.T) {
+	snapshot, slot := imagePromptFixture()
+	snapshot.ExternalReferences = []ExternalReferenceFacts{{PublicID: "external-a", Purpose: models.AIReferenceUsageEffect, Caption: LocalizedNameFacts{ZH: "套机", EN: "Fitted"}, AllowedGuidance: LocalizedNameFacts{ZH: "比例", EN: "Proportion"}, ForbiddenGuidance: LocalizedNameFacts{ZH: "品牌", EN: "Brand"}, SourceName: "Competitor", SHA256: strings.Repeat("a", 64)}}
+	compiled, err := CompileImagePrompt(snapshot, slot, ImageTurnInput{Operation: models.AIExecutionGenerate, ThreadPublicID: "thread-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(compiled.Instructions, "external_reference_*") || !strings.Contains(string(compiled.NormalizedInputJSON), "external_reference_usage_effect") || !strings.Contains(string(compiled.NormalizedInputJSON), "forbidden_guidance") {
+		t.Fatalf("external safety metadata missing: %s\n%s", compiled.Instructions, compiled.NormalizedInputJSON)
+	}
+}

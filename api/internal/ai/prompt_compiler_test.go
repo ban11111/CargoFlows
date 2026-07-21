@@ -210,3 +210,22 @@ func TestCompileTextPromptGolden(t *testing.T) {
 		})
 	}
 }
+
+func TestCompileTextPromptIncludesOnlyCopyInspirationAsNonFact(t *testing.T) {
+	snapshot, slot := textPromptFixture(models.AIContentSlotTitle)
+	snapshot.ExternalReferences = []ExternalReferenceFacts{
+		{PublicID: "copy-a", Purpose: models.AIReferenceCopyInspiration, Caption: LocalizedNameFacts{ZH: "卖点", EN: "Copy"}, AllowedGuidance: LocalizedNameFacts{ZH: "结构", EN: "Structure"}, ForbiddenGuidance: LocalizedNameFacts{ZH: "事实", EN: "Facts"}, SourceName: "Competitor", SHA256: strings.Repeat("a", 64)},
+		{PublicID: "usage-a", Purpose: models.AIReferenceUsageEffect, Caption: LocalizedNameFacts{ZH: "套机", EN: "Fitted"}, AllowedGuidance: LocalizedNameFacts{ZH: "比例", EN: "Proportion"}, ForbiddenGuidance: LocalizedNameFacts{ZH: "品牌", EN: "Brand"}, SourceName: "Competitor", SHA256: strings.Repeat("b", 64)},
+	}
+	compiled, err := CompileTextPrompt(snapshot, slot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := string(compiled.InputJSON)
+	if !strings.Contains(input, "copy-a") || strings.Contains(input, "usage-a") || !strings.Contains(input, "untrusted_expression_inspiration_not_fact") {
+		t.Fatalf("copy inspiration isolation failed: %s", input)
+	}
+	if !strings.Contains(compiled.Instructions, "never cite external-reference IDs") {
+		t.Fatalf("external references were not excluded from facts: %s", compiled.Instructions)
+	}
+}
