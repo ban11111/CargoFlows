@@ -219,7 +219,7 @@ func (e *ImageExecutor) prepare(ctx context.Context, leased LeasedItem) (prepare
 		}
 		now := e.clock.Now()
 		requestConfig, _ := json.Marshal(map[string]any{"model": e.model, "size": prompt.ToolConfig.Size, "quality": prompt.ToolConfig.Quality, "store": false})
-		execution := models.AIExecution{PublicID: uuid.NewString(), AIJobItemID: item.ID, AIImageTurnID: &turn.ID, Operation: turn.Operation, Status: models.AIExecutionPreparing, AttemptNumber: item.AttemptCount, L0PolicyVersion: prompt.LayerVersions.L0, L1ProductContextVersion: prompt.LayerVersions.L1, L2TemplateVersionPublicID: prompt.LayerVersions.L2, L3ContentSlotPublicID: prompt.LayerVersions.L3, NormalizedInputJSON: prompt.NormalizedInputJSON, OrderedInputListJSON: prompt.OrderedInputListJSON, CompiledPrompt: prompt.Instructions, CompiledPromptSHA256: prompt.SHA256, UserInstruction: turn.UserInstruction, Model: e.model, RequestedModel: e.model, APIMode: "responses", RequestConfigJSON: requestConfig, WorkerID: leased.LeaseOwner, LeaseExpiresAt: item.LeaseExpiresAt, StartedAt: &now}
+		execution := models.AIExecution{PublicID: uuid.NewString(), AIJobItemID: item.ID, AIImageTurnID: &turn.ID, Operation: turn.Operation, Status: models.AIExecutionPreparing, AttemptNumber: item.AttemptCount, L0PolicyVersion: prompt.LayerVersions.L0, L1ProductContextVersion: prompt.LayerVersions.L1, L2TemplateVersionPublicID: prompt.LayerVersions.L2, L3ContentSlotPublicID: prompt.LayerVersions.L3, NormalizedInputJSON: prompt.NormalizedInputJSON, OrderedInputListJSON: prompt.OrderedInputListJSON, CompiledPrompt: prompt.ImagesAPIPrompt(), CompiledPromptSHA256: prompt.SHA256, UserInstruction: turn.UserInstruction, Model: e.model, RequestedModel: e.model, APIMode: "responses", RequestConfigJSON: requestConfig, WorkerID: leased.LeaseOwner, LeaseExpiresAt: item.LeaseExpiresAt, StartedAt: &now}
 		if err := tx.Create(&execution).Error; err != nil {
 			return err
 		}
@@ -264,7 +264,7 @@ func (e *ImageExecutor) prepare(ctx context.Context, leased LeasedItem) (prepare
 			}
 			keys = append(keys, stored.DerivativeObjectKey)
 		}
-		for _, reference := range snapshot.ExternalReferences {
+		for _, reference := range imageGenerationExternalReferences(snapshot.ExternalReferences) {
 			var stored models.AIReferenceItem
 			if err := tx.Where("public_id = ? AND sha256 = ?", reference.PublicID, reference.SHA256).First(&stored).Error; err != nil || stored.ObjectKey == "" {
 				return invalidExecutionInput("frozen external reference is unavailable")

@@ -106,7 +106,8 @@ func (client *OpenAIImageResponsesClient) requestBody(request ImageRequest) ([]b
 	if model == "" {
 		model = client.config.Model
 	}
-	if len(request.Prompt.NormalizedInputJSON) == 0 || len(request.Prompt.OrderedInputListJSON) == 0 || request.Prompt.Instructions == "" || request.Prompt.ToolConfig.Moderation != "auto" || (request.Prompt.ToolConfig.Action != "generate" && request.Prompt.ToolConfig.Action != "edit") || !supportedImageSize(request.Prompt.ToolConfig.Size) || !supportedQuality(request.Prompt.ToolConfig.Quality) || len(request.Inputs) == 0 || len(request.Metadata) > 16 {
+	expectedInputs, inputCountErr := request.Prompt.ExpectedInputCount()
+	if len(request.Prompt.NormalizedInputJSON) == 0 || len(request.Prompt.OrderedInputListJSON) == 0 || request.Prompt.Instructions == "" || request.Prompt.ToolConfig.Moderation != "auto" || (request.Prompt.ToolConfig.Action != "generate" && request.Prompt.ToolConfig.Action != "edit") || !supportedImageSize(request.Prompt.ToolConfig.Size) || !supportedQuality(request.Prompt.ToolConfig.Quality) || len(request.Inputs) == 0 || inputCountErr != nil || expectedInputs != len(request.Inputs) || len(request.Metadata) > 16 {
 		return nil, &ImageProviderError{Kind: ErrImageProviderInvalidRequest}
 	}
 	for key, value := range request.Metadata {
@@ -116,15 +117,10 @@ func (client *OpenAIImageResponsesClient) requestBody(request ImageRequest) ([]b
 	}
 	var inputBytes int
 	content := make([]map[string]any, 0, len(request.Inputs)+1)
-	inputEnvelope, err := json.Marshal(struct {
-		NormalizedInput json.RawMessage `json:"normalized_input"`
-		OrderedInputs   json.RawMessage `json:"ordered_inputs"`
-	}{request.Prompt.NormalizedInputJSON, request.Prompt.OrderedInputListJSON})
-	if err != nil {
+	if strings.TrimSpace(request.Prompt.TaskBrief) == "" {
 		return nil, &ImageProviderError{Kind: ErrImageProviderInvalidRequest}
 	}
-	content = append(content, map[string]any{"type": "input_text", "text": string(inputEnvelope)})
-	clearByteSlice(inputEnvelope)
+	content = append(content, map[string]any{"type": "input_text", "text": request.Prompt.ProviderInputText()})
 	for _, input := range request.Inputs {
 		if input.MIMEType != "image/png" && input.MIMEType != "image/jpeg" && input.MIMEType != "image/webp" {
 			return nil, &ImageProviderError{Kind: ErrImageProviderInvalidRequest}

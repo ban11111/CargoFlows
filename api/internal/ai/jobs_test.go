@@ -249,7 +249,7 @@ func TestCreateJobFreezesPublishedSameCategoryExternalReferences(t *testing.T) {
 	if err := db.Create(&sop).Error; err != nil {
 		t.Fatal(err)
 	}
-	version := models.AIReferenceSOPVersion{PublicID: uuid.NewString(), AIReferenceSOPID: sop.ID, VersionNumber: 1, NameZH: "套机效果", NameEN: "Fitted effect", Status: models.SOPVersionPublished, PublishedByID: &fixture.Operator.ID, PublishedAt: &now}
+	version := models.AIReferenceSOPVersion{PublicID: uuid.NewString(), AIReferenceSOPID: sop.ID, VersionNumber: 1, NameZH: "套机效果", NameEN: "Fitted effect", DescriptionZH: "只参考姿态与比例", DescriptionEN: "Pose and proportion only", Status: models.SOPVersionPublished, PublishedByID: &fixture.Operator.ID, PublishedAt: &now}
 	if err := db.Create(&version).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +265,7 @@ func TestCreateJobFreezesPublishedSameCategoryExternalReferences(t *testing.T) {
 	if err := json.Unmarshal(job.InputSnapshot, &snapshot); err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.ReferenceSOPs) != 1 || len(snapshot.ExternalReferences) != 1 || snapshot.ExternalReferences[0].Purpose != models.AIReferenceUsageEffect || snapshot.ExternalReferences[0].SHA256 != strings.Repeat("a", 64) {
+	if len(snapshot.ReferenceSOPs) != 1 || snapshot.ReferenceSOPs[0].Description.EN != "Pose and proportion only" || len(snapshot.ExternalReferences) != 1 || snapshot.ExternalReferences[0].Purpose != models.AIReferenceUsageEffect || snapshot.ExternalReferences[0].SHA256 != strings.Repeat("a", 64) {
 		t.Fatalf("external reference was not frozen: %#v", snapshot)
 	}
 	if err := db.Model(&usage).Updates(map[string]any{"caption_zh": "changed", "sha256": strings.Repeat("b", 64)}).Error; err != nil {

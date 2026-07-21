@@ -227,6 +227,7 @@ type ReferenceSOPFacts struct {
 	VersionNumber   int                `json:"version_number"`
 	CategoryID      uint               `json:"category_id"`
 	Name            LocalizedNameFacts `json:"name"`
+	Description     LocalizedNameFacts `json:"description"`
 }
 
 type ExternalReferenceFacts struct {
@@ -1013,7 +1014,7 @@ func loadExternalReferences(tx *gorm.DB, categoryID uint, requested []string) ([
 			reviewer = users[*version.PublishedByID]
 		}
 		if !seenVersions[version.ID] {
-			frozenSOPs = append(frozenSOPs, ReferenceSOPFacts{PublicID: sop.PublicID, VersionPublicID: version.PublicID, VersionNumber: version.VersionNumber, CategoryID: sop.CategoryID, Name: LocalizedNameFacts{ZH: version.NameZH, EN: version.NameEN}})
+			frozenSOPs = append(frozenSOPs, ReferenceSOPFacts{PublicID: sop.PublicID, VersionPublicID: version.PublicID, VersionNumber: version.VersionNumber, CategoryID: sop.CategoryID, Name: LocalizedNameFacts{ZH: version.NameZH, EN: version.NameEN}, Description: LocalizedNameFacts{ZH: version.DescriptionZH, EN: version.DescriptionEN}})
 			seenVersions[version.ID] = true
 		}
 		references = append(references, ExternalReferenceFacts{PublicID: item.PublicID, SOPPublicID: sop.PublicID, VersionPublicID: version.PublicID, Purpose: item.Purpose, Caption: LocalizedNameFacts{ZH: item.CaptionZH, EN: item.CaptionEN}, AllowedGuidance: LocalizedNameFacts{ZH: item.AllowedGuidanceZH, EN: item.AllowedGuidanceEN}, ForbiddenGuidance: LocalizedNameFacts{ZH: item.ForbiddenGuidanceZH, EN: item.ForbiddenGuidanceEN}, SourceName: item.SourceName, SourceURL: item.SourceURL, SHA256: item.SHA256, ReviewedByPublicID: reviewer})

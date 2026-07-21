@@ -102,13 +102,18 @@ func (client *OpenAIImagesClient) Generate(ctx context.Context, apiKey []byte, r
 }
 
 func imagesRequestBody(model string, request ImageRequest) ([]byte, string, string, error) {
+	providerPrompt := request.Prompt.ImagesAPIPrompt()
+	expectedInputs, err := request.Prompt.ExpectedInputCount()
+	if strings.TrimSpace(request.Prompt.TaskBrief) == "" || len(request.Prompt.NormalizedInputJSON) == 0 || len(request.Prompt.OrderedInputListJSON) == 0 || err != nil || expectedInputs != len(request.Inputs) {
+		return nil, "", "", &ImageProviderError{Kind: ErrImageProviderInvalidRequest}
+	}
 	if len(request.Inputs) == 0 {
-		body, err := json.Marshal(map[string]any{"model": model, "prompt": request.Prompt.Instructions, "n": 1, "size": request.Prompt.ToolConfig.Size, "quality": request.Prompt.ToolConfig.Quality, "output_format": "png"})
+		body, err := json.Marshal(map[string]any{"model": model, "prompt": providerPrompt, "n": 1, "size": request.Prompt.ToolConfig.Size, "quality": request.Prompt.ToolConfig.Quality, "output_format": "png"})
 		return body, "application/json", "/images/generations", err
 	}
 	var buffer bytes.Buffer
 	w := multipart.NewWriter(&buffer)
-	fields := map[string]string{"model": model, "prompt": request.Prompt.Instructions, "n": "1", "size": request.Prompt.ToolConfig.Size, "quality": request.Prompt.ToolConfig.Quality, "output_format": "png"}
+	fields := map[string]string{"model": model, "prompt": providerPrompt, "n": "1", "size": request.Prompt.ToolConfig.Size, "quality": request.Prompt.ToolConfig.Quality, "output_format": "png"}
 	for key, value := range fields {
 		if err := w.WriteField(key, value); err != nil {
 			return nil, "", "", err
