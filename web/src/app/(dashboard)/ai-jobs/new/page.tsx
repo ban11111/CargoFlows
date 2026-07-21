@@ -23,7 +23,7 @@ type Template = components["schemas"]["AIContentTemplate"];
 type Slot = components["schemas"]["AIContentSlot"];
 type Job = components["schemas"]["AIJob"];
 type Override = components["schemas"]["AIJobGenerationOverride"];
-type SKU = { public_id: string; code: string; status: string; product: { name: string; category_id: number; brand_id?: string; brand?: string } };
+type SKU = { public_id: string; code: string; status: string; compatible_device_model: string; product: { name: string; category_id: number; brand_id?: string; brand?: string } };
 type BrandIcon = { public_id: string; name: string; notes: string; media_url: string; status: string };
 type AssetCategory = components["schemas"]["AssetReviewCategory"];
 type ReviewAsset = AssetCategory["skus"][number]["assets"][number];
@@ -57,6 +57,10 @@ function slotKind(kind: Slot["kind"], zh: boolean) {
   if (kind === "image") return zh ? "图片" : "Image";
   if (kind === "title") return zh ? "商品标题" : "Product title";
   return zh ? "搜索优化描述" : "Search description";
+}
+
+function requiresCompatibleDeviceModel(slot: Slot) {
+  return (slot.constraints as Record<string, unknown>).requires_compatible_device_model === true;
 }
 
 function AssetGroup({ assets, label, help, selected, setSelected, zh }: { assets: ReviewAsset[]; label: string; help?: string; selected: string[]; setSelected: (update: (current: string[]) => string[]) => void; zh: boolean }) {
@@ -167,12 +171,17 @@ export default function NewAIJobPage() {
   async function selectSKU(next: string) {
 		pendingSKUSelection.current = next;
     setSkuID(next);
+    const nextSKU = skusQuery.data?.data.find((sku) => sku.public_id === next);
+    if (!nextSKU?.compatible_device_model.trim()) {
+      const modelDependentKeys = new Set(slots.filter(requiresCompatibleDeviceModel).map((slot) => slot.slot_key));
+      setSelectedSlots((current) => current.filter((key) => !modelDependentKeys.has(key)));
+    }
     setSelectedReferenceItems([]);
     const assets = (assetsQuery.data?.data ?? []).flatMap((category) => category.skus).find((sku) => sku.public_id === next)?.assets ?? [];
 		setSelectedAssets(assets.filter((asset) => asset.review_status === "approved" && (asset as ReviewAsset & { origin_type?: string }).origin_type !== "ai_generated").map((asset) => asset.public_id));
 		setSelectedBrandIcons([]);
 		setBrandIcons([]);
-		const nextBrandID = skusQuery.data?.data.find((sku) => sku.public_id === next)?.product.brand_id;
+		const nextBrandID = nextSKU?.product.brand_id;
 		if (nextBrandID) {
 			setBrandIconsLoading(true);
 			try { const response = await apiRequest<{ data: BrandIcon[] }>(`/brands/${nextBrandID}/icons?status=active`); if (pendingSKUSelection.current === next) { setBrandIcons(response.data); setSelectedBrandIcons(response.data.map((icon) => icon.public_id)); } } finally { if (pendingSKUSelection.current === next) setBrandIconsLoading(false); }
@@ -196,6 +205,7 @@ export default function NewAIJobPage() {
     setError(null);
     setCanvasError(false);
     const removing = selectedSlots.includes(slot.slot_key);
+    if (!removing && requiresCompatibleDeviceModel(slot) && !selectedSKU?.compatible_device_model.trim()) return;
     if (removing && slot.kind === "image") {
       setCanvases((current) => current.map((canvas) => ({ ...canvas, slotKeys: canvas.slotKeys.filter((key) => key !== slot.slot_key) })));
       if (chosenImageSlots.length === 1) {
@@ -279,7 +289,7 @@ export default function NewAIJobPage() {
       </div> : null}
 
       {step === 2 ? <div className="space-y-5">
-        <fieldset className="space-y-3"><legend className="sr-only">{t("selectOutputSlots")}</legend>{slots.map((slot) => <label className={`flex min-h-16 cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors ${selectedSlots.includes(slot.slot_key) ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"}`} key={slot.public_id}><input checked={selectedSlots.includes(slot.slot_key)} className="mt-1 h-5 w-5 accent-[var(--color-primary)]" onChange={() => toggleSlot(slot)} type="checkbox" /><span className="min-w-0 flex-1"><span className="flex flex-wrap items-center gap-2 font-medium">{zh ? slot.name_zh : slot.name_en}<Badge>{slotKind(slot.kind, zh)}</Badge>{slot.optional ? <Badge>{t("optionalSlot")}</Badge> : null}</span><span className="mt-1 block text-sm text-muted-foreground">{zh ? slot.description_zh : slot.description_en}</span></span></label>)}</fieldset>
+        <fieldset className="space-y-3"><legend className="sr-only">{t("selectOutputSlots")}</legend>{slots.map((slot) => { const modelMissing = requiresCompatibleDeviceModel(slot) && !selectedSKU?.compatible_device_model.trim(); return <label aria-disabled={modelMissing} className={`flex min-h-16 items-start gap-3 rounded-lg border p-4 transition-colors ${modelMissing ? "cursor-not-allowed border-border bg-muted/40 opacity-70" : "cursor-pointer"} ${selectedSlots.includes(slot.slot_key) ? "border-primary bg-primary/5" : modelMissing ? "" : "border-border hover:bg-muted/50"}`} key={slot.public_id}><input checked={selectedSlots.includes(slot.slot_key)} className="mt-1 h-5 w-5 accent-[var(--color-primary)]" disabled={modelMissing} onChange={() => toggleSlot(slot)} type="checkbox" /><span className="min-w-0 flex-1"><span className="flex flex-wrap items-center gap-2 font-medium">{zh ? slot.name_zh : slot.name_en}<Badge>{slotKind(slot.kind, zh)}</Badge>{slot.optional ? <Badge>{t("optionalSlot")}</Badge> : null}</span><span className="mt-1 block text-sm text-muted-foreground">{zh ? slot.description_zh : slot.description_en}</span>{modelMissing ? <span className="mt-2 block text-xs font-medium text-warning">{zh ? "请先编辑 SKU 并填写兼容设备型号。" : "Edit the SKU and add a compatible device model first."} <Link className="underline" href={`/skus/${skuID}`}>{zh ? "编辑 SKU" : "Edit SKU"}</Link></span> : null}</span></label>; })}</fieldset>
         {chosenImageSlots.length ? <fieldset className="rounded-xl border border-primary/25 bg-primary/[0.035] p-4"><legend className="px-1 text-sm font-semibold text-navy">{zh ? "图片画布" : "Image canvases"}</legend><p className="mt-1 text-sm text-muted-foreground">{zh ? "可以添加多张画布，每张画布自由选择图片项目；同一项目可用于多张画布。" : "Add multiple canvases and choose projects independently for each. A project may be reused across canvases."}</p>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <label className={`cursor-pointer rounded-lg border p-4 ${!customCanvases ? "border-primary bg-card shadow-[var(--shadow-sm)]" : "border-border bg-card/60"}`}><span className="flex items-start gap-3"><input checked={!customCanvases} className="mt-1 h-5 w-5 accent-[var(--color-primary)]" name="image-output-mode" onChange={() => { setCustomCanvases(false); setCanvasError(false); }} type="radio" /><span><span className="block font-medium">{zh ? "每个项目单独一张" : "One image per project"}</span><span className="mt-1 block text-xs leading-5 text-muted-foreground">{chosenImageSlots.length} {zh ? "张图片输出" : "image outputs"}</span></span></span></label>

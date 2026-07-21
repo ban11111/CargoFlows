@@ -12,6 +12,7 @@ const activeSKU = {
   code: "CASE-BLK",
   color: "黑色",
   size: "标准",
+  compatible_device_model: "iPhone 17 Pro",
   barcode: "690000000001",
   stock: 12,
   low_stock_threshold: 3,

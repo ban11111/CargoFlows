@@ -443,14 +443,15 @@ func Seed(db *gorm.DB) error {
 	}
 
 	sku := models.SKU{
-		ProductID:         product.ID,
-		Code:              "CF-CASE-CLR-IP17",
-		Color:             "透明",
-		Size:              "iPhone 17 Pro",
-		Stock:             18,
-		LowStockThreshold: 20,
-		PlatformTitle:     "iPhone 17 Pro 透明防摔手机壳",
-		Status:            "active",
+		ProductID:             product.ID,
+		Code:                  "CF-CASE-CLR-IP17",
+		Color:                 "透明",
+		Size:                  "iPhone 17 Pro",
+		CompatibleDeviceModel: "iPhone 17 Pro",
+		Stock:                 18,
+		LowStockThreshold:     20,
+		PlatformTitle:         "iPhone 17 Pro 透明防摔手机壳",
+		Status:                "active",
 	}
 	if err := db.Create(&sku).Error; err != nil {
 		return err

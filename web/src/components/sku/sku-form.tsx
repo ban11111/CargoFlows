@@ -20,6 +20,7 @@ export interface SKUFormValue {
   code: string;
   color: string;
   size: string;
+  compatible_device_model: string;
   barcode: string;
   stock: number;
   low_stock_threshold: number;
@@ -32,7 +33,7 @@ export interface SKUFormValue {
 interface Category { id: number; name: string; name_en: string }
 interface Brand { public_id: string; name: string }
 
-const emptyValue: SKUFormValue = { category_id: 0, product_name: "", brand: "", brand_id: "", category: "", code: "", color: "", size: "", barcode: "", stock: 0, low_stock_threshold: 0, platform_title: "", selling_points: "", status: "draft", tags: [] };
+const emptyValue: SKUFormValue = { category_id: 0, product_name: "", brand: "", brand_id: "", category: "", code: "", color: "", size: "", compatible_device_model: "", barcode: "", stock: 0, low_stock_threshold: 0, platform_title: "", selling_points: "", status: "draft", tags: [] };
 
 export function SKUForm({ initial, mode, busy, onCancel, onSubmit }: { initial?: SKUFormValue; mode: "create" | "edit"; busy?: boolean; onCancel?: () => void; onSubmit: (value: SKUFormValue) => void }) {
   const { language } = useLanguage();
@@ -42,7 +43,7 @@ export function SKUForm({ initial, mode, busy, onCancel, onSubmit }: { initial?:
   const [errors, setErrors] = useState<Record<string, string>>({});
   const categories = useQuery({ queryKey: ["categories"], queryFn: () => apiRequest<{ data: Category[] }>("/categories") });
 	const brands = useQuery({ queryKey: ["brands"], queryFn: () => apiRequest<{ data: Brand[] }>("/brands") });
-  const text = zh ? { productName: "商品名称", brand: "品牌", category: "分类", code: "SKU 编码", color: "颜色", size: "规格 / 型号", barcode: "条码", stock: "初始库存", threshold: "低库存阈值", platformTitle: "平台标题", sellingPoints: "卖点", status: "状态", tags: "标签（逗号分隔）", active: "启用", draft: "草稿", disabled: "停用", save: mode === "create" ? "创建 SKU" : "保存修改", cancel: "取消", required: "请填写此字段", chooseCategory: "请选择分类" } : { productName: "Product name", brand: "Brand", category: "Category", code: "SKU code", color: "Color", size: "Specification / model", barcode: "Barcode", stock: "Initial stock", threshold: "Low-stock threshold", platformTitle: "Platform title", sellingPoints: "Selling points", status: "Status", tags: "Tags (comma-separated)", active: "Active", draft: "Draft", disabled: "Disabled", save: mode === "create" ? "Create SKU" : "Save changes", cancel: "Cancel", required: "This field is required", chooseCategory: "Choose a category" };
+  const text = zh ? { productName: "商品名称", brand: "品牌", category: "分类", code: "SKU 编码", color: "颜色", size: "规格", compatibleDeviceModel: "兼容设备型号", compatibleDeviceModelHelp: "装机效果图使用的唯一可信型号，例如 iPhone 17 Pro。普通 SKU 可留空。", barcode: "条码", stock: "初始库存", threshold: "低库存阈值", platformTitle: "平台标题", sellingPoints: "卖点", status: "状态", tags: "标签（逗号分隔）", active: "启用", draft: "草稿", disabled: "停用", save: mode === "create" ? "创建 SKU" : "保存修改", cancel: "取消", required: "请填写此字段", chooseCategory: "请选择分类" } : { productName: "Product name", brand: "Brand", category: "Category", code: "SKU code", color: "Color", size: "Specification", compatibleDeviceModel: "Compatible device model", compatibleDeviceModelHelp: "The sole trusted model for installed-device images, for example iPhone 17 Pro. Optional for ordinary SKUs.", barcode: "Barcode", stock: "Initial stock", threshold: "Low-stock threshold", platformTitle: "Platform title", sellingPoints: "Selling points", status: "Status", tags: "Tags (comma-separated)", active: "Active", draft: "Draft", disabled: "Disabled", save: mode === "create" ? "Create SKU" : "Save changes", cancel: "Cancel", required: "This field is required", chooseCategory: "Choose a category" };
 
   function set<K extends keyof SKUFormValue>(key: K, next: SKUFormValue[K]) { setValue((current) => ({ ...current, [key]: next })); }
   function submit(event: FormEvent) {
@@ -54,7 +55,7 @@ export function SKUForm({ initial, mode, busy, onCancel, onSubmit }: { initial?:
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) return;
     const selected = categories.data?.data.find((category) => category.id === value.category_id);
-    onSubmit({ ...value, product_name: value.product_name.trim(), code: value.code.trim(), category: selected?.name ?? value.category, tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean) });
+    onSubmit({ ...value, product_name: value.product_name.trim(), code: value.code.trim(), compatible_device_model: value.compatible_device_model.trim(), category: selected?.name ?? value.category, tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean) });
   }
 
   return <form className="space-y-5" onSubmit={submit}>
@@ -65,6 +66,7 @@ export function SKUForm({ initial, mode, busy, onCancel, onSubmit }: { initial?:
       <FormField error={errors.code} id="sku-code" label={text.code}><Input id="sku-code" maxLength={80} onChange={(event) => set("code", event.target.value)} value={value.code} /></FormField>
       <FormField id="sku-color" label={text.color}><Input id="sku-color" maxLength={80} onChange={(event) => set("color", event.target.value)} value={value.color} /></FormField>
       <FormField id="sku-size" label={text.size}><Input id="sku-size" maxLength={80} onChange={(event) => set("size", event.target.value)} value={value.size} /></FormField>
+      <div><FormField id="sku-compatible-device-model" label={text.compatibleDeviceModel}><Input aria-describedby="sku-compatible-device-model-help" id="sku-compatible-device-model" maxLength={120} onChange={(event) => set("compatible_device_model", event.target.value)} value={value.compatible_device_model} /></FormField><p className="mt-1 text-xs leading-5 text-muted-foreground" id="sku-compatible-device-model-help">{text.compatibleDeviceModelHelp}</p></div>
       <FormField id="sku-barcode" label={text.barcode}><Input id="sku-barcode" maxLength={120} onChange={(event) => set("barcode", event.target.value)} value={value.barcode} /></FormField>
       {mode === "create" ? <FormField id="sku-stock" label={text.stock}><Input id="sku-stock" min={0} onChange={(event) => set("stock", Number(event.target.value))} type="number" value={value.stock} /></FormField> : null}
       <FormField id="sku-threshold" label={text.threshold}><Input id="sku-threshold" min={0} onChange={(event) => set("low_stock_threshold", Number(event.target.value))} type="number" value={value.low_stock_threshold} /></FormField>

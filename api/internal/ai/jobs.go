@@ -45,6 +45,7 @@ var (
 	ErrStyleReferenceNotEligible      = errors.New("style references must be approved grants")
 	ErrBrandIconNotEligible           = errors.New("brand icons must be active and belong to the SKU brand")
 	ErrExternalReferenceNotEligible   = errors.New("external references must belong to a published same-category AI reference SOP")
+	ErrCompatibleDeviceModelRequired  = errors.New("compatible device model is required for the selected output")
 )
 
 type CreateJobInput struct {
@@ -94,13 +95,14 @@ type ProductFacts struct {
 }
 
 type SKUFacts struct {
-	PublicID      string   `json:"public_id"`
-	Code          string   `json:"code"`
-	Color         string   `json:"color"`
-	Size          string   `json:"size"`
-	PlatformTitle string   `json:"platform_title"`
-	SellingPoints string   `json:"selling_points"`
-	Tags          []string `json:"tags"`
+	PublicID              string   `json:"public_id"`
+	Code                  string   `json:"code"`
+	Color                 string   `json:"color"`
+	Size                  string   `json:"size"`
+	CompatibleDeviceModel string   `json:"compatible_device_model,omitempty"`
+	PlatformTitle         string   `json:"platform_title"`
+	SellingPoints         string   `json:"selling_points"`
+	Tags                  []string `json:"tags"`
 }
 
 type VectorFacts struct {
@@ -376,6 +378,9 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 		selectedSlots, err := selectJobSlots(version.Slots, normalized.SelectedSlotKeys)
 		if err != nil {
 			return err
+		}
+		if requiresCompatibleDeviceModel(selectedSlots) && strings.TrimSpace(sku.CompatibleDeviceModel) == "" {
+			return ErrCompatibleDeviceModelRequired
 		}
 		if err := validateUserPreference(selectedSlots, normalized.UserPreference); err != nil {
 			return err
@@ -1344,7 +1349,19 @@ func makeProductSnapshot(sku models.SKU, sop models.SOPVersion, captureSOPPublic
 	if overrides == nil {
 		overrides = map[string]GenerationOverride{}
 	}
-	return ProductSnapshotV1{Schema: ProductSnapshotSchemaV1, Locale: locale, TargetPlatform: template.TargetPlatform, Product: ProductFacts{Name: sku.Product.Name, Brand: sku.Product.Brand, Description: sku.Product.Description, Category: CategoryFacts{NameZH: sku.Product.CatalogCategory.Name, NameEN: sku.Product.CatalogCategory.NameEN}}, SKU: SKUFacts{PublicID: sku.PublicID, Code: sku.Code, Color: sku.Color, Size: sku.Size, PlatformTitle: sku.PlatformTitle, SellingPoints: sku.SellingPoints, Tags: tags}, SOP: SOPFacts{PublicID: captureSOPPublicID, VersionPublicID: sop.PublicID, VersionNumber: sop.VersionNumber, SchemaVersion: sop.SchemaVersion, Name: LocalizedNameFacts{ZH: sop.NameZH, EN: sop.NameEN}, Description: LocalizedNameFacts{ZH: sop.DescriptionZH, EN: sop.DescriptionEN}, CoordinateSystem: sop.CoordinateSystem, Views: views}, Template: TemplateFacts{TemplatePublicID: template.PublicID, VersionPublicID: version.PublicID, VersionNumber: version.VersionNumber, PromptCompilerVersion: version.PromptCompilerVersion, PlatformPrompt: version.PlatformPrompt, SelectedSlots: selectedSlots}, SelectedAssets: assetFacts, UserPreference: preference, GenerationOverrides: overrides, ImageCanvases: canvases}
+	return ProductSnapshotV1{Schema: ProductSnapshotSchemaV1, Locale: locale, TargetPlatform: template.TargetPlatform, Product: ProductFacts{Name: sku.Product.Name, Brand: sku.Product.Brand, Description: sku.Product.Description, Category: CategoryFacts{NameZH: sku.Product.CatalogCategory.Name, NameEN: sku.Product.CatalogCategory.NameEN}}, SKU: SKUFacts{PublicID: sku.PublicID, Code: sku.Code, Color: sku.Color, Size: sku.Size, CompatibleDeviceModel: sku.CompatibleDeviceModel, PlatformTitle: sku.PlatformTitle, SellingPoints: sku.SellingPoints, Tags: tags}, SOP: SOPFacts{PublicID: captureSOPPublicID, VersionPublicID: sop.PublicID, VersionNumber: sop.VersionNumber, SchemaVersion: sop.SchemaVersion, Name: LocalizedNameFacts{ZH: sop.NameZH, EN: sop.NameEN}, Description: LocalizedNameFacts{ZH: sop.DescriptionZH, EN: sop.DescriptionEN}, CoordinateSystem: sop.CoordinateSystem, Views: views}, Template: TemplateFacts{TemplatePublicID: template.PublicID, VersionPublicID: version.PublicID, VersionNumber: version.VersionNumber, PromptCompilerVersion: version.PromptCompilerVersion, PlatformPrompt: version.PlatformPrompt, SelectedSlots: selectedSlots}, SelectedAssets: assetFacts, UserPreference: preference, GenerationOverrides: overrides, ImageCanvases: canvases}
+}
+
+func requiresCompatibleDeviceModel(slots []models.AIContentSlot) bool {
+	for _, slot := range slots {
+		var constraints map[string]any
+		if json.Unmarshal(slot.ConstraintsJSON, &constraints) == nil {
+			if required, ok := constraints["requires_compatible_device_model"].(bool); ok && required {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func slotFacts(slot models.AIContentSlot) SlotFacts {

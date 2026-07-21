@@ -27,15 +27,16 @@ const template = {
     { public_id: "slot-title", slot_key: "title", kind: "title", name_zh: "商品标题", name_en: "Product title", description_zh: "搜索标题", description_en: "Search title", sequence: 2, optional: true, default_selected: false, prompt_fragment: "title", constraints: {}, generation_config: { allowed_candidate_count: [1, 3] }, layout_config: {} },
     { public_id: "slot-detail", slot_key: "detail", kind: "image", name_zh: "细节卖点", name_en: "Detail benefits", description_zh: "展示边缘和按键", description_en: "Show edges and buttons", sequence: 3, optional: true, default_selected: false, prompt_fragment: "detail", constraints: { required_views: ["reference_front"] }, generation_config: { allowed_candidate_count: [1, 2], allowed_sizes: ["1024x1024"], allowed_qualities: ["high"], allowed_styles: ["简洁", "生活方式"], allow_user_extra_prompt: true }, layout_config: {} },
     { public_id: "slot-lifestyle", slot_key: "lifestyle", kind: "image", name_zh: "生活场景", name_en: "Lifestyle", description_zh: "展示使用场景", description_en: "Show product in use", sequence: 4, optional: true, default_selected: false, prompt_fragment: "lifestyle", constraints: { required_views: ["reference_front"] }, generation_config: { allowed_candidate_count: [1, 2], allowed_sizes: ["1024x1024"], allowed_qualities: ["high"], allowed_styles: ["简洁", "生活方式"], allow_user_extra_prompt: true }, layout_config: {} },
+    { public_id: "slot-installed", slot_key: "installed", kind: "image", name_zh: "真实手机装壳棚拍图", name_en: "Installed device studio", description_zh: "展示真实装机效果", description_en: "Show the installed device", sequence: 5, optional: true, default_selected: false, prompt_fragment: "installed", constraints: { required_views: ["reference_front"], requires_compatible_device_model: true }, generation_config: { allowed_candidate_count: [1], allowed_sizes: ["1024x1024"], allowed_qualities: ["high"], allowed_styles: ["简洁"], allow_user_extra_prompt: true }, layout_config: {} },
   ] }],
 };
 
-function installWizardFetch(assetViewKey = "reference_front") {
+function installWizardFetch(assetViewKey = "reference_front", compatibleDeviceModel = "iPhone 17 Pro") {
   const requests: Array<{ path: string; init?: RequestInit; body?: unknown }> = [];
   const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const path = String(input);
     requests.push({ path, init, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-    if (path.endsWith("/skus")) return new Response(JSON.stringify({ data: [{ public_id: skuPublicID, code: "CF-CASE-CLR-IP17", status: "active", product: { name: "Clear Case", brand: "CargoFlows", brand_id: brandPublicID } }] }), { status: 200 });
+    if (path.endsWith("/skus")) return new Response(JSON.stringify({ data: [{ public_id: skuPublicID, code: "CF-CASE-CLR-IP17", status: "active", compatible_device_model: compatibleDeviceModel, product: { name: "Clear Case", brand: "CargoFlows", brand_id: brandPublicID } }] }), { status: 200 });
 	if (path.includes(`/brands/${brandPublicID}/icons`)) return new Response(JSON.stringify({ data: [{ public_id: brandIconPublicID, name: "Primary", notes: "", media_url: `/api/v1/brand-icons/${brandIconPublicID}/media`, status: "active" }] }), { status: 200 });
     if (path.endsWith("/ai-content-templates")) return new Response(JSON.stringify({ data: [template] }), { status: 200 });
     if (path.includes("/assets/review/hierarchy")) return new Response(JSON.stringify({ data: [{ id: 1, name: "配件", name_en: "Accessories", is_system: false, skus: [{ public_id: skuPublicID, code: "CF-CASE-CLR-IP17", product_name: "Clear Case", tags: [], assets: [{ public_id: assetPublicID, media_url: `/api/v1/assets/${assetPublicID}/media`, review_status: "approved", captured_at: "2026-07-17T00:00:00Z", sop_view_key: assetViewKey, sop_view_name: { "zh-CN": "正面", en: "Front" }, photo_session_code: "PS-1" }] }] }] }), { status: 200 });
@@ -82,6 +83,17 @@ describe("NewAIJobPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "下一步" }));
     expect(screen.getByRole("alert")).toHaveTextContent("请至少选择一个输出槽位");
     expect(screen.getByRole("heading", { name: "选择输出槽位" })).toBeInTheDocument();
+  });
+
+  it("disables device-dependent slots when the SKU has no compatible model", async () => {
+    installWizardFetch("reference_front", "   ");
+    render(<NewAIJobPage />, { wrapper: Providers });
+    fireEvent.change(await screen.findByLabelText("选择 SKU"), { target: { value: skuPublicID } });
+    fireEvent.change(screen.getByLabelText("选择模板版本"), { target: { value: "version-1" } });
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    expect(screen.getByRole("checkbox", { name: /真实手机装壳棚拍图/ })).toBeDisabled();
+    expect(screen.getByText("请先编辑 SKU 并填写兼容设备型号。")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "编辑 SKU" })).toHaveAttribute("href", `/skus/${skuPublicID}`);
   });
 
   it("builds multiple canvases and allows a project to be reused", async () => {

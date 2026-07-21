@@ -267,6 +267,15 @@ func TestTextResultReviewAndApplicationRoutesAreOperatorSafe(t *testing.T) {
 	}
 }
 
+func TestRespondAIErrorUsesStructuredCompatibleDeviceModelCode(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	respondAIError(context, ai.ErrCompatibleDeviceModelRequired)
+	if recorder.Code != http.StatusUnprocessableEntity || !strings.Contains(recorder.Body.String(), `"code":"sku_compatible_device_model_required"`) {
+		t.Fatalf("response = %d %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestAIContentTemplateAdminLifecycleUsesPublicDTOs(t *testing.T) {
 	db := newTestDB(t)
 	server, admin, operator := authenticatedAIRouter(t, db, &handlerVerifier{authenticated: true})

@@ -1524,6 +1524,7 @@ components:
         code: { type: string, minLength: 1 }
         color: { type: string }
         size: { type: string }
+        compatible_device_model: { type: string, maxLength: 120, description: Canonical compatible device model used by device-dependent AI outputs. }
         barcode: { type: string }
         stock: { type: integer }
         low_stock_threshold: { type: integer }
@@ -1556,12 +1557,13 @@ components:
     SKU:
       type: object
       additionalProperties: false
-      required: [public_id, code, color, size, barcode, stock, low_stock_threshold, platform_title, selling_points, status, created_at, updated_at, product, tags]
+      required: [public_id, code, color, size, compatible_device_model, barcode, stock, low_stock_threshold, platform_title, selling_points, status, created_at, updated_at, product, tags]
       properties:
         public_id: { type: string, format: uuid }
         code: { type: string }
         color: { type: string }
         size: { type: string }
+        compatible_device_model: { type: string, description: Canonical compatible device model used by device-dependent AI outputs. }
         barcode: { type: string }
         stock: { type: integer }
         low_stock_threshold: { type: integer }

@@ -251,6 +251,23 @@ cd ../web
 ../scripts/run-ai-text-e2e.sh
 ```
 
+### Local AI administrator API tool
+
+For repeatable local AI-template and OpenAI-settings operations, copy the root
+`.env.example` to `.env` and set `ADMIN_USER_EMAIL` and
+`ADMIN_USER_PASSWORD` to an active super-administrator account. The ignored
+`.env` remains local. The helper logs in normally for every invocation, keeps the
+short-lived bearer token out of output, and only permits AI, OpenAI settings, and
+SKU API paths:
+
+```bash
+scripts/ai-admin-api.sh GET /ai-content-templates | jq
+scripts/ai-admin-api.sh PATCH /ai-content-template-versions/UUID update.json | jq
+```
+
+Pass `-` as the body source to read JSON from standard input. Override
+`API_BASE_URL` in `.env` when the API does not use `http://127.0.0.1:8080`.
+
 The local fake provider supports text Responses, the Responses image tool, and
 Images generation/edit endpoints. It returns deterministic PNGs and records only
 sanitized request facts (model, action, input count, mask/parent presence and safe

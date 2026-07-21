@@ -1784,6 +1784,8 @@ export interface components {
             code: string;
             color?: string;
             size?: string;
+            /** @description Canonical compatible device model used by device-dependent AI outputs. */
+            compatible_device_model?: string;
             barcode?: string;
             stock?: number;
             low_stock_threshold?: number;
@@ -1819,6 +1821,8 @@ export interface components {
             code: string;
             color: string;
             size: string;
+            /** @description Canonical compatible device model used by device-dependent AI outputs. */
+            compatible_device_model: string;
             barcode: string;
             stock: number;
             low_stock_threshold: number;

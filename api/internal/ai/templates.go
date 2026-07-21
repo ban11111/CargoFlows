@@ -467,6 +467,11 @@ func ValidateTemplateVersion(version models.AIContentTemplateVersion, slots []mo
 		if slot.Kind == models.AIContentSlotImage {
 			issues = append(issues, validateImageSize(generation, path+".generation_config.size")...)
 			issues = append(issues, validateRequiredViews(constraints, path+".constraints.required_views")...)
+			if value, exists := constraints["requires_compatible_device_model"]; exists {
+				if _, ok := value.(bool); !ok {
+					issues = appendIssue(issues, "requires_compatible_device_model_invalid", path+".constraints.requires_compatible_device_model", "Compatible device model requirement must be a boolean.")
+				}
+			}
 		} else if constraints != nil {
 			rawConstraints, _ := json.Marshal(constraints)
 			if _, err := parseTextConstraintRules(rawConstraints, slot.Kind); err != nil {
@@ -626,7 +631,7 @@ func validatePrompt(prompt, path string, required bool) []ValidationIssue {
 var supportedTemplateVariables = map[string]struct{}{
 	"locale": {}, "target_platform": {}, "candidate_count": {},
 	"product.name": {}, "product.brand": {}, "product.category": {}, "product.description": {}, "product.product_type": {},
-	"sku.code": {}, "sku.color": {}, "sku.size": {}, "sku.platform_title": {}, "sku.attributes": {},
+	"sku.code": {}, "sku.color": {}, "sku.size": {}, "sku.compatible_device_model": {}, "sku.platform_title": {}, "sku.attributes": {},
 	"sop.name_zh": {}, "sop.name_en": {}, "sop.version": {}, "sop.coordinate_system": {}, "sop.required_views": {}, "sop.views": {},
 	"style.name": {}, "style.description": {}, "style.instructions": {}, "style.preferences": {},
 	"approved_assets": {}, "approved_assets.metadata": {},

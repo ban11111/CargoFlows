@@ -122,22 +122,23 @@ type BrandIconUpload struct {
 func (upload *BrandIconUpload) BeforeCreate(*gorm.DB) error { return ensurePublicID(&upload.PublicID) }
 
 type SKU struct {
-	ID                uint      `gorm:"primaryKey" json:"-"`
-	PublicID          string    `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
-	ProductID         uint      `gorm:"index;not null" json:"-"`
-	Code              string    `gorm:"size:80;uniqueIndex;not null" json:"code"`
-	Color             string    `gorm:"size:80" json:"color"`
-	Size              string    `gorm:"size:80" json:"size"`
-	Barcode           string    `gorm:"size:120" json:"barcode"`
-	Stock             int       `gorm:"not null;default:0" json:"stock"`
-	LowStockThreshold int       `gorm:"not null;default:0" json:"low_stock_threshold"`
-	PlatformTitle     string    `gorm:"size:240" json:"platform_title"`
-	SellingPoints     string    `gorm:"type:text" json:"selling_points"`
-	Status            string    `gorm:"size:32;not null;default:active" json:"status"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
-	Product           Product   `json:"product"`
-	Tags              []Tag     `gorm:"many2many:sku_tags;" json:"tags"`
+	ID                    uint      `gorm:"primaryKey" json:"-"`
+	PublicID              string    `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
+	ProductID             uint      `gorm:"index;not null" json:"-"`
+	Code                  string    `gorm:"size:80;uniqueIndex;not null" json:"code"`
+	Color                 string    `gorm:"size:80" json:"color"`
+	Size                  string    `gorm:"size:80" json:"size"`
+	CompatibleDeviceModel string    `gorm:"size:120" json:"compatible_device_model"`
+	Barcode               string    `gorm:"size:120" json:"barcode"`
+	Stock                 int       `gorm:"not null;default:0" json:"stock"`
+	LowStockThreshold     int       `gorm:"not null;default:0" json:"low_stock_threshold"`
+	PlatformTitle         string    `gorm:"size:240" json:"platform_title"`
+	SellingPoints         string    `gorm:"type:text" json:"selling_points"`
+	Status                string    `gorm:"size:32;not null;default:active" json:"status"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
+	Product               Product   `json:"product"`
+	Tags                  []Tag     `gorm:"many2many:sku_tags;" json:"tags"`
 }
 
 type InventoryAdjustment struct {

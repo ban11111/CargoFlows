@@ -19,6 +19,7 @@ interface SKUDetail {
   code: string;
   color: string;
   size: string;
+  compatible_device_model: string;
   barcode: string;
   stock: number;
   low_stock_threshold: number;
@@ -63,6 +64,7 @@ export default function SkuDetailPage() {
           code: sku.code,
           color: sku.color,
           size: sku.size,
+          compatible_device_model: sku.compatible_device_model,
           barcode: sku.barcode,
           stock: sku.stock,
           low_stock_threshold: sku.low_stock_threshold,
@@ -123,6 +125,7 @@ export default function SkuDetailPage() {
             <Field label={t("brand")} value={sku.product.brand} />
             <Field label={t("color")} value={sku.color} />
             <Field label={t("size")} value={sku.size} />
+            <Field label={language === "zh" ? "兼容设备型号" : "Compatible device model"} value={sku.compatible_device_model || "—"} />
             <Field label={t("currentStock")} value={formatNumber(sku.stock)} />
             <Field label={t("threshold")} value={formatNumber(sku.low_stock_threshold)} />
           </dl>
@@ -159,7 +162,7 @@ export default function SkuDetailPage() {
   );
 }
 
-function skuFormValue(sku: SKUDetail): SKUFormValue { return { category_id: sku.product.category_id, product_name: sku.product.name, brand: sku.product.brand, brand_id: sku.product.brand_id ?? "", category: sku.product.category, code: sku.code, color: sku.color, size: sku.size, barcode: sku.barcode, stock: sku.stock, low_stock_threshold: sku.low_stock_threshold, platform_title: sku.platform_title, selling_points: sku.selling_points, status: sku.status, tags: sku.tags.map((tag) => tag.name) }; }
+function skuFormValue(sku: SKUDetail): SKUFormValue { return { category_id: sku.product.category_id, product_name: sku.product.name, brand: sku.product.brand, brand_id: sku.product.brand_id ?? "", category: sku.product.category, code: sku.code, color: sku.color, size: sku.size, compatible_device_model: sku.compatible_device_model, barcode: sku.barcode, stock: sku.stock, low_stock_threshold: sku.low_stock_threshold, platform_title: sku.platform_title, selling_points: sku.selling_points, status: sku.status, tags: sku.tags.map((tag) => tag.name) }; }
 
 function Field({ label, value }: { label: string; value: string }) {
   return (

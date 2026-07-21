@@ -263,7 +263,7 @@ func compileTemplateReferences(prompt string, required bool) (string, error) {
 var templateVariableInputPaths = map[string]string{
 	"locale": "$input.locale", "target_platform": "$input.target_platform", "candidate_count": "$input.request.candidate_count",
 	"product.name": "$input.product.name", "product.brand": "$input.product.brand", "product.category": "$input.product.category", "product.description": "$input.product.description", "product.product_type": "$input.product.category",
-	"sku.code": "$input.sku.code", "sku.color": "$input.sku.color", "sku.size": "$input.sku.size", "sku.platform_title": "$input.sku.platform_title", "sku.attributes": "$input.sku",
+	"sku.code": "$input.sku.code", "sku.color": "$input.sku.color", "sku.size": "$input.sku.size", "sku.compatible_device_model": "$input.sku.compatible_device_model", "sku.platform_title": "$input.sku.platform_title", "sku.attributes": "$input.sku",
 	"sop.name_zh": "$input.sop.name.zh", "sop.name_en": "$input.sop.name.en", "sop.version": "$input.sop.version_number", "sop.coordinate_system": "$input.sop.coordinate_system", "sop.required_views": "$input.sop.views", "sop.views": "$input.sop.views",
 	"style.name": "$input.slot.generation_config.style", "style.description": "$input.slot.generation_config", "style.instructions": "$input.slot.generation_config", "style.preferences": "$input.slot.generation_config",
 	"approved_assets": "$input.approved_assets", "approved_assets.metadata": "$input.approved_assets",

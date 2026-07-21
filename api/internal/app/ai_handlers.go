@@ -726,6 +726,8 @@ func respondAIError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"code": "lifecycle_conflict", "message": err.Error()})
 	case errors.Is(err, ai.ErrSlotSelectionInvalid):
 		respondAIBadRequest(c, err)
+	case errors.Is(err, ai.ErrCompatibleDeviceModelRequired):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "sku_compatible_device_model_required", "message": err.Error()})
 	case errors.Is(err, ai.ErrIdempotencyKeyInvalid), errors.Is(err, ai.ErrLocaleInvalid), errors.Is(err, ai.ErrUserPreferenceInvalid), errors.Is(err, ai.ErrUserPreferenceNotAllowed), errors.Is(err, ai.ErrGenerationOverrideInvalid), errors.Is(err, ai.ErrTemplateVersionIDInvalid), errors.Is(err, ai.ErrSKUIDInvalid), errors.Is(err, ai.ErrAssetIDInvalid):
 		respondAIBadRequest(c, err)
 	case errors.Is(err, ai.ErrPublishedTemplateConfigInvalid):

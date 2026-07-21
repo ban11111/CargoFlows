@@ -19,6 +19,7 @@ interface SKUListItem {
   code: string;
   color: string;
   size: string;
+  compatible_device_model: string;
   barcode: string;
   stock: number;
   low_stock_threshold: number;
@@ -58,6 +59,7 @@ export default function SkusPage() {
         code: sku.code,
         color: sku.color,
         size: sku.size,
+        compatible_device_model: sku.compatible_device_model,
         barcode: sku.barcode,
         stock: sku.stock,
         low_stock_threshold: sku.low_stock_threshold,

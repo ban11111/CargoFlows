@@ -95,6 +95,34 @@ func TestSKURoutesUsePublicUUIDAndSafeDTOs(t *testing.T) {
 	}
 }
 
+func TestSKURoutesPersistAndValidateCompatibleDeviceModel(t *testing.T) {
+	db := newTestDB(t)
+	category := models.Category{Name: "Phone cases", NameEN: "Phone cases"}
+	if err := db.Create(&category).Error; err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{db: db}
+	created := performSKUHandlerRequest(t, server.createSKU, http.MethodPost, "/skus", "", fmt.Sprintf(`{"category_id":%d,"product_name":"Clear case","code":"CASE-MODEL","compatible_device_model":"  iPhone 17 Pro  "}`, category.ID))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create = %d %s", created.Code, created.Body.String())
+	}
+	var sku skuDTO
+	if err := json.Unmarshal(created.Body.Bytes(), &sku); err != nil {
+		t.Fatal(err)
+	}
+	if sku.CompatibleDeviceModel != "iPhone 17 Pro" {
+		t.Fatalf("created model = %q", sku.CompatibleDeviceModel)
+	}
+	updated := performSKUHandlerRequest(t, server.updateSKU, http.MethodPatch, "/skus/"+sku.PublicID, sku.PublicID, fmt.Sprintf(`{"category_id":%d,"product_name":"Clear case","code":"CASE-MODEL","compatible_device_model":"iPhone 17 Air"}`, category.ID))
+	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"compatible_device_model":"iPhone 17 Air"`) {
+		t.Fatalf("update = %d %s", updated.Code, updated.Body.String())
+	}
+	tooLong := performSKUHandlerRequest(t, server.updateSKU, http.MethodPatch, "/skus/"+sku.PublicID, sku.PublicID, fmt.Sprintf(`{"category_id":%d,"product_name":"Clear case","code":"CASE-MODEL","compatible_device_model":%q}`, category.ID, strings.Repeat("x", 121)))
+	if tooLong.Code != http.StatusBadRequest {
+		t.Fatalf("too-long model = %d %s", tooLong.Code, tooLong.Body.String())
+	}
+}
+
 func TestAssetMediaRequiresAuthenticationAndSetsSafeHeaders(t *testing.T) {
 	db := newTestDB(t)
 	user := models.User{Name: "Media reviewer", Email: uuid.NewString() + "@example.test", PasswordHash: "unused", Role: models.RoleOperator, Status: "active"}

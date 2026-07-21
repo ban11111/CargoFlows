@@ -8,7 +8,7 @@ import SkuDetailPage from "./page";
 vi.mock("next/navigation", () => ({ useParams: () => ({ id: "11111111-1111-4111-8111-111111111111" }), useRouter: () => ({ push: vi.fn() }) }));
 
 const sku = {
-  public_id: "11111111-1111-4111-8111-111111111111", code: "CASE-BLK", color: "黑色", size: "标准", barcode: "", stock: 8, low_stock_threshold: 2,
+  public_id: "11111111-1111-4111-8111-111111111111", code: "CASE-BLK", color: "黑色", size: "标准", compatible_device_model: "iPhone 17 Pro", barcode: "", stock: 8, low_stock_threshold: 2,
   platform_title: "星轨保护壳", selling_points: "轻薄", status: "active" as const, tags: [{ name: "主推" }],
   product: { category_id: 1, name: "星轨保护壳 黑色", brand: "Aster", category: "配件", category_record: { name: "配件", name_en: "Accessories" } },
 };

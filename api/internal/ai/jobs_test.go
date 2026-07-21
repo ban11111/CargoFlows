@@ -56,7 +56,7 @@ func seedAIJobFixture(t *testing.T) (*gorm.DB, aiJobFixture) {
 	if err := db.Create(&tags).Error; err != nil {
 		t.Fatal(err)
 	}
-	sku := models.SKU{ProductID: product.ID, Code: "CASE-17-PRO", Color: "透明", Size: "iPhone 17 Pro", Barcode: "secret-ish-barcode", Stock: 99, LowStockThreshold: 5, PlatformTitle: "透明手机壳", SellingPoints: "轻薄;防刮", Status: "active", Tags: []models.Tag{tags[1], tags[0]}}
+	sku := models.SKU{ProductID: product.ID, Code: "CASE-17-PRO", Color: "透明", Size: "大号", CompatibleDeviceModel: "iPhone 17 Pro", Barcode: "secret-ish-barcode", Stock: 99, LowStockThreshold: 5, PlatformTitle: "透明手机壳", SellingPoints: "轻薄;防刮", Status: "active", Tags: []models.Tag{tags[1], tags[0]}}
 	otherSKU := models.SKU{ProductID: product.ID, Code: "CASE-17-AIR", Color: "透明", Size: "iPhone 17 Air", Status: "active"}
 	if err := db.Create(&sku).Error; err != nil {
 		t.Fatal(err)
@@ -192,8 +192,49 @@ func TestCreateJobSnapshotsOnlyWhitelistedFactsAndSelectedSlots(t *testing.T) {
 	if job.SKUID != fixture.SKU.PublicID || snapshot.SKU.PublicID != fixture.SKU.PublicID || snapshot.SelectedAssets[0].PublicID != fixture.ApprovedAsset.PublicID {
 		t.Fatalf("public identity contract was not preserved: job=%#v snapshot=%#v", job, snapshot)
 	}
+	if snapshot.SKU.CompatibleDeviceModel != "iPhone 17 Pro" || snapshot.SKU.Size != "大号" {
+		t.Fatalf("compatible device model was not independently snapshotted: %#v", snapshot.SKU)
+	}
 	if snapshot.SelectedAssets[0].View.CameraPositionDirection.Z != 1 || snapshot.SelectedAssets[0].View.Instruction.EN != "Front capture" || snapshot.SelectedAssets[0].View.Composition.AspectRatio != "1:1" {
 		t.Fatalf("asset-specific view was not snapshotted: %#v", snapshot.SelectedAssets[0].View)
+	}
+}
+
+func TestCreateJobRequiresAndFreezesCompatibleDeviceModelForConstrainedSlots(t *testing.T) {
+	db, fixture := seedAIJobFixture(t)
+	if err := db.Model(&models.AIContentSlot{}).Where("ai_content_template_version_id = ? AND slot_key = ?", fixture.PublishedVersion.ID, "hero").Update("constraints_json", []byte(`{"required_views":["reference_front"],"requires_compatible_device_model":true}`)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&models.SKU{}).Where("id = ?", fixture.SKU.ID).Update("compatible_device_model", "   ").Error; err != nil {
+		t.Fatal(err)
+	}
+	input := CreateJobInput{SKUID: fixture.SKU.PublicID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"hero"}, SelectedAssetIDs: []string{fixture.ApprovedAsset.PublicID}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "job-device-model-required"}
+	if _, err := NewJobService(db).Create(t.Context(), input); !errors.Is(err, ErrCompatibleDeviceModelRequired) {
+		t.Fatalf("missing model error = %v", err)
+	}
+	if err := db.Model(&models.SKU{}).Where("id = ?", fixture.SKU.ID).Update("compatible_device_model", "iPhone 17 Pro").Error; err != nil {
+		t.Fatal(err)
+	}
+	job, err := NewJobService(db).Create(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot ProductSnapshotV1
+	if err := json.Unmarshal(job.InputSnapshot, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.SKU.CompatibleDeviceModel != "iPhone 17 Pro" {
+		t.Fatalf("snapshot model = %q", snapshot.SKU.CompatibleDeviceModel)
+	}
+	if err := db.Model(&models.SKU{}).Where("id = ?", fixture.SKU.ID).Update("compatible_device_model", "changed later").Error; err != nil {
+		t.Fatal(err)
+	}
+	stored, err := NewJobService(db).Get(t.Context(), job.PublicID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(stored.InputSnapshot), `"compatible_device_model":"iPhone 17 Pro"`) {
+		t.Fatalf("stored snapshot changed: %s", stored.InputSnapshot)
 	}
 }
 

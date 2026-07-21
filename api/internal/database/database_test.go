@@ -270,6 +270,9 @@ func TestMigrateCreatesAIFoundationTables(t *testing.T) {
 			t.Fatalf("missing table for %T", model)
 		}
 	}
+	if !db.Migrator().HasColumn(&models.SKU{}, "compatible_device_model") {
+		t.Fatal("missing SKU compatible device model column")
+	}
 	for _, column := range []string{"l0_policy_version", "l1_product_context_version", "l2_template_version_public_id", "l3_content_slot_public_id", "normalized_input_json", "ordered_input_list_json"} {
 		if !db.Migrator().HasColumn(&models.AIExecution{}, column) {
 			t.Fatalf("missing AI execution provenance column %q", column)

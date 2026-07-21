@@ -230,7 +230,7 @@ func TestValidateTemplateVersionReportsDuplicateKeysKindsSequencesAndJSON(t *tes
 func TestTemplateVariablesUseExactV1Allowlist(t *testing.T) {
 	accepted := []string{
 		"locale", "target_platform", "candidate_count", "product.name", "product.brand", "product.category",
-		"product.description", "sku.code", "sku.color", "sku.size", "sku.platform_title", "sop.name_zh",
+		"product.description", "sku.code", "sku.color", "sku.size", "sku.compatible_device_model", "sku.platform_title", "sop.name_zh",
 		"sop.name_en", "sop.required_views", "style.name", "style.description", "style.instructions",
 	}
 	for _, variable := range accepted {
@@ -245,6 +245,12 @@ func TestTemplateVariablesUseExactV1Allowlist(t *testing.T) {
 			assertIssueCodes(t, validatePrompt("Use {{"+variable+"}}", "prompt", true), "template_variable_unknown")
 		})
 	}
+}
+
+func TestValidateTemplateVersionRejectsNonBooleanCompatibleDeviceRequirement(t *testing.T) {
+	version := models.AIContentTemplateVersion{DefaultLocale: "zh-CN", PromptCompilerVersion: "v1", PlatformPrompt: "ok"}
+	slot := models.AIContentSlot{SlotKey: "installed", Kind: models.AIContentSlotImage, NameZH: "装机", NameEN: "Installed", Sequence: 1, PromptFragment: "Use {{sku.compatible_device_model}}", ConstraintsJSON: []byte(`{"requires_compatible_device_model":"yes"}`), GenerationConfigJSON: []byte(`{"size":"1024x1024"}`), LayoutConfigJSON: []byte(`{}`)}
+	assertIssueCodes(t, ValidateTemplateVersion(version, []models.AIContentSlot{slot}), "requires_compatible_device_model_invalid")
 }
 
 func TestPublishFreezesVersionCopyCreatesFreshDraftAndArchiveRecalculatesParent(t *testing.T) {

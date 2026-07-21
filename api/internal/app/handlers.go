@@ -126,21 +126,22 @@ func (s *Server) changePassword(c *gin.Context) {
 }
 
 type createSKURequest struct {
-	CategoryID        uint     `json:"category_id"`
-	ProductName       string   `json:"product_name" binding:"required"`
-	BrandID           string   `json:"brand_id"`
-	Brand             string   `json:"brand"`
-	Category          string   `json:"category"`
-	Code              string   `json:"code" binding:"required"`
-	Color             string   `json:"color"`
-	Size              string   `json:"size"`
-	Barcode           string   `json:"barcode"`
-	Stock             int      `json:"stock"`
-	LowStockThreshold int      `json:"low_stock_threshold"`
-	PlatformTitle     string   `json:"platform_title"`
-	SellingPoints     string   `json:"selling_points"`
-	Status            string   `json:"status"`
-	Tags              []string `json:"tags"`
+	CategoryID            uint     `json:"category_id"`
+	ProductName           string   `json:"product_name" binding:"required"`
+	BrandID               string   `json:"brand_id"`
+	Brand                 string   `json:"brand"`
+	Category              string   `json:"category"`
+	Code                  string   `json:"code" binding:"required"`
+	Color                 string   `json:"color"`
+	Size                  string   `json:"size"`
+	CompatibleDeviceModel string   `json:"compatible_device_model" binding:"max=120"`
+	Barcode               string   `json:"barcode"`
+	Stock                 int      `json:"stock"`
+	LowStockThreshold     int      `json:"low_stock_threshold"`
+	PlatformTitle         string   `json:"platform_title"`
+	SellingPoints         string   `json:"selling_points"`
+	Status                string   `json:"status"`
+	Tags                  []string `json:"tags"`
 }
 
 type skuProductDTO struct {
@@ -154,20 +155,21 @@ type skuProductDTO struct {
 }
 
 type skuDTO struct {
-	PublicID          string         `json:"public_id"`
-	Code              string         `json:"code"`
-	Color             string         `json:"color"`
-	Size              string         `json:"size"`
-	Barcode           string         `json:"barcode"`
-	Stock             int            `json:"stock"`
-	LowStockThreshold int            `json:"low_stock_threshold"`
-	PlatformTitle     string         `json:"platform_title"`
-	SellingPoints     string         `json:"selling_points"`
-	Status            string         `json:"status"`
-	CreatedAt         time.Time      `json:"created_at"`
-	UpdatedAt         time.Time      `json:"updated_at"`
-	Product           skuProductDTO  `json:"product"`
-	Tags              []publicTagDTO `json:"tags"`
+	PublicID              string         `json:"public_id"`
+	Code                  string         `json:"code"`
+	Color                 string         `json:"color"`
+	Size                  string         `json:"size"`
+	CompatibleDeviceModel string         `json:"compatible_device_model"`
+	Barcode               string         `json:"barcode"`
+	Stock                 int            `json:"stock"`
+	LowStockThreshold     int            `json:"low_stock_threshold"`
+	PlatformTitle         string         `json:"platform_title"`
+	SellingPoints         string         `json:"selling_points"`
+	Status                string         `json:"status"`
+	CreatedAt             time.Time      `json:"created_at"`
+	UpdatedAt             time.Time      `json:"updated_at"`
+	Product               skuProductDTO  `json:"product"`
+	Tags                  []publicTagDTO `json:"tags"`
 }
 
 type publicTagDTO struct {
@@ -188,7 +190,7 @@ func skuDTOFromModel(value models.SKU) skuDTO {
 		brandID = value.Product.BrandRecord.PublicID
 	}
 	return skuDTO{
-		PublicID: value.PublicID, Code: value.Code, Color: value.Color, Size: value.Size, Barcode: value.Barcode,
+		PublicID: value.PublicID, Code: value.Code, Color: value.Color, Size: value.Size, CompatibleDeviceModel: value.CompatibleDeviceModel, Barcode: value.Barcode,
 		Stock: value.Stock, LowStockThreshold: value.LowStockThreshold, PlatformTitle: value.PlatformTitle,
 		SellingPoints: value.SellingPoints, Status: value.Status, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
 		Product: skuProductDTO{CategoryID: value.Product.CategoryID, BrandID: brandID, Name: value.Product.Name, Brand: value.Product.Brand,
@@ -248,16 +250,17 @@ func (s *Server) createSKU(c *gin.Context) {
 			return err
 		}
 		sku = models.SKU{
-			ProductID:         product.ID,
-			Code:              req.Code,
-			Color:             req.Color,
-			Size:              req.Size,
-			Barcode:           req.Barcode,
-			Stock:             req.Stock,
-			LowStockThreshold: req.LowStockThreshold,
-			PlatformTitle:     req.PlatformTitle,
-			SellingPoints:     req.SellingPoints,
-			Status:            req.Status,
+			ProductID:             product.ID,
+			Code:                  req.Code,
+			Color:                 req.Color,
+			Size:                  req.Size,
+			CompatibleDeviceModel: strings.TrimSpace(req.CompatibleDeviceModel),
+			Barcode:               req.Barcode,
+			Stock:                 req.Stock,
+			LowStockThreshold:     req.LowStockThreshold,
+			PlatformTitle:         req.PlatformTitle,
+			SellingPoints:         req.SellingPoints,
+			Status:                req.Status,
 		}
 		if err := tx.Create(&sku).Error; err != nil {
 			return err
@@ -317,6 +320,7 @@ func (s *Server) updateSKU(c *gin.Context) {
 		sku.Code = req.Code
 		sku.Color = req.Color
 		sku.Size = req.Size
+		sku.CompatibleDeviceModel = strings.TrimSpace(req.CompatibleDeviceModel)
 		sku.Barcode = req.Barcode
 		sku.LowStockThreshold = req.LowStockThreshold
 		sku.PlatformTitle = req.PlatformTitle
