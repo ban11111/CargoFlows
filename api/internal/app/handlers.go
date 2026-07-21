@@ -14,6 +14,7 @@ import (
 
 	"cargoflows/api/internal/ai"
 	"cargoflows/api/internal/models"
+	"cargoflows/api/internal/money"
 	"github.com/gin-gonic/gin"
 	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/golang-jwt/jwt/v5"
@@ -162,6 +163,9 @@ type skuDTO struct {
 	CompatibleDeviceModel string         `json:"compatible_device_model"`
 	Barcode               string         `json:"barcode"`
 	Stock                 int            `json:"stock"`
+	AverageUnitCostSGD    string         `json:"average_unit_cost_sgd"`
+	InventoryValueSGD     string         `json:"inventory_value_sgd"`
+	CostingWarning        string         `json:"costing_warning"`
 	LowStockThreshold     int            `json:"low_stock_threshold"`
 	PlatformTitle         string         `json:"platform_title"`
 	SellingPoints         string         `json:"selling_points"`
@@ -189,9 +193,13 @@ func skuDTOFromModel(value models.SKU) skuDTO {
 	if value.Product.BrandRecord != nil {
 		brandID = value.Product.BrandRecord.PublicID
 	}
+	warning := ""
+	if value.ZeroCostOpening && value.Stock > 0 {
+		warning = "zero_cost_opening"
+	}
 	return skuDTO{
 		PublicID: value.PublicID, Code: value.Code, Color: value.Color, Size: value.Size, CompatibleDeviceModel: value.CompatibleDeviceModel, Barcode: value.Barcode,
-		Stock: value.Stock, LowStockThreshold: value.LowStockThreshold, PlatformTitle: value.PlatformTitle,
+		Stock: value.Stock, AverageUnitCostSGD: decimalOrZero(value.AverageUnitCostSGD), InventoryValueSGD: decimalOrZero(value.InventoryValueSGD), CostingWarning: warning, LowStockThreshold: value.LowStockThreshold, PlatformTitle: value.PlatformTitle,
 		SellingPoints: value.SellingPoints, Status: value.Status, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
 		Product: skuProductDTO{CategoryID: value.Product.CategoryID, BrandID: brandID, Name: value.Product.Name, Brand: value.Product.Brand,
 			Category: value.Product.Category, Description: value.Product.Description, CatalogCategory: value.Product.CatalogCategory},
@@ -257,6 +265,9 @@ func (s *Server) createSKU(c *gin.Context) {
 			CompatibleDeviceModel: strings.TrimSpace(req.CompatibleDeviceModel),
 			Barcode:               req.Barcode,
 			Stock:                 req.Stock,
+			AverageUnitCostSGD:    "0.00000000",
+			InventoryValueSGD:     "0.00000000",
+			ZeroCostOpening:       req.Stock > 0,
 			LowStockThreshold:     req.LowStockThreshold,
 			PlatformTitle:         req.PlatformTitle,
 			SellingPoints:         req.SellingPoints,
@@ -264,6 +275,18 @@ func (s *Server) createSKU(c *gin.Context) {
 		}
 		if err := tx.Create(&sku).Error; err != nil {
 			return err
+		}
+		if req.Stock != 0 {
+			now := time.Now().UTC()
+			actorID := currentUser(c).ID
+			opening := models.InventoryTransaction{Type: "stock_adjustment", Status: inventoryPosted, BusinessDate: now, Note: "Zero-cost opening balance", CreatedByID: actorID, PostedByID: &actorID, PostedAt: &now}
+			if err := tx.Create(&opening).Error; err != nil {
+				return err
+			}
+			line := models.InventoryTransactionLine{InventoryTransactionID: opening.ID, SKUID: sku.ID, QuantityDelta: req.Stock, SourceCurrency: "SGD", SourceUnitPrice: "0.00000000", FXRateToSGD: "1.00000000", FXRateDate: &now, FXRateSource: "opening", MerchandiseAmountSGD: "0.00000000", AllocatedChargesSGD: "0.00000000", LandedUnitCostSGD: "0.00000000", MovementCostSGD: "0.00000000", QuantityBefore: 0, QuantityAfter: req.Stock, AverageCostBeforeSGD: "0.00000000", AverageCostAfterSGD: "0.00000000", InventoryValueBeforeSGD: "0.00000000", InventoryValueAfterSGD: "0.00000000"}
+			if err := tx.Create(&line).Error; err != nil {
+				return err
+			}
 		}
 		tags, err := resolveTags(tx, req.Tags)
 		if err != nil {
@@ -280,6 +303,14 @@ func (s *Server) createSKU(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, skuDTOFromModel(sku))
+}
+
+func decimalOrZero(value string) string {
+	parsed, err := money.Parse(value)
+	if err != nil {
+		return "0.00000000"
+	}
+	return money.Format(parsed)
 }
 
 func (s *Server) getSKU(c *gin.Context) {
@@ -309,6 +340,10 @@ func (s *Server) updateSKU(c *gin.Context) {
 	var req createSKURequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	if req.Stock != sku.Stock {
+		c.JSON(http.StatusConflict, gin.H{"code": "inventory_ledger_required", "message": "stock cannot be changed through SKU PATCH; create an inventory transaction"})
 		return
 	}
 
@@ -474,30 +509,36 @@ func (s *Server) createInventoryAdjustment(c *gin.Context) {
 	}
 
 	user := currentUser(c)
-	var adjustment models.InventoryAdjustment
 	var sku models.SKU
+	if err := s.db.Where("public_id = ?", publicID).First(&sku).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "sku not found"})
+		return
+	}
+	now := time.Now().UTC()
+	note := strings.TrimSpace(req.Reason)
+	if strings.TrimSpace(req.Note) != "" {
+		note += ": " + strings.TrimSpace(req.Note)
+	}
+	transaction := models.InventoryTransaction{Type: "stock_adjustment", Status: inventoryDraft, BusinessDate: now, Note: note, CreatedByID: user.ID}
+	line := models.InventoryTransactionLine{SKUID: sku.ID, QuantityDelta: req.QuantityDelta, SourceCurrency: "SGD", SourceUnitPrice: "0.00000000", FXRateToSGD: "1.00000000", FXRateDate: &now, FXRateSource: "cost_ledger"}
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("public_id = ?", publicID).First(&sku).Error; err != nil {
+		if err := tx.Create(&transaction).Error; err != nil {
 			return err
 		}
-		sku.Stock += req.QuantityDelta
-		if sku.Stock < 0 {
-			return fmt.Errorf("stock cannot be negative")
-		}
-		if err := tx.Save(&sku).Error; err != nil {
-			return err
-		}
-		adjustment = models.InventoryAdjustment{
-			SKUID:         sku.ID,
-			QuantityDelta: req.QuantityDelta,
-			Reason:        req.Reason,
-			Note:          req.Note,
-			OperatorID:    user.ID,
-		}
-		return tx.Create(&adjustment).Error
+		line.InventoryTransactionID = transaction.ID
+		return tx.Create(&line).Error
 	})
+	if err == nil {
+		transaction.Lines = []models.InventoryTransactionLine{line}
+		err = s.postPreparedInventory(&transaction, user.ID)
+	}
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		return
+	}
+	adjustment := models.InventoryAdjustment{SKUID: sku.ID, QuantityDelta: req.QuantityDelta, Reason: req.Reason, Note: req.Note, OperatorID: user.ID}
+	if err := s.db.Create(&adjustment).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
 		return
 	}
 

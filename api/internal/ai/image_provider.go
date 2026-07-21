@@ -33,9 +33,11 @@ type ImageRequest struct {
 
 type ImageUsage struct {
 	InputTextTokens   int64
+	CachedInputTokens int64
 	InputImageTokens  int64
 	OutputTextTokens  int64
 	OutputImageTokens int64
+	ReasoningTokens   int64
 	TotalTokens       int64
 }
 
@@ -44,6 +46,7 @@ type ImageResponse struct {
 	RequestID   string
 	ImageCallID string
 	Model       string
+	ServiceTier string
 	MIMEType    string
 	ImageBytes  []byte
 	Usage       ImageUsage

@@ -29,6 +29,7 @@ type AIDependencies struct {
 	Jobs             *ai.JobService
 	TextResults      *ai.TextResultService
 	ImageResults     *ai.ImageResultService
+	Costs            *ai.CostService
 }
 
 func NewRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
@@ -44,6 +45,25 @@ func NewRouterWithAIDependencies(cfg config.Config, db *gorm.DB, deps AIDependen
 		panic("configure AI services: " + err.Error())
 	}
 	return newRouter(cfg, db, deps)
+}
+
+// NewOpenAICostService creates the organization-cost client used by scheduled
+// synchronization without exposing or duplicating plaintext credential logic.
+func NewOpenAICostService(cfg config.Config, db *gorm.DB) (*ai.CostService, error) {
+	key, err := validateSecretsMasterKey(cfg)
+	if err != nil || len(key) == 0 {
+		return nil, err
+	}
+	defer func() {
+		for index := range key {
+			key[index] = 0
+		}
+	}()
+	box, err := secrets.NewAESGCM(key)
+	if err != nil {
+		return nil, err
+	}
+	return ai.NewCostService(db, box, cfg.OpenAIBaseURL, nil), nil
 }
 
 func newRouter(cfg config.Config, db *gorm.DB, deps AIDependencies) *gin.Engine {
@@ -97,6 +117,14 @@ func registerExistingRoutes(protected *gin.RouterGroup, server *Server) {
 	protected.DELETE("/skus/:sku_id", server.deleteSKU)
 	protected.POST("/skus/:sku_id/inventory-adjustments", server.createInventoryAdjustment)
 	protected.GET("/skus/:sku_id/inventory-history", server.listInventoryHistory)
+	inventoryManagers := protected.Group("")
+	inventoryManagers.Use(requireRoles(models.RoleSuperAdmin, models.RoleAdmin, models.RoleOperator))
+	inventoryManagers.GET("/inventory-transactions", server.listInventoryTransactions)
+	inventoryManagers.POST("/inventory-transactions", server.createInventoryTransaction)
+	inventoryManagers.GET("/inventory-transactions/:transaction_id", server.getInventoryTransaction)
+	inventoryManagers.PATCH("/inventory-transactions/:transaction_id", server.updateInventoryTransaction)
+	inventoryManagers.POST("/inventory-transactions/:transaction_id/post", server.postInventoryTransaction)
+	inventoryManagers.POST("/inventory-transactions/:transaction_id/reverse", server.reverseInventoryTransaction)
 	protected.GET("/skus/:sku_id/variant-identity", server.getSKUVariantIdentity)
 	protected.GET("/categories", server.listCategories)
 	protected.POST("/categories", server.createCategory)
@@ -196,6 +224,9 @@ func registerAIRoutes(protected *gin.RouterGroup, server *Server) {
 	aiJobs.GET("/ai-reference-sops", server.listAIReferenceSOPs)
 	aiJobs.GET("/ai-reference-sops/:sop_id", server.getAIReferenceSOP)
 	aiJobs.GET("/ai-reference-items/:item_id/media", server.aiReferenceItemMedia)
+	aiJobs.GET("/ai-cost/rates", server.listAICostRates)
+	aiJobs.GET("/ai-cost/reconciliation", server.listAIReconciliation)
+	aiJobs.GET("/ai-cost/analytics", server.listAICostAnalytics)
 	aiSettings := protected.Group("")
 	aiSettings.Use(requireRoles(models.RoleSuperAdmin))
 	aiSettings.GET("/settings/openai", server.getOpenAISetting)
@@ -204,6 +235,9 @@ func registerAIRoutes(protected *gin.RouterGroup, server *Server) {
 	aiSettings.PATCH("/settings/openai/workers", server.updateOpenAIWorkers)
 	aiSettings.PUT("/settings/openai", server.putOpenAISetting)
 	aiSettings.DELETE("/settings/openai", server.disableOpenAISetting)
+	aiSettings.GET("/settings/openai/costs", server.getOpenAICostSetting)
+	aiSettings.PUT("/settings/openai/costs", server.putOpenAICostSetting)
+	aiSettings.POST("/settings/openai/costs/scopes", server.listOpenAICostScopes)
 	aiAdmin := protected.Group("")
 	aiAdmin.Use(requireRoles(models.RoleSuperAdmin, models.RoleAdmin))
 	aiJobs.GET("/style-reference-grants", server.listStyleReferenceGrants)
@@ -229,6 +263,11 @@ func registerAIRoutes(protected *gin.RouterGroup, server *Server) {
 	aiAdmin.POST("/ai-content-template-versions/:version_id/archive", server.archiveAIContentTemplateVersion)
 	aiAdmin.POST("/ai-content-template-versions/:version_id/restore", server.restoreAIContentTemplateVersion)
 	aiAdmin.DELETE("/ai-content-template-versions/:version_id", server.deleteAIContentTemplateDraft)
+	aiAdmin.POST("/ai-cost/rates", server.createAICostRateVersion)
+	aiAdmin.POST("/ai-cost/rates/reprice", server.repriceAIUsage)
+	aiAdmin.POST("/ai-cost/reconciliation/sync", server.syncAIReconciliation)
+	aiAdmin.POST("/ai-cost/reconciliation/periods/:month/close", server.closeAIReconciliationPeriod)
+	aiAdmin.POST("/ai-cost/reconciliation/periods/:month/reopen", server.reopenAIReconciliationPeriod)
 }
 
 func newAIDependencies(cfg config.Config, db *gorm.DB) (AIDependencies, error) {
@@ -245,6 +284,7 @@ func newAIDependencies(cfg config.Config, db *gorm.DB) (AIDependencies, error) {
 		return AIDependencies{}, fmt.Errorf("configure CARGOFLOWS_SECRETS_MASTER_KEY: %w", err)
 	}
 	deps.ProviderSettings = ai.NewProviderSettingsService(db, box, ai.NewHTTPProviderVerifier(cfg.OpenAIBaseURL, nil))
+	deps.Costs = ai.NewCostService(db, box, cfg.OpenAIBaseURL, nil)
 	return deps, nil
 }
 

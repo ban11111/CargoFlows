@@ -338,9 +338,10 @@ func (e *ImageExecutor) persistResult(ctx context.Context, p preparedImageExecut
 			return err
 		}
 		now := e.clock.Now()
-		if err := tx.Model(&execution).Updates(map[string]any{"status": models.AIExecutionCompleted, "open_ai_response_id": response.ResponseID, "open_ai_request_id": response.RequestID, "model": response.Model, "actual_model": response.Model, "input_text_tokens": response.Usage.InputTextTokens, "input_image_tokens": response.Usage.InputImageTokens, "output_text_tokens": response.Usage.OutputTextTokens, "output_image_tokens": response.Usage.OutputImageTokens, "total_tokens": response.Usage.TotalTokens, "completed_at": now, "safe_error": "", "failure_code": ""}).Error; err != nil {
+		if err := tx.Model(&execution).Updates(map[string]any{"status": models.AIExecutionCompleted, "open_ai_response_id": response.ResponseID, "open_ai_request_id": response.RequestID, "model": response.Model, "actual_model": response.Model, "input_text_tokens": response.Usage.InputTextTokens, "cached_input_tokens": response.Usage.CachedInputTokens, "input_image_tokens": response.Usage.InputImageTokens, "output_text_tokens": response.Usage.OutputTextTokens, "output_image_tokens": response.Usage.OutputImageTokens, "reasoning_tokens": response.Usage.ReasoningTokens, "total_tokens": response.Usage.TotalTokens, "service_tier": defaultString(response.ServiceTier, "default"), "completed_at": now, "safe_error": "", "failure_code": ""}).Error; err != nil {
 			return err
 		}
+		execution.ServiceTier = defaultString(response.ServiceTier, "default")
 		// A successfully persisted image proves that the credential can use the
 		// configured image tool; keep the settings UI as an operational signal.
 		if execution.OpenAIProviderSettingID != nil {
@@ -352,7 +353,11 @@ func (e *ImageExecutor) persistResult(ctx context.Context, p preparedImageExecut
 				return err
 			}
 		}
-		if err := tx.Create(&models.AIUsageLedger{AIExecutionID: execution.ID, Model: response.Model, InputTextTokens: response.Usage.InputTextTokens, InputImageTokens: response.Usage.InputImageTokens, OutputTextTokens: response.Usage.OutputTextTokens, OutputImageTokens: response.Usage.OutputImageTokens, TotalTokens: response.Usage.TotalTokens, Currency: "USD", OpenAIRequestID: response.RequestID}).Error; err != nil {
+		ledger := models.AIUsageLedger{AIExecutionID: execution.ID, Model: response.Model, InputTextTokens: response.Usage.InputTextTokens, CachedInputTokens: response.Usage.CachedInputTokens, InputImageTokens: response.Usage.InputImageTokens, OutputTextTokens: response.Usage.OutputTextTokens, OutputImageTokens: response.Usage.OutputImageTokens, ReasoningTokens: response.Usage.ReasoningTokens, TotalTokens: response.Usage.TotalTokens, Currency: "USD", OpenAIRequestID: response.RequestID}
+		if err := tx.Create(&ledger).Error; err != nil {
+			return err
+		}
+		if err := PriceUsageLedger(tx, &ledger, execution); err != nil {
 			return err
 		}
 		if err := tx.Model(&models.AIImageTurn{}).Where("id = ?", p.turn.ID).Updates(map[string]any{"status": models.AIImageTurnCompleted, "completed_at": now, "lease_owner": "", "lease_expires_at": nil}).Error; err != nil {

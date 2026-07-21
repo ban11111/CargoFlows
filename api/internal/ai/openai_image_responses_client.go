@@ -174,10 +174,11 @@ func decodeOpenAIImageResponse(response *http.Response, requestID string) (Image
 	}
 	defer clearByteSlice(body)
 	var decoded struct {
-		ID     string `json:"id"`
-		Status string `json:"status"`
-		Model  string `json:"model"`
-		Output []struct {
+		ID          string `json:"id"`
+		Status      string `json:"status"`
+		Model       string `json:"model"`
+		ServiceTier string `json:"service_tier"`
+		Output      []struct {
 			Type    string `json:"type"`
 			ID      string `json:"id"`
 			Status  string `json:"status"`
@@ -191,14 +192,16 @@ func decodeOpenAIImageResponse(response *http.Response, requestID string) (Image
 			OutputTokens int64 `json:"output_tokens"`
 			TotalTokens  int64 `json:"total_tokens"`
 			InputDetails struct {
-				ImageTokens int64 `json:"image_tokens"`
+				ImageTokens  int64 `json:"image_tokens"`
+				CachedTokens int64 `json:"cached_tokens"`
 			} `json:"input_tokens_details"`
 			OutputDetails struct {
-				ImageTokens int64 `json:"image_tokens"`
+				ImageTokens     int64 `json:"image_tokens"`
+				ReasoningTokens int64 `json:"reasoning_tokens"`
 			} `json:"output_tokens_details"`
 		} `json:"usage"`
 	}
-	if json.Unmarshal(body, &decoded) != nil || decoded.ID == "" || decoded.Status != "completed" || strings.TrimSpace(decoded.Model) == "" || decoded.Usage == nil || decoded.Usage.InputTokens < 0 || decoded.Usage.OutputTokens < 0 || decoded.Usage.TotalTokens != decoded.Usage.InputTokens+decoded.Usage.OutputTokens || decoded.Usage.InputDetails.ImageTokens < 0 || decoded.Usage.InputDetails.ImageTokens > decoded.Usage.InputTokens || decoded.Usage.OutputDetails.ImageTokens < 0 || decoded.Usage.OutputDetails.ImageTokens > decoded.Usage.OutputTokens {
+	if json.Unmarshal(body, &decoded) != nil || decoded.ID == "" || decoded.Status != "completed" || strings.TrimSpace(decoded.Model) == "" || decoded.Usage == nil || decoded.Usage.InputTokens < 0 || decoded.Usage.OutputTokens < 0 || decoded.Usage.TotalTokens != decoded.Usage.InputTokens+decoded.Usage.OutputTokens || decoded.Usage.InputDetails.ImageTokens < 0 || decoded.Usage.InputDetails.ImageTokens > decoded.Usage.InputTokens || decoded.Usage.InputDetails.CachedTokens < 0 || decoded.Usage.InputDetails.CachedTokens > decoded.Usage.InputTokens || decoded.Usage.OutputDetails.ImageTokens < 0 || decoded.Usage.OutputDetails.ImageTokens > decoded.Usage.OutputTokens || decoded.Usage.OutputDetails.ReasoningTokens < 0 || decoded.Usage.OutputDetails.ReasoningTokens > decoded.Usage.OutputTokens {
 		return ImageResponse{}, &ImageProviderError{Kind: ErrImageProviderInvalidResponse, RequestID: requestID}
 	}
 	var callID, encoded string
@@ -227,8 +230,8 @@ func decodeOpenAIImageResponse(response *http.Response, requestID string) (Image
 		return ImageResponse{}, &ImageProviderError{Kind: ErrImageProviderInvalidResponse, RequestID: requestID}
 	}
 	return ImageResponse{
-		ResponseID: decoded.ID, RequestID: requestID, ImageCallID: callID, Model: decoded.Model, MIMEType: "image/png", ImageBytes: imageBytes,
-		Usage: ImageUsage{InputTextTokens: decoded.Usage.InputTokens - decoded.Usage.InputDetails.ImageTokens, InputImageTokens: decoded.Usage.InputDetails.ImageTokens, OutputTextTokens: decoded.Usage.OutputTokens - decoded.Usage.OutputDetails.ImageTokens, OutputImageTokens: decoded.Usage.OutputDetails.ImageTokens, TotalTokens: decoded.Usage.TotalTokens},
+		ResponseID: decoded.ID, RequestID: requestID, ImageCallID: callID, Model: decoded.Model, ServiceTier: defaultString(decoded.ServiceTier, "default"), MIMEType: "image/png", ImageBytes: imageBytes,
+		Usage: ImageUsage{InputTextTokens: decoded.Usage.InputTokens - decoded.Usage.InputDetails.ImageTokens, CachedInputTokens: decoded.Usage.InputDetails.CachedTokens, InputImageTokens: decoded.Usage.InputDetails.ImageTokens, OutputTextTokens: decoded.Usage.OutputTokens - decoded.Usage.OutputDetails.ImageTokens, OutputImageTokens: decoded.Usage.OutputDetails.ImageTokens, ReasoningTokens: decoded.Usage.OutputDetails.ReasoningTokens, TotalTokens: decoded.Usage.TotalTokens},
 	}, nil
 }
 

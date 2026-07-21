@@ -126,6 +126,10 @@ func migrateSchema(db *gorm.DB) error {
 		&models.PhotoSession{},
 		&models.Asset{},
 		&models.AssetReview{},
+		&models.InventoryTransaction{},
+		&models.InventoryTransactionLine{},
+		&models.InventoryCharge{},
+		&models.ExchangeRate{},
 		&models.OpenAIProviderSetting{},
 		&models.AIWorkerSetting{},
 		&models.AIContentTemplate{},
@@ -139,6 +143,13 @@ func migrateSchema(db *gorm.DB) error {
 		&models.AIImageResult{},
 		&models.AIAuditEvent{},
 		&models.AIUsageLedger{},
+		&models.AIRateCard{},
+		&models.AIUsageCharge{},
+		&models.OpenAICostSetting{},
+		&models.OpenAICostBucket{},
+		&models.OpenAIUsageBucket{},
+		&models.AIReconciliationAllocation{},
+		&models.AIReconciliationPeriod{},
 		&models.AITextResult{},
 		&models.SKUPlatformContent{},
 		&models.SKUPlatformContentRevision{},
@@ -151,12 +162,46 @@ func migrateSchema(db *gorm.DB) error {
 	if err := seedAIWorkerSetting(db); err != nil {
 		return err
 	}
+	if err := backfillInventoryOpeningBalances(db); err != nil {
+		return err
+	}
 	return backfillAIModelConfiguration(db)
 }
 
 func seedAIWorkerSetting(db *gorm.DB) error {
 	setting := models.AIWorkerSetting{ID: 1, MaxWorkersPerJob: 3, MaxWorkersGlobal: 9}
 	return db.Clauses(clause.OnConflict{DoNothing: true}).Create(&setting).Error
+}
+
+func backfillInventoryOpeningBalances(db *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		var skus []models.SKU
+		if err := tx.Where("stock <> 0").Find(&skus).Error; err != nil {
+			return err
+		}
+		for _, sku := range skus {
+			var count int64
+			if err := tx.Model(&models.InventoryTransactionLine{}).Where("sk_uid = ?", sku.ID).Count(&count).Error; err != nil {
+				return err
+			}
+			if count != 0 {
+				continue
+			}
+			now := time.Now().UTC()
+			opening := models.InventoryTransaction{Type: "stock_adjustment", Status: "posted", BusinessDate: now, Note: "Zero-cost opening balance migration", CreatedByID: 1, PostedByID: nil, PostedAt: &now}
+			if err := tx.Create(&opening).Error; err != nil {
+				return err
+			}
+			line := models.InventoryTransactionLine{InventoryTransactionID: opening.ID, SKUID: sku.ID, QuantityDelta: sku.Stock, SourceCurrency: "SGD", SourceUnitPrice: "0.00000000", FXRateToSGD: "1.00000000", FXRateDate: &now, FXRateSource: "opening", MerchandiseAmountSGD: "0.00000000", AllocatedChargesSGD: "0.00000000", LandedUnitCostSGD: "0.00000000", MovementCostSGD: "0.00000000", QuantityAfter: sku.Stock, AverageCostBeforeSGD: "0.00000000", AverageCostAfterSGD: "0.00000000", InventoryValueBeforeSGD: "0.00000000", InventoryValueAfterSGD: "0.00000000"}
+			if err := tx.Create(&line).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&sku).Updates(map[string]any{"average_unit_cost_sgd": "0.00000000", "inventory_value_sgd": "0.00000000", "zero_cost_opening": true}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func backfillBrands(db *gorm.DB) error {

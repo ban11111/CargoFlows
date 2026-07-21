@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"cargoflows/api/internal/models"
+	"cargoflows/api/internal/money"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -277,18 +278,28 @@ type JobModelSnapshot struct {
 }
 
 type JobExecutionDocument struct {
-	PublicID          string                      `json:"public_id"`
-	Operation         models.AIExecutionOperation `json:"operation"`
-	Status            models.AIExecutionStatus    `json:"status"`
-	AttemptNumber     int                         `json:"attempt_number"`
-	RequestedModel    string                      `json:"requested_model"`
-	ActualModel       string                      `json:"actual_model"`
-	APIMode           string                      `json:"api_mode"`
-	ProviderRequestID string                      `json:"provider_request_id"`
-	FailureCode       string                      `json:"failure_code"`
-	SafeError         string                      `json:"safe_error"`
-	StartedAt         *time.Time                  `json:"started_at"`
-	CompletedAt       *time.Time                  `json:"completed_at"`
+	PublicID           string                      `json:"public_id"`
+	Operation          models.AIExecutionOperation `json:"operation"`
+	Status             models.AIExecutionStatus    `json:"status"`
+	AttemptNumber      int                         `json:"attempt_number"`
+	RequestedModel     string                      `json:"requested_model"`
+	ActualModel        string                      `json:"actual_model"`
+	APIMode            string                      `json:"api_mode"`
+	ProviderRequestID  string                      `json:"provider_request_id"`
+	InputTextTokens    int64                       `json:"input_text_tokens"`
+	CachedInputTokens  int64                       `json:"cached_input_tokens"`
+	InputImageTokens   int64                       `json:"input_image_tokens"`
+	OutputTextTokens   int64                       `json:"output_text_tokens"`
+	OutputImageTokens  int64                       `json:"output_image_tokens"`
+	ReasoningTokens    int64                       `json:"reasoning_tokens"`
+	TotalTokens        int64                       `json:"total_tokens"`
+	ServiceTier        string                      `json:"service_tier"`
+	PricingStatus      string                      `json:"pricing_status"`
+	EstimatedAmountUSD string                      `json:"estimated_amount_usd"`
+	FailureCode        string                      `json:"failure_code"`
+	SafeError          string                      `json:"safe_error"`
+	StartedAt          *time.Time                  `json:"started_at"`
+	CompletedAt        *time.Time                  `json:"completed_at"`
 }
 
 type JobFailureDocument struct {
@@ -335,6 +346,10 @@ type JobDocument struct {
 	CreatedAt               time.Time          `json:"created_at"`
 	UpdatedAt               time.Time          `json:"updated_at"`
 	Items                   []JobItemDocument  `json:"items"`
+	TotalTokens             int64              `json:"total_tokens"`
+	EstimatedAmountUSD      string             `json:"estimated_amount_usd"`
+	ReconciledAmountUSD     string             `json:"reconciled_amount_usd"`
+	ReconciliationStatus    string             `json:"reconciliation_status"`
 	Replayed                bool               `json:"-"`
 }
 
@@ -726,7 +741,11 @@ func documentFromPersistedJob(db *gorm.DB, job models.AIJob) (JobDocument, error
 	if err != nil {
 		return JobDocument{}, err
 	}
-	return jobDocument(job, ids[job.AIContentTemplateVersionID]), nil
+	doc := jobDocument(job, ids[job.AIContentTemplateVersionID])
+	if err := enrichCostDocument(db, job.ID, &doc); err != nil {
+		return JobDocument{}, err
+	}
+	return doc, nil
 }
 
 func (s *JobService) List(ctx context.Context) ([]JobDocument, error) {
@@ -758,7 +777,11 @@ func (s *JobService) ListFiltered(ctx context.Context, filters JobListFilters) (
 	}
 	result := make([]JobDocument, 0, len(jobs))
 	for _, job := range jobs {
-		result = append(result, jobDocument(job, publicIDs[job.AIContentTemplateVersionID]))
+		doc := jobDocument(job, publicIDs[job.AIContentTemplateVersionID])
+		if err := enrichCostDocument(s.db.WithContext(ctx), job.ID, &doc); err != nil {
+			return nil, err
+		}
+		result = append(result, doc)
 	}
 	return result, nil
 }
@@ -775,7 +798,38 @@ func (s *JobService) Get(ctx context.Context, publicID string) (JobDocument, err
 	if err != nil {
 		return JobDocument{}, err
 	}
-	return jobDocument(job, ids[job.AIContentTemplateVersionID]), nil
+	doc := jobDocument(job, ids[job.AIContentTemplateVersionID])
+	if err := enrichCostDocument(s.db.WithContext(ctx), job.ID, &doc); err != nil {
+		return JobDocument{}, err
+	}
+	return doc, nil
+}
+
+// enrichCostDocument applies only the latest immutable allocation snapshot for
+// each supplier bucket. It intentionally labels the value as reconciled rather
+// than as a request-level invoice amount.
+func enrichCostDocument(db *gorm.DB, jobID uint, doc *JobDocument) error {
+	if !db.Migrator().HasTable(&models.AIReconciliationAllocation{}) {
+		return nil
+	}
+	var rows []models.AIReconciliationAllocation
+	if err := db.Where("ai_job_id = ?", jobID).Order("open_ai_cost_bucket_id ASC, version ASC, id ASC").Find(&rows).Error; err != nil {
+		return err
+	}
+	latest := map[uint]models.AIReconciliationAllocation{}
+	for _, row := range rows {
+		latest[row.OpenAICostBucketID] = row
+	}
+	if len(latest) == 0 {
+		return nil
+	}
+	total := money.Must("0")
+	for _, row := range latest {
+		total.Add(total, money.Must(row.AllocatedAmountUSD))
+	}
+	doc.ReconciledAmountUSD = money.Format(total)
+	doc.ReconciliationStatus = "reconciled_allocation"
+	return nil
 }
 
 func loadJobSKU(tx *gorm.DB, publicID string) (models.SKU, error) {
@@ -1398,6 +1452,9 @@ func jobDocument(job models.AIJob, versionPublicID string) JobDocument {
 	_ = json.Unmarshal(job.CreatedBySnapshotJSON, &creator)
 	_ = json.Unmarshal(job.ModelSnapshotJSON, &modelSnapshot)
 	items := make([]JobItemDocument, 0, len(job.Items))
+	totalTokens := int64(0)
+	estimatedTotal := money.Must("0")
+	allPriced := true
 	for _, item := range job.Items {
 		ids := []string{}
 		_ = json.Unmarshal(item.SelectedInputAssetIDsJSON, &ids)
@@ -1411,7 +1468,16 @@ func jobDocument(job models.AIJob, versionPublicID string) JobDocument {
 			if requested == "" {
 				requested = execution.Model
 			}
-			executions = append(executions, JobExecutionDocument{PublicID: execution.PublicID, Operation: execution.Operation, Status: execution.Status, AttemptNumber: execution.AttemptNumber, RequestedModel: requested, ActualModel: actual, APIMode: defaultString(execution.APIMode, "responses"), ProviderRequestID: execution.OpenAIRequestID, FailureCode: execution.FailureCode, SafeError: execution.SafeError, StartedAt: execution.StartedAt, CompletedAt: execution.CompletedAt})
+			pricingStatus, estimated := defaultString(execution.PricingStatus, "unpriced"), defaultString(execution.EstimatedAmountUSD, "0.00000000")
+			if pricingStatus == "priced" {
+				estimatedTotal.Add(estimatedTotal, money.Must(estimated))
+			} else if execution.TotalTokens == 0 && pricingStatus == "unpriced" {
+				pricingStatus = "not_applicable"
+			} else {
+				allPriced = false
+			}
+			totalTokens += execution.TotalTokens
+			executions = append(executions, JobExecutionDocument{PublicID: execution.PublicID, Operation: execution.Operation, Status: execution.Status, AttemptNumber: execution.AttemptNumber, RequestedModel: requested, ActualModel: actual, APIMode: defaultString(execution.APIMode, "responses"), ProviderRequestID: execution.OpenAIRequestID, InputTextTokens: execution.InputTextTokens, CachedInputTokens: execution.CachedInputTokens, InputImageTokens: execution.InputImageTokens, OutputTextTokens: execution.OutputTextTokens, OutputImageTokens: execution.OutputImageTokens, ReasoningTokens: execution.ReasoningTokens, TotalTokens: execution.TotalTokens, ServiceTier: defaultString(execution.ServiceTier, "default"), PricingStatus: pricingStatus, EstimatedAmountUSD: estimated, FailureCode: execution.FailureCode, SafeError: execution.SafeError, StartedAt: execution.StartedAt, CompletedAt: execution.CompletedAt})
 		}
 		var failure *JobFailureDocument
 		if item.SafeError != "" || item.FailureCode != "" {
@@ -1425,7 +1491,11 @@ func jobDocument(job models.AIJob, versionPublicID string) JobDocument {
 		}
 		items = append(items, JobItemDocument{PublicID: item.PublicID, SlotKey: item.SlotKey, Kind: item.Kind, Status: item.Status, SlotSnapshot: cloneJSON(item.SlotSnapshotJSON), SelectedInputAssetIDs: ids, AttemptCount: item.AttemptCount, SafeError: item.SafeError, Failure: failure, Executions: executions, StartedAt: item.StartedAt, CompletedAt: item.CompletedAt, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt})
 	}
-	return JobDocument{PublicID: job.PublicID, SKUID: job.SKU.PublicID, TemplateVersionPublicID: versionPublicID, TargetPlatform: job.TargetPlatform, Locale: job.Locale, Status: job.Status, SnapshotSchema: job.SnapshotSchema, InputSnapshot: append(json.RawMessage(nil), job.InputSnapshotJSON...), CreatedBy: creator, CreatedBySnapshot: creator, ModelSnapshot: modelSnapshot, StartedAt: job.StartedAt, CompletedAt: job.CompletedAt, CancelledAt: job.CancelledAt, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt, Items: items}
+	reconciliationStatus := "unpriced"
+	if allPriced {
+		reconciliationStatus = "pending"
+	}
+	return JobDocument{PublicID: job.PublicID, SKUID: job.SKU.PublicID, TemplateVersionPublicID: versionPublicID, TargetPlatform: job.TargetPlatform, Locale: job.Locale, Status: job.Status, SnapshotSchema: job.SnapshotSchema, InputSnapshot: append(json.RawMessage(nil), job.InputSnapshotJSON...), CreatedBy: creator, CreatedBySnapshot: creator, ModelSnapshot: modelSnapshot, StartedAt: job.StartedAt, CompletedAt: job.CompletedAt, CancelledAt: job.CancelledAt, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt, Items: items, TotalTokens: totalTokens, EstimatedAmountUSD: money.Format(estimatedTotal), ReconciledAmountUSD: "0.00000000", ReconciliationStatus: reconciliationStatus}
 }
 
 func loadJobAuditSnapshots(tx *gorm.DB, actorID uint) (JobCreatorSnapshot, JobModelSnapshot, error) {

@@ -22,6 +22,9 @@ interface SKUListItem {
   compatible_device_model: string;
   barcode: string;
   stock: number;
+	average_unit_cost_sgd: string;
+	inventory_value_sgd: string;
+	costing_warning: boolean;
   low_stock_threshold: number;
   platform_title: string;
   selling_points: string;
@@ -115,6 +118,8 @@ export default function SkusPage() {
         return <span className={low ? "font-semibold text-danger" : ""}>{formatNumber(row.original.stock)}</span>;
       },
     },
+	{ accessorKey: "average_unit_cost_sgd", header: language === "zh" ? "平均成本 (SGD)" : "Avg cost (SGD)", cell: ({ row }) => <span className="tabular-nums">S${Number(row.original.average_unit_cost_sgd ?? 0).toFixed(2)}</span> },
+	{ accessorKey: "inventory_value_sgd", header: language === "zh" ? "库存金额" : "Inventory value", cell: ({ row }) => <div><span className="tabular-nums">S${Number(row.original.inventory_value_sgd ?? 0).toFixed(2)}</span>{row.original.costing_warning ? <Badge className="ml-2" variant="warning">{language === "zh" ? "零成本" : "Zero cost"}</Badge> : null}</div> },
     {
       accessorKey: "status",
       header: t("status"),
@@ -160,10 +165,12 @@ export default function SkusPage() {
         <div><p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">CargoFlows · Catalog</p><h1 className="text-3xl font-bold tracking-tight text-navy sm:text-4xl">{t("skuManage")}</h1><p className="mt-2 text-sm text-muted-foreground">{t("skuManageDesc")}</p></div>
         <Button asChild className="min-h-11"><Link href="/skus/new"><Plus className="h-4 w-4" />{t("newSku")}</Link></Button>
       </div>
-      <div className="grid gap-3 md:grid-cols-3">
+	  {skus.some((sku) => sku.costing_warning) ? <div className="rounded-lg border border-warning/35 bg-warning/5 p-3 text-sm text-warning" role="status">{language === "zh" ? "部分现有库存以 0 SGD 开账；警告会持续显示，直到通过采购入库形成有效平均成本。" : "Some opening inventory is valued at SGD 0. The warning remains until a priced receipt establishes cost."}</div> : null}
+      <div className="grid gap-3 md:grid-cols-4">
         <Stat label={t("skuTotal")} value={formatNumber(skus.length)} detail={t("skuTotalDesc")} />
         <Stat label={t("activeSku")} value={formatNumber(activeCount)} detail={t("activeSkuDesc")} />
         <Stat label={t("lowStock")} value={formatNumber(lowStockCount)} detail={t("lowStockDesc")} />
+		<Stat label={language === "zh" ? "库存估值" : "Inventory value"} value={`S$${skus.reduce((sum, sku) => sum + Number(sku.inventory_value_sgd ?? 0), 0).toFixed(2)}`} detail={language === "zh" ? "SGD 移动平均" : "SGD moving average"} />
       </div>
       <section className="rounded-xl border border-border bg-card p-4 shadow-[var(--shadow-sm)] sm:p-5">
         <div className="flex flex-col gap-3 border-b border-border pb-4 lg:flex-row lg:items-center lg:justify-between">

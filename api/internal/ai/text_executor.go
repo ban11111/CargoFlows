@@ -137,6 +137,7 @@ func (executor *TextExecutor) Execute(ctx context.Context, leased LeasedItem) er
 	prepared.execution.OpenAIRequestID = response.RequestID
 	prepared.execution.Model = response.Model
 	prepared.execution.InputTextTokens = response.Usage.InputTextTokens
+	prepared.execution.CachedInputTokens = response.Usage.CachedInputTokens
 	prepared.execution.InputImageTokens = response.Usage.InputImageTokens
 	prepared.execution.OutputTextTokens = response.Usage.OutputTextTokens
 	return executor.finalize(ctx, prepared.execution, response.OutputJSON)
@@ -361,8 +362,8 @@ func (executor *TextExecutor) captureProviderResponse(ctx context.Context, execu
 		}
 		result := tx.Model(&execution).Where("status IN ?", []models.AIExecutionStatus{models.AIExecutionCallingOpenAI, models.AIExecutionNeedsAttention}).Updates(map[string]any{
 			"status": models.AIExecutionStoring, "provider_output_json": []byte(response.OutputJSON), "open_ai_response_id": response.ResponseID,
-			"open_ai_request_id": response.RequestID, "model": response.Model, "actual_model": response.Model, "input_text_tokens": response.Usage.InputTextTokens, "input_image_tokens": response.Usage.InputImageTokens, "output_text_tokens": response.Usage.OutputTextTokens,
-			"reasoning_tokens": response.Usage.ReasoningTokens, "total_tokens": response.Usage.TotalTokens,
+			"open_ai_request_id": response.RequestID, "model": response.Model, "actual_model": response.Model, "input_text_tokens": response.Usage.InputTextTokens, "cached_input_tokens": response.Usage.CachedInputTokens, "input_image_tokens": response.Usage.InputImageTokens, "output_text_tokens": response.Usage.OutputTextTokens,
+			"reasoning_tokens": response.Usage.ReasoningTokens, "total_tokens": response.Usage.TotalTokens, "service_tier": defaultString(response.ServiceTier, "default"),
 		})
 		if result.Error != nil {
 			return result.Error
@@ -408,8 +409,11 @@ func (executor *TextExecutor) finalize(ctx context.Context, execution models.AIE
 				return err
 			}
 		}
-		ledger := models.AIUsageLedger{AIExecutionID: current.ID, Model: current.Model, InputTextTokens: current.InputTextTokens, InputImageTokens: current.InputImageTokens, OutputTextTokens: current.OutputTextTokens, ReasoningTokens: current.ReasoningTokens, TotalTokens: current.TotalTokens, Currency: "USD", OpenAIRequestID: current.OpenAIRequestID}
+		ledger := models.AIUsageLedger{AIExecutionID: current.ID, Model: current.Model, InputTextTokens: current.InputTextTokens, CachedInputTokens: current.CachedInputTokens, InputImageTokens: current.InputImageTokens, OutputTextTokens: current.OutputTextTokens, ReasoningTokens: current.ReasoningTokens, TotalTokens: current.TotalTokens, Currency: "USD", OpenAIRequestID: current.OpenAIRequestID}
 		if err := tx.Create(&ledger).Error; err != nil {
+			return err
+		}
+		if err := PriceUsageLedger(tx, &ledger, current); err != nil {
 			return err
 		}
 		now := executor.clock.Now()
