@@ -118,6 +118,51 @@ func TestCompileTextPromptBuildsStrictSEOSchema(t *testing.T) {
 	}
 }
 
+func TestCompileTextPromptBuildsEnglishFirstBilingualSchema(t *testing.T) {
+	snapshot, slot := textPromptFixture(models.AIContentSlotTitle)
+	snapshot.Schema = ProductSnapshotSchemaV2
+	snapshot.Locale = "en"
+	snapshot.OutputLocales = []string{"en", "zh-CN"}
+	compiled, err := CompileTextPrompt(snapshot, slot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compiled.CompilerVersion != TextPromptCompilerVersion || compiled.LayerVersions.Language != LanguagePolicyVersion {
+		t.Fatalf("compiler metadata = %#v", compiled)
+	}
+	if !strings.Contains(compiled.Instructions, "localizations.en") || !strings.Contains(compiled.Instructions, "localizations.zh-CN") || !strings.Contains(compiled.Instructions, "consistent with L0-L1b") {
+		t.Fatalf("missing mandatory bilingual policy: %s", compiled.Instructions)
+	}
+	var schema map[string]any
+	if json.Unmarshal(compiled.JSONSchema, &schema) != nil {
+		t.Fatal("invalid schema")
+	}
+	text := string(compiled.JSONSchema)
+	if strings.Index(text, `"en"`) < 0 || strings.Index(text, `"zh-CN"`) < strings.Index(text, `"en"`) || !strings.Contains(text, `"localizations"`) {
+		t.Fatalf("bilingual schema = %s", text)
+	}
+}
+
+func TestCompileTextPromptBuildsSingleLanguageLocalizedSchemas(t *testing.T) {
+	for _, locale := range []string{"en", "zh-CN"} {
+		t.Run(locale, func(t *testing.T) {
+			snapshot, slot := textPromptFixture(models.AIContentSlotTitle)
+			snapshot.Schema, snapshot.Locale, snapshot.OutputLocales = ProductSnapshotSchemaV2, locale, []string{locale}
+			compiled, err := CompileTextPrompt(snapshot, slot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(compiled.JSONSchema), `"localizations"`) || !strings.Contains(compiled.Instructions, "Produce "+map[string]string{"en": "English", "zh-CN": "Simplified Chinese"}[locale]+" only") {
+				t.Fatalf("single-language prompt = %#v", compiled)
+			}
+			other := map[string]string{"en": `"zh-CN"`, "zh-CN": `"en"`}[locale]
+			if strings.Contains(string(compiled.JSONSchema), other) {
+				t.Fatalf("schema contains unselected locale %s: %s", other, compiled.JSONSchema)
+			}
+		})
+	}
+}
+
 func TestCompileTextPromptRejectsUnsafeOrInvalidInput(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -125,6 +170,9 @@ func TestCompileTextPromptRejectsUnsafeOrInvalidInput(t *testing.T) {
 		want   error
 	}{
 		{"wrong snapshot schema", func(snapshot *ProductSnapshotV1, _ *SlotFacts) { snapshot.Schema = "v0" }, ErrTextPromptSnapshotInvalid},
+		{"invalid v2 output locales", func(snapshot *ProductSnapshotV1, _ *SlotFacts) {
+			snapshot.Schema, snapshot.Locale, snapshot.OutputLocales = ProductSnapshotSchemaV2, "zh-CN", []string{"zh-CN", "en"}
+		}, ErrTextPromptSnapshotInvalid},
 		{"image slot", func(_ *ProductSnapshotV1, slot *SlotFacts) { slot.Kind = models.AIContentSlotImage }, ErrTextPromptSlotInvalid},
 		{"unknown variable", func(snapshot *ProductSnapshotV1, _ *SlotFacts) {
 			snapshot.Template.PlatformPrompt = "Use {{secrets.api_key}}"

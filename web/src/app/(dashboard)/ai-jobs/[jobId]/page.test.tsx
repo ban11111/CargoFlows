@@ -120,6 +120,35 @@ describe("AIJobDetailPage", () => {
     await waitFor(() => expect(requests.some((request) => request.path.endsWith(`${resultPath}/apply`) && request.method === "POST")).toBe(true));
   });
 
+  it("edits bilingual content in English-first order as one candidate", async () => {
+    const titleItem = { ...job.items[0], public_id: "item-title", slot_key: "title", kind: "title", slot_snapshot: { ...job.items[0].slot_snapshot, public_id: "slot-title", slot_key: "title", kind: "title", name: { zh: "商品标题", en: "Product title" } } };
+    const bilingualJob = { ...job, locale: "en", output_locales: ["en", "zh-CN"], snapshot_schema: "cargoflows_product_generation_v2", input_snapshot: { ...job.input_snapshot, schema: "cargoflows_product_generation_v2", locale: "en", output_locales: ["en", "zh-CN"] }, items: [titleItem] };
+    const result = { public_id: "result-bilingual", job_item_id: "item-title", candidate_index: 1, kind: "title", raw_structured: { localizations: { en: { title: "Clear protective phone case", keywords: ["case"] }, "zh-CN": { title: "轻薄透明保护手机壳", keywords: ["手机壳"] } }, source_fields: ["product.name"] }, validation: [], state: "candidate", edited_at: null, approved_at: null, rejected_at: null, applied_at: null, effective: false, created_at: job.created_at, updated_at: job.updated_at };
+    let patchBody: { structured?: { localizations?: Record<string, { title: string }> } } | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path.endsWith("/ai-jobs/job-1")) return new Response(JSON.stringify(bilingualJob), { status: 200 });
+      if (path.endsWith("/ai-jobs/job-1/text-results")) return new Response(JSON.stringify({ data: [result] }), { status: 200 });
+      if (path.endsWith("/items/item-title/text-results/result-bilingual") && init?.method === "PATCH") {
+        patchBody = JSON.parse(String(init.body)) as typeof patchBody;
+        return new Response(JSON.stringify({ ...result, edited_structured: patchBody?.structured }), { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    });
+    render(<AIJobDetailPage />, { wrapper: Providers });
+
+    const englishTitle = await screen.findByDisplayValue("Clear protective phone case");
+    const chineseTitle = screen.getByDisplayValue("轻薄透明保护手机壳");
+    const englishSection = screen.getByRole("heading", { name: "English", level: 4 });
+    const chineseSection = screen.getByRole("heading", { name: "简体中文", level: 4 });
+    expect(englishSection.compareDocumentPosition(chineseSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.change(englishTitle, { target: { value: "Clear slim protective case" } });
+    fireEvent.change(chineseTitle, { target: { value: "轻薄透明防护手机壳" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存编辑" }));
+
+    await waitFor(() => expect(patchBody?.structured?.localizations).toMatchObject({ en: { title: "Clear slim protective case" }, "zh-CN": { title: "轻薄透明防护手机壳" } }));
+  });
+
   it("keeps commas inside SEO selling points and splits them only by line", async () => {
     const seoItem = { ...job.items[0], public_id: "item-seo", slot_key: "seo", kind: "seo_description", slot_snapshot: { ...job.items[0].slot_snapshot, public_id: "slot-seo", slot_key: "seo", kind: "seo_description", name: { zh: "搜索描述", en: "Search description" } } };
     const seoResult = { public_id: "result-seo", job_item_id: "item-seo", candidate_index: 1, kind: "seo_description", raw_structured: { short_description: "透明保护壳", selling_points: ["轻薄，易握"], long_description: "适合日常使用的透明保护壳。", search_keywords: ["透明壳"], source_fields: ["product.name"] }, validation: [], state: "candidate", edited_at: null, approved_at: null, rejected_at: null, applied_at: null, effective: false, created_at: job.created_at, updated_at: job.updated_at };

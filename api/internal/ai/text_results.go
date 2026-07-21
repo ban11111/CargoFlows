@@ -67,13 +67,21 @@ type PlatformContentHistory struct {
 }
 
 type TextApplicationPreview struct {
-	Before json.RawMessage `json:"before"`
-	After  json.RawMessage `json:"after"`
+	Before        json.RawMessage                `json:"before"`
+	After         json.RawMessage                `json:"after"`
+	Localizations []TextApplicationLocalePreview `json:"localizations"`
 }
 
 type TextApplicationResult struct {
-	Content  PlatformContentDocument `json:"content"`
-	Replayed bool                    `json:"replayed"`
+	Content  PlatformContentDocument   `json:"content"`
+	Contents []PlatformContentDocument `json:"contents"`
+	Replayed bool                      `json:"replayed"`
+}
+
+type TextApplicationLocalePreview struct {
+	Locale string          `json:"locale"`
+	Before json.RawMessage `json:"before"`
+	After  json.RawMessage `json:"after"`
 }
 
 type TextResultService struct {
@@ -237,12 +245,24 @@ func (service *TextResultService) Preview(ctx context.Context, jobID, itemID, re
 	if err := requireEffectiveApproval(binding); err != nil {
 		return TextApplicationPreview{}, err
 	}
-	content, found, err := findPlatformContent(service.db.WithContext(ctx), binding.job)
+	payloads, err := localizedResultPayloads(binding)
 	if err != nil {
 		return TextApplicationPreview{}, err
 	}
-	before, after, err := applicationSnapshots(content, found, binding)
-	return TextApplicationPreview{Before: before, After: after}, err
+	preview := TextApplicationPreview{Localizations: make([]TextApplicationLocalePreview, 0, len(payloads))}
+	for _, payload := range payloads {
+		content, found, err := findPlatformContent(service.db.WithContext(ctx), binding.job, payload.Locale)
+		if err != nil {
+			return TextApplicationPreview{}, err
+		}
+		before, after, err := applicationSnapshots(content, found, binding, payload.Locale, payload.Structured)
+		if err != nil {
+			return TextApplicationPreview{}, err
+		}
+		preview.Localizations = append(preview.Localizations, TextApplicationLocalePreview{Locale: payload.Locale, Before: before, After: after})
+	}
+	preview.Before, preview.After = preview.Localizations[0].Before, preview.Localizations[0].After
+	return preview, nil
 }
 
 func (service *TextResultService) Apply(ctx context.Context, jobID, itemID, resultID string, actorID uint) (TextApplicationResult, error) {
@@ -253,15 +273,19 @@ func (service *TextResultService) Apply(ctx context.Context, jobID, itemID, resu
 			return err
 		}
 		if binding.result.AppliedAt != nil {
-			var revision models.SKUPlatformContentRevision
-			if err := tx.Where("source_ai_text_result_id = ?", binding.result.ID).First(&revision).Error; err != nil {
+			var revisions []models.SKUPlatformContentRevision
+			if err := tx.Where("source_ai_text_result_id = ?", binding.result.ID).Order("id ASC").Find(&revisions).Error; err != nil || len(revisions) == 0 {
 				return ErrTextResultLifecycleConflict
 			}
-			var historical PlatformContentDocument
-			if err := json.Unmarshal(revision.AfterJSON, &historical); err != nil {
-				return ErrTextResultLifecycleConflict
+			contents := make([]PlatformContentDocument, 0, len(revisions))
+			for _, revision := range revisions {
+				var historical PlatformContentDocument
+				if err := json.Unmarshal(revision.AfterJSON, &historical); err != nil {
+					return ErrTextResultLifecycleConflict
+				}
+				contents = append(contents, historical)
 			}
-			applied = TextApplicationResult{Content: historical, Replayed: true}
+			applied = TextApplicationResult{Content: contents[0], Contents: contents, Replayed: true}
 			return nil
 		}
 		if err := requireEffectiveApproval(binding); err != nil {
@@ -275,50 +299,61 @@ func (service *TextResultService) Apply(ctx context.Context, jobID, itemID, resu
 		if err := skuQuery.Select("id").First(&sku, binding.job.SKUID).Error; err != nil {
 			return err
 		}
-		content, found, err := findPlatformContent(tx, binding.job)
+		payloads, err := localizedResultPayloads(binding)
 		if err != nil {
-			return err
-		}
-		before, after, err := applicationSnapshots(content, found, binding)
-		if err != nil {
-			return err
-		}
-		var next PlatformContentDocument
-		if err := json.Unmarshal(after, &next); err != nil {
 			return err
 		}
 		now := service.clock.Now()
-		if !found {
-			content = models.SKUPlatformContent{PublicID: uuid.NewString(), SKUID: binding.job.SKUID, Platform: binding.job.TargetPlatform, Locale: binding.job.Locale, Revision: 1, UpdatedByID: actorID}
-		} else {
-			content.Revision++
-			content.UpdatedByID = actorID
-		}
-		content.Title, content.ShortDescription, content.LongDescription = next.Title, next.ShortDescription, next.LongDescription
-		content.SellingPointsJSON, content.SearchKeywordsJSON = []byte(next.SellingPoints), []byte(next.SearchKeywords)
-		content.SourceAITextResultID = &binding.result.ID
-		if !found {
-			if err := tx.Create(&content).Error; err != nil {
+		contents := make([]PlatformContentDocument, 0, len(payloads))
+		revisions := map[string]int{}
+		for _, payload := range payloads {
+			content, found, err := findPlatformContent(tx, binding.job, payload.Locale)
+			if err != nil {
 				return err
 			}
-		} else if err := tx.Save(&content).Error; err != nil {
-			return err
-		}
-		after, err = json.Marshal(platformContentDocument(content, binding.job.SKU.PublicID))
-		if err != nil {
-			return err
-		}
-		revision := models.SKUPlatformContentRevision{PublicID: uuid.NewString(), SKUPlatformContentID: content.ID, Revision: content.Revision, BeforeJSON: before, AfterJSON: after, SourceAITextResultID: &binding.result.ID, ActorID: actorID}
-		if err := tx.Create(&revision).Error; err != nil {
-			return err
+			before, after, err := applicationSnapshots(content, found, binding, payload.Locale, payload.Structured)
+			if err != nil {
+				return err
+			}
+			var next PlatformContentDocument
+			if err := json.Unmarshal(after, &next); err != nil {
+				return err
+			}
+			if !found {
+				content = models.SKUPlatformContent{PublicID: uuid.NewString(), SKUID: binding.job.SKUID, Platform: binding.job.TargetPlatform, Locale: payload.Locale, Revision: 1, UpdatedByID: actorID}
+			} else {
+				content.Revision++
+				content.UpdatedByID = actorID
+			}
+			content.Title, content.ShortDescription, content.LongDescription = next.Title, next.ShortDescription, next.LongDescription
+			content.SellingPointsJSON, content.SearchKeywordsJSON = []byte(next.SellingPoints), []byte(next.SearchKeywords)
+			content.SourceAITextResultID = &binding.result.ID
+			if !found {
+				if err := tx.Create(&content).Error; err != nil {
+					return err
+				}
+			} else if err := tx.Save(&content).Error; err != nil {
+				return err
+			}
+			after, err = json.Marshal(platformContentDocument(content, binding.job.SKU.PublicID))
+			if err != nil {
+				return err
+			}
+			revision := models.SKUPlatformContentRevision{PublicID: uuid.NewString(), SKUPlatformContentID: content.ID, Revision: content.Revision, BeforeJSON: before, AfterJSON: after, SourceAITextResultID: &binding.result.ID, ActorID: actorID}
+			if err := tx.Create(&revision).Error; err != nil {
+				return err
+			}
+			document := platformContentDocument(content, binding.job.SKU.PublicID)
+			contents = append(contents, document)
+			revisions[payload.Locale] = document.Revision
 		}
 		if err := tx.Model(&binding.result).Updates(map[string]any{"applied_by_id": actorID, "applied_at": now}).Error; err != nil {
 			return err
 		}
-		if err := createTextResultAudit(tx, binding, actorID, "ai_text_result.applied", map[string]any{"platform": binding.job.TargetPlatform, "locale": binding.job.Locale, "revision": content.Revision}); err != nil {
+		if err := createTextResultAudit(tx, binding, actorID, "ai_text_result.applied", map[string]any{"platform": binding.job.TargetPlatform, "locales": outputLocalesForJob(binding.job), "revisions": revisions}); err != nil {
 			return err
 		}
-		applied = TextApplicationResult{Content: platformContentDocument(content, binding.job.SKU.PublicID)}
+		applied = TextApplicationResult{Content: contents[0], Contents: contents}
 		return nil
 	})
 	return applied, err
@@ -413,6 +448,13 @@ func validateEditedTextResult(job models.AIJob, item models.AIJobItem, kind mode
 		return ErrTextResultInvalid
 	}
 	bounds := textLengthBounds{MinLength: constraints.MinLength, MaxLength: constraints.MaxLength}
+	if snapshot.Schema == ProductSnapshotSchemaV2 {
+		prompt := CompiledTextPrompt{CompilerVersion: TextPromptCompilerVersion, SchemaName: textSchemaName(kind), InputJSON: mustTextValidationInput(snapshot, slot), CandidateCount: 1}
+		if !validateLocalizedTextCandidate(raw, prompt.SchemaName, prompt, constraints, requiredTextFieldValues(snapshot.Product, snapshot.SKU)) {
+			return ErrTextResultInvalid
+		}
+		return nil
+	}
 	switch kind {
 	case models.AIContentSlotTitle:
 		var candidate titleTextCandidate
@@ -428,6 +470,18 @@ func validateEditedTextResult(job models.AIJob, item models.AIJobItem, kind mode
 		return ErrTextResultInvalid
 	}
 	return nil
+}
+
+func textSchemaName(kind models.AIContentSlotKind) string {
+	if kind == models.AIContentSlotTitle {
+		return "cargoflows_product_title"
+	}
+	return "cargoflows_product_seo"
+}
+
+func mustTextValidationInput(snapshot ProductSnapshotV1, slot SlotFacts) json.RawMessage {
+	value, _ := json.Marshal(map[string]any{"locale": snapshot.Locale, "output_locales": outputLocalesForSnapshot(snapshot), "product": snapshot.Product, "sku": snapshot.SKU, "slot": map[string]any{"constraints": slot.Constraints}})
+	return value
 }
 
 func requireEffectiveApproval(binding textResultBinding) error {
@@ -447,8 +501,8 @@ func effectiveTextJSON(result models.AITextResult) json.RawMessage {
 	return append(json.RawMessage(nil), result.RawStructuredJSON...)
 }
 
-func findPlatformContent(db *gorm.DB, job models.AIJob) (models.SKUPlatformContent, bool, error) {
-	query := db.Where("sku_id = ? AND platform = ? AND locale = ?", job.SKUID, job.TargetPlatform, job.Locale)
+func findPlatformContent(db *gorm.DB, job models.AIJob, locale string) (models.SKUPlatformContent, bool, error) {
+	query := db.Where("sku_id = ? AND platform = ? AND locale = ?", job.SKUID, job.TargetPlatform, locale)
 	if db.Dialector.Name() == "mysql" {
 		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 	}
@@ -460,9 +514,9 @@ func findPlatformContent(db *gorm.DB, job models.AIJob) (models.SKUPlatformConte
 	return content, err == nil, err
 }
 
-func applicationSnapshots(content models.SKUPlatformContent, found bool, binding textResultBinding) (json.RawMessage, json.RawMessage, error) {
+func applicationSnapshots(content models.SKUPlatformContent, found bool, binding textResultBinding, locale string, raw json.RawMessage) (json.RawMessage, json.RawMessage, error) {
 	before := json.RawMessage(`{}`)
-	document := PlatformContentDocument{SKUID: binding.job.SKU.PublicID, Platform: binding.job.TargetPlatform, Locale: binding.job.Locale, SellingPoints: json.RawMessage(`[]`), SearchKeywords: json.RawMessage(`[]`), Revision: 1}
+	document := PlatformContentDocument{SKUID: binding.job.SKU.PublicID, Platform: binding.job.TargetPlatform, Locale: locale, SellingPoints: json.RawMessage(`[]`), SearchKeywords: json.RawMessage(`[]`), Revision: 1}
 	if found {
 		document = platformContentDocument(content, binding.job.SKU.PublicID)
 		encoded, err := json.Marshal(document)
@@ -472,16 +526,30 @@ func applicationSnapshots(content models.SKUPlatformContent, found bool, binding
 		before = encoded
 		document.Revision++
 	}
-	raw := effectiveTextJSON(binding.result)
 	if binding.result.Kind == models.AIContentSlotTitle {
-		var candidate titleTextCandidate
-		if strictJSONDecode(raw, &candidate) != nil || candidate.Title == nil {
+		var candidate localizedTitleContent
+		if binding.job.SnapshotSchema != ProductSnapshotSchemaV2 {
+			var legacy titleTextCandidate
+			if strictJSONDecode(raw, &legacy) != nil || legacy.Title == nil {
+				return nil, nil, ErrTextResultInvalid
+			}
+			candidate.Title, candidate.Keywords = legacy.Title, legacy.Keywords
+		} else if strictJSONDecode(raw, &candidate) != nil || candidate.Title == nil {
 			return nil, nil, ErrTextResultInvalid
 		}
 		document.Title = *candidate.Title
 	} else {
-		var candidate seoTextCandidate
-		if strictJSONDecode(raw, &candidate) != nil || candidate.ShortDescription == nil || candidate.LongDescription == nil || candidate.SellingPoints == nil || candidate.SearchKeywords == nil {
+		var candidate localizedSEOContent
+		if binding.job.SnapshotSchema != ProductSnapshotSchemaV2 {
+			var legacy seoTextCandidate
+			if strictJSONDecode(raw, &legacy) != nil {
+				return nil, nil, ErrTextResultInvalid
+			}
+			candidate.ShortDescription, candidate.LongDescription, candidate.SellingPoints, candidate.SearchKeywords = legacy.ShortDescription, legacy.LongDescription, legacy.SellingPoints, legacy.SearchKeywords
+		} else if strictJSONDecode(raw, &candidate) != nil {
+			return nil, nil, ErrTextResultInvalid
+		}
+		if candidate.ShortDescription == nil || candidate.LongDescription == nil || candidate.SellingPoints == nil || candidate.SearchKeywords == nil {
 			return nil, nil, ErrTextResultInvalid
 		}
 		document.ShortDescription, document.LongDescription = *candidate.ShortDescription, *candidate.LongDescription
@@ -490,6 +558,32 @@ func applicationSnapshots(content models.SKUPlatformContent, found bool, binding
 	}
 	after, err := json.Marshal(document)
 	return before, after, err
+}
+
+type localizedResultPayload struct {
+	Locale     string
+	Structured json.RawMessage
+}
+
+func localizedResultPayloads(binding textResultBinding) ([]localizedResultPayload, error) {
+	raw := effectiveTextJSON(binding.result)
+	if binding.job.SnapshotSchema != ProductSnapshotSchemaV2 {
+		return []localizedResultPayload{{Locale: binding.job.Locale, Structured: raw}}, nil
+	}
+	var candidate localizedTextCandidate
+	if strictJSONDecode(raw, &candidate) != nil || candidate.Localizations == nil {
+		return nil, ErrTextResultInvalid
+	}
+	locales := outputLocalesForJob(binding.job)
+	result := make([]localizedResultPayload, 0, len(locales))
+	for _, locale := range locales {
+		value, ok := (*candidate.Localizations)[locale]
+		if !ok {
+			return nil, ErrTextResultInvalid
+		}
+		result = append(result, localizedResultPayload{Locale: locale, Structured: value})
+	}
+	return result, nil
 }
 
 func platformContentDocument(content models.SKUPlatformContent, skuPublicID string) PlatformContentDocument {

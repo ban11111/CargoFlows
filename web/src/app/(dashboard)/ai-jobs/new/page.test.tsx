@@ -70,8 +70,32 @@ describe("NewAIJobPage", () => {
 
     await waitFor(() => expect(push).toHaveBeenCalledWith("/ai-jobs/job-created"));
     const post = requests.find((request) => request.path.endsWith("/ai-jobs") && request.init?.method === "POST");
-    expect(post?.body).toMatchObject({ sku_id: skuPublicID, template_version_id: "version-1", selected_slot_keys: ["hero"], selected_asset_ids: [assetPublicID], selected_brand_icon_ids: [brandIconPublicID], locale: "zh-CN", user_preference: "保留透明材质", generation_overrides: { hero: { candidate_count: 1, size: "1024x1024", quality: "high", style: "简洁" } } });
+    expect(post?.body).toMatchObject({ sku_id: skuPublicID, template_version_id: "version-1", selected_slot_keys: ["hero"], selected_asset_ids: [assetPublicID], selected_brand_icon_ids: [brandIconPublicID], output_locales: ["en", "zh-CN"], user_preference: "保留透明材质", generation_overrides: { hero: { candidate_count: 1, size: "1024x1024", quality: "high", style: "简洁" } } });
+    expect(post?.body).not.toHaveProperty("locale");
     expect(new Headers(post?.init?.headers).get("Idempotency-Key")).toMatch(/^ai-job-/);
+  });
+
+  it.each([
+    ["English", ["en"]],
+    ["简体中文", ["zh-CN"]],
+  ])("submits the %s output language strategy", async (option, outputLocales) => {
+    const { requests } = installWizardFetch();
+    render(<NewAIJobPage />, { wrapper: Providers });
+
+    fireEvent.change(await screen.findByLabelText("选择 SKU"), { target: { value: skuPublicID } });
+    fireEvent.change(screen.getByLabelText("选择模板版本"), { target: { value: "version-1" } });
+    expect(screen.getByLabelText("输出语言策略")).toHaveValue("bilingual");
+    fireEvent.change(screen.getByLabelText("输出语言策略"), { target: { value: outputLocales[0] } });
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /商品标题/ }));
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    fireEvent.click(screen.getByRole("button", { name: "创建任务" }));
+
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/ai-jobs/job-created"));
+    const post = requests.find((request) => request.path.endsWith("/ai-jobs") && request.init?.method === "POST");
+    expect(post?.body).toMatchObject({ output_locales: outputLocales });
   });
 
   it("blocks advancing until at least one optional slot is selected", async () => {

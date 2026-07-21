@@ -69,6 +69,37 @@ func TestCompileImagePromptLayersProductAndCoordinateRules(t *testing.T) {
 	}
 }
 
+func TestCompileImagePromptEnforcesEnglishFirstBilingualVisibleText(t *testing.T) {
+	snapshot, slot := imagePromptFixture()
+	snapshot.Schema = ProductSnapshotSchemaV2
+	snapshot.Locale = "en"
+	snapshot.OutputLocales = []string{"en", "zh-CN"}
+	compiled, err := CompileImagePrompt(snapshot, slot, ImageTurnInput{Operation: models.AIExecutionGenerate, ThreadPublicID: "thread-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compiled.CompilerVersion != ImagePromptCompilerVersion || compiled.LayerVersions.Language != LanguagePolicyVersion || !strings.Contains(compiled.Instructions, "English primary") || !strings.Contains(compiled.Instructions, "Simplified Chinese") || !strings.Contains(compiled.Instructions, "consistent with L0-L1b") {
+		t.Fatalf("language policy missing: %#v", compiled)
+	}
+}
+
+func TestCompileImagePromptRestrictsVisibleTextToSelectedSingleLanguage(t *testing.T) {
+	for _, locale := range []string{"en", "zh-CN"} {
+		t.Run(locale, func(t *testing.T) {
+			snapshot, slot := imagePromptFixture()
+			snapshot.Schema, snapshot.Locale, snapshot.OutputLocales = ProductSnapshotSchemaV2, locale, []string{locale}
+			compiled, err := CompileImagePrompt(snapshot, slot, ImageTurnInput{Operation: models.AIExecutionGenerate, ThreadPublicID: "thread-a"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			selected := map[string]string{"en": "English only", "zh-CN": "Simplified Chinese only"}[locale]
+			if !strings.Contains(compiled.Instructions, selected) {
+				t.Fatalf("single-language image policy missing: %s", compiled.Instructions)
+			}
+		})
+	}
+}
+
 func TestCompileImagePromptPlacesRecolorableBrandIconAfterProductSources(t *testing.T) {
 	snapshot, slot := imagePromptFixture()
 	snapshot.BrandIcons = []BrandIconFacts{{PublicID: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", Name: "Primary wordmark", Notes: "Horizontal", MIMEType: "image/png", Width: 400, Height: 120, ByteCount: 2048, SHA256: strings.Repeat("c", 64)}}
@@ -207,6 +238,9 @@ func TestCompileImagePromptRejectsUnsafeOrInvalidInput(t *testing.T) {
 		mutate func(*ProductSnapshotV1, *SlotFacts, *ImageTurnInput)
 		want   error
 	}{
+		{"invalid v2 output locales", func(snapshot *ProductSnapshotV1, _ *SlotFacts, _ *ImageTurnInput) {
+			snapshot.Schema, snapshot.Locale, snapshot.OutputLocales = ProductSnapshotSchemaV2, "zh-CN", []string{"zh-CN", "en"}
+		}, ErrImagePromptSnapshotInvalid},
 		{"wrong slot kind", func(_ *ProductSnapshotV1, slot *SlotFacts, _ *ImageTurnInput) { slot.Kind = models.AIContentSlotTitle }, ErrImagePromptSlotInvalid},
 		{"unknown template variable", func(snapshot *ProductSnapshotV1, _ *SlotFacts, _ *ImageTurnInput) {
 			snapshot.Template.PlatformPrompt = "{{secrets.key}}"

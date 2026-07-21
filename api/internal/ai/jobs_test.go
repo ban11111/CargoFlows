@@ -186,7 +186,7 @@ func TestCreateJobSnapshotsOnlyWhitelistedFactsAndSelectedSlots(t *testing.T) {
 	if err := json.Unmarshal(job.InputSnapshot, &snapshot); err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.Schema != ProductSnapshotSchemaV1 || snapshot.Product.Category.NameEN != "Phone cases" || snapshot.SOP.CoordinateSystem != "pcs_object_v1" || len(snapshot.SelectedAssets) != 1 || len(snapshot.Template.SelectedSlots) != 2 || !snapshot.Template.SelectedSlots[0].DefaultSelected {
+	if snapshot.Schema != ProductSnapshotSchemaV2 || !reflect.DeepEqual(snapshot.OutputLocales, []string{"zh-CN"}) || snapshot.Product.Category.NameEN != "Phone cases" || snapshot.SOP.CoordinateSystem != "pcs_object_v1" || len(snapshot.SelectedAssets) != 1 || len(snapshot.Template.SelectedSlots) != 2 || !snapshot.Template.SelectedSlots[0].DefaultSelected {
 		t.Fatalf("incomplete snapshot: %#v", snapshot)
 	}
 	if job.SKUID != fixture.SKU.PublicID || snapshot.SKU.PublicID != fixture.SKU.PublicID || snapshot.SelectedAssets[0].PublicID != fixture.ApprovedAsset.PublicID {
@@ -774,8 +774,19 @@ func TestCreateJobRejectsInvalidRuntimeConfiguration(t *testing.T) {
 	base.UserPreference = ""
 	base.Locale = " ZH-cn "
 	normalized, _, err := normalizeCreateJobInput(base)
-	if err != nil || normalized.Locale != "zh-CN" {
+	if err != nil || normalized.Locale != "zh-CN" || !reflect.DeepEqual(normalized.OutputLocales, []string{"zh-CN"}) {
 		t.Fatalf("locale normalization = %q/%v", normalized.Locale, err)
+	}
+	bilingual := base
+	bilingual.Locale = ""
+	bilingual.OutputLocales = []string{"en", "zh-CN"}
+	normalized, _, err = normalizeCreateJobInput(bilingual)
+	if err != nil || normalized.Locale != "en" || !reflect.DeepEqual(normalized.OutputLocales, []string{"en", "zh-CN"}) { t.Fatalf("bilingual normalization = %#v/%v", normalized, err) }
+	for _, invalid := range [][]string{{}, {"zh-CN", "en"}, {"en", "en"}, {"fr"}} {
+		candidate := bilingual
+		candidate.OutputLocales = invalid
+		if len(invalid) == 0 { candidate.Locale = "" }
+		if _, _, err := normalizeCreateJobInput(candidate); !errors.Is(err, ErrOutputLocalesInvalid) && !(len(invalid) == 0 && errors.Is(err, ErrLocaleInvalid)) { t.Fatalf("output locales %v error = %v", invalid, err) }
 	}
 	base.Locale = strings.Repeat("x", 33)
 	if _, err := service.Create(t.Context(), base); !errors.Is(err, ErrLocaleInvalid) {

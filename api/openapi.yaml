@@ -2152,7 +2152,10 @@ components:
     CreateAIJobRequest:
       type: object
       additionalProperties: false
-      required: [sku_id, template_version_id, selected_slot_keys, selected_asset_ids, locale]
+      required: [sku_id, template_version_id, selected_slot_keys, selected_asset_ids]
+      anyOf:
+        - required: [output_locales]
+        - required: [locale]
       properties:
         sku_id: { type: string, format: uuid }
         template_version_id: { type: string, format: uuid }
@@ -2162,6 +2165,7 @@ components:
         selected_brand_icon_ids: { type: array, maxItems: 8, uniqueItems: true, items: { type: string, format: uuid }, description: Optional active icons belonging to the target SKU brand. }
         selected_reference_item_ids: { type: array, uniqueItems: true, items: { type: string, format: uuid }, description: Optional items from published same-category AI reference SOPs. }
         locale: { type: string, minLength: 2, maxLength: 32, pattern: '^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$' }
+        output_locales: { type: array, minItems: 1, maxItems: 2, uniqueItems: true, items: { type: string, enum: [en, zh-CN] }, description: 'Ordered output policy. Supported values are [en], [zh-CN], and [en, zh-CN].' }
         user_preference: { type: string, maxLength: 1000, description: Optional L4 user instruction stored immutably in the job snapshot. }
         generation_overrides:
           type: object
@@ -2296,15 +2300,16 @@ components:
     AIJob:
       type: object
       additionalProperties: false
-      required: [public_id, sku_id, template_version_id, target_platform, locale, status, snapshot_schema, input_snapshot, created_by, created_by_snapshot, model_snapshot, started_at, completed_at, cancelled_at, created_at, updated_at, items, total_tokens, estimated_amount_usd, reconciled_amount_usd, reconciliation_status]
+      required: [public_id, sku_id, template_version_id, target_platform, locale, output_locales, status, snapshot_schema, input_snapshot, created_by, created_by_snapshot, model_snapshot, started_at, completed_at, cancelled_at, created_at, updated_at, items, total_tokens, estimated_amount_usd, reconciled_amount_usd, reconciliation_status]
       properties:
         public_id: { type: string, format: uuid }
         sku_id: { type: string, format: uuid }
         template_version_id: { type: string, format: uuid }
         target_platform: { type: string }
         locale: { type: string }
+        output_locales: { type: array, minItems: 1, maxItems: 2, items: { type: string, enum: [en, zh-CN] } }
         status: { type: string, enum: [queued, running, partial, completed, failed, cancelled] }
-        snapshot_schema: { type: string, enum: [cargoflows_product_generation_v1] }
+        snapshot_schema: { type: string, enum: [cargoflows_product_generation_v1, cargoflows_product_generation_v2] }
         input_snapshot: { $ref: '#/components/schemas/ProductSnapshotV1' }
         created_by: { $ref: '#/components/schemas/AIJobCreator' }
         created_by_snapshot: { $ref: '#/components/schemas/AIJobCreator' }
@@ -2556,16 +2561,26 @@ components:
     AITextApplicationPreview:
       type: object
       additionalProperties: false
-      required: [before, after]
+      required: [before, after, localizations]
       properties:
+        before: { type: object, additionalProperties: true }
+        after: { type: object, additionalProperties: true }
+        localizations: { type: array, minItems: 1, items: { $ref: '#/components/schemas/AITextApplicationLocalePreview' } }
+    AITextApplicationLocalePreview:
+      type: object
+      additionalProperties: false
+      required: [locale, before, after]
+      properties:
+        locale: { type: string, enum: [en, zh-CN] }
         before: { type: object, additionalProperties: true }
         after: { type: object, additionalProperties: true }
     AITextApplicationResult:
       type: object
       additionalProperties: false
-      required: [content, replayed]
+      required: [content, contents, replayed]
       properties:
         content: { $ref: '#/components/schemas/PlatformContent' }
+        contents: { type: array, minItems: 1, items: { $ref: '#/components/schemas/PlatformContent' } }
         replayed: { type: boolean }
     AIJobSlotSnapshot:
       type: object
@@ -2701,8 +2716,9 @@ components:
       additionalProperties: false
       required: [schema, locale, target_platform, product, sku, sop, template, selected_assets, user_preference, generation_overrides]
       properties:
-        schema: { type: string, enum: [cargoflows_product_generation_v1] }
+        schema: { type: string, enum: [cargoflows_product_generation_v1, cargoflows_product_generation_v2] }
         locale: { type: string }
+        output_locales: { type: array, minItems: 1, maxItems: 2, items: { type: string, enum: [en, zh-CN] } }
         target_platform: { type: string }
         product: { $ref: '#/components/schemas/AISnapshotProduct' }
         sku: { $ref: '#/components/schemas/AISnapshotSKU' }

@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -160,6 +161,9 @@ func migrateSchema(db *gorm.DB) error {
 	); err != nil {
 		return err
 	}
+	if err := backfillAIJobOutputLocales(db); err != nil {
+		return err
+	}
 	if err := backfillBrands(db); err != nil {
 		return err
 	}
@@ -170,6 +174,26 @@ func migrateSchema(db *gorm.DB) error {
 		return err
 	}
 	return backfillAIModelConfiguration(db)
+}
+
+func backfillAIJobOutputLocales(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&models.AIJob{}) || !db.Migrator().HasColumn(&models.AIJob{}, "OutputLocalesJSON") {
+		return nil
+	}
+	var jobs []models.AIJob
+	if err := db.Select("id", "locale", "output_locales_json").Where("output_locales_json IS NULL").Find(&jobs).Error; err != nil {
+		return fmt.Errorf("find AI jobs without output locales: %w", err)
+	}
+	for _, job := range jobs {
+		encoded, err := json.Marshal([]string{job.Locale})
+		if err != nil {
+			return err
+		}
+		if err := db.Model(&models.AIJob{}).Where("id = ? AND output_locales_json IS NULL", job.ID).Update("output_locales_json", encoded).Error; err != nil {
+			return fmt.Errorf("backfill AI job output locales: %w", err)
+		}
+	}
+	return nil
 }
 
 func seedAIWorkerSetting(db *gorm.DB) error {

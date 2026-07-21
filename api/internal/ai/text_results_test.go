@@ -128,6 +128,99 @@ func TestTextResultLifecycleKeepsRawImmutableAndRequiresEffectiveApproval(t *tes
 	}
 }
 
+func TestBilingualTextResultAppliesEnglishAndChineseAtomically(t *testing.T) {
+	service, db, job, item, results := prepareTextResultService(t)
+	var snapshot ProductSnapshotV1
+	if err := json.Unmarshal(job.InputSnapshotJSON, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	snapshot.Schema, snapshot.Locale, snapshot.OutputLocales = ProductSnapshotSchemaV2, "en", []string{"en", "zh-CN"}
+	snapshotJSON, _ := json.Marshal(snapshot)
+	localesJSON, _ := json.Marshal(snapshot.OutputLocales)
+	if err := db.Model(&job).Updates(map[string]any{"snapshot_schema": ProductSnapshotSchemaV2, "locale": "en", "output_locales_json": localesJSON, "input_snapshot_json": snapshotJSON}).Error; err != nil {
+		t.Fatal(err)
+	}
+	job.SnapshotSchema, job.Locale, job.OutputLocalesJSON, job.InputSnapshotJSON = ProductSnapshotSchemaV2, "en", localesJSON, snapshotJSON
+	bilingual := []byte(`{"localizations":{"en":{"title":"Clear protective phone case","keywords":["case"]},"zh-CN":{"title":"轻薄透明保护手机壳","keywords":["手机壳"]}},"source_fields":["product.name"]}`)
+	if err := db.Model(&results[0]).Update("raw_structured_json", bilingual).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Approve(t.Context(), job.PublicID, item.PublicID, results[0].PublicID, 10); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := service.Preview(t.Context(), job.PublicID, item.PublicID, results[0].PublicID)
+	if err != nil || len(preview.Localizations) != 2 || preview.Localizations[0].Locale != "en" {
+		t.Fatalf("preview=%#v err=%v", preview, err)
+	}
+	applied, err := service.Apply(t.Context(), job.PublicID, item.PublicID, results[0].PublicID, 10)
+	if err != nil || len(applied.Contents) != 2 || applied.Contents[0].Locale != "en" || applied.Contents[1].Locale != "zh-CN" {
+		t.Fatalf("applied=%#v err=%v", applied, err)
+	}
+	var contents []models.SKUPlatformContent
+	if err := db.Order("id ASC").Find(&contents).Error; err != nil || len(contents) != 2 || contents[0].Title != "Clear protective phone case" || contents[1].Title != "轻薄透明保护手机壳" {
+		t.Fatalf("contents=%#v err=%v", contents, err)
+	}
+	var revisions int64
+	db.Model(&models.SKUPlatformContentRevision{}).Count(&revisions)
+	if revisions != 2 {
+		t.Fatalf("revision count=%d", revisions)
+	}
+	replayed, err := service.Apply(t.Context(), job.PublicID, item.PublicID, results[0].PublicID, 10)
+	if err != nil || !replayed.Replayed || len(replayed.Contents) != 2 {
+		t.Fatalf("replay=%#v err=%v", replayed, err)
+	}
+}
+
+func TestBilingualTextResultRollsBackBothLocalesWhenOneRevisionFails(t *testing.T) {
+	service, db, job, item, results := prepareTextResultService(t)
+	var snapshot ProductSnapshotV1
+	if err := json.Unmarshal(job.InputSnapshotJSON, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	snapshot.Schema, snapshot.Locale, snapshot.OutputLocales = ProductSnapshotSchemaV2, "en", []string{"en", "zh-CN"}
+	snapshotJSON, _ := json.Marshal(snapshot)
+	localesJSON, _ := json.Marshal(snapshot.OutputLocales)
+	if err := db.Model(&job).Updates(map[string]any{"snapshot_schema": ProductSnapshotSchemaV2, "locale": "en", "output_locales_json": localesJSON, "input_snapshot_json": snapshotJSON}).Error; err != nil {
+		t.Fatal(err)
+	}
+	bilingual := []byte(`{"localizations":{"en":{"title":"Clear protective phone case","keywords":["case"]},"zh-CN":{"title":"轻薄透明保护手机壳","keywords":["手机壳"]}},"source_fields":["product.name"]}`)
+	if err := db.Model(&results[0]).Update("raw_structured_json", bilingual).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Approve(t.Context(), job.PublicID, item.PublicID, results[0].PublicID, 10); err != nil {
+		t.Fatal(err)
+	}
+	revisions := 0
+	if err := db.Callback().Create().Before("gorm:create").Register("test:fail_second_bilingual_revision", func(tx *gorm.DB) {
+		if tx.Statement.Table != "sku_platform_content_revisions" {
+			return
+		}
+		revisions++
+		if revisions == 2 {
+			tx.AddError(errors.New("injected second locale failure"))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Apply(t.Context(), job.PublicID, item.PublicID, results[0].PublicID, 10); err == nil {
+		t.Fatal("expected the second locale failure")
+	}
+	var contentCount, revisionCount int64
+	if err := db.Model(&models.SKUPlatformContent{}).Count(&contentCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&models.SKUPlatformContentRevision{}).Count(&revisionCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	var stored models.AITextResult
+	if err := db.First(&stored, results[0].ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if contentCount != 0 || revisionCount != 0 || stored.AppliedAt != nil {
+		t.Fatalf("partial bilingual apply persisted: contents=%d revisions=%d applied_at=%v", contentCount, revisionCount, stored.AppliedAt)
+	}
+}
+
 func TestTextResultOwnershipRejectionPreviewAndHistory(t *testing.T) {
 	service, db, job, item, results := prepareTextResultService(t)
 	if _, err := service.Approve(t.Context(), "00000000-0000-4000-8000-000000000000", item.PublicID, results[0].PublicID, 10); !errors.Is(err, ErrTextResultNotFound) {

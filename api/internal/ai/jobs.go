@@ -19,7 +19,10 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-const ProductSnapshotSchemaV1 = "cargoflows_product_generation_v1"
+const (
+	ProductSnapshotSchemaV1 = "cargoflows_product_generation_v1"
+	ProductSnapshotSchemaV2 = "cargoflows_product_generation_v2"
+)
 
 const (
 	AssetSourceProductVisual      = "product_visual"
@@ -36,6 +39,7 @@ var (
 	ErrIdempotencyKeyInvalid          = errors.New("idempotency key is invalid")
 	ErrIdempotencyConflict            = errors.New("idempotency key was already used for a different request")
 	ErrLocaleInvalid                  = errors.New("locale is invalid")
+	ErrOutputLocalesInvalid           = errors.New("output locales are invalid")
 	ErrUserPreferenceInvalid          = errors.New("user preference is too long")
 	ErrGenerationOverrideInvalid      = errors.New("generation override is not explicitly allowed by the published slot")
 	ErrPublishedTemplateConfigInvalid = errors.New("published template configuration is invalid")
@@ -61,6 +65,7 @@ type CreateJobInput struct {
 	SelectedBrandIconIDs      []string
 	SelectedReferenceItemIDs  []string
 	Locale                    string
+	OutputLocales             []string
 	CreatedByID               uint
 	IdempotencyKey            string
 	UserPreference            string
@@ -197,6 +202,7 @@ type TemplateFacts struct {
 type ProductSnapshotV1 struct {
 	Schema              string                        `json:"schema"`
 	Locale              string                        `json:"locale"`
+	OutputLocales       []string                      `json:"output_locales,omitempty"`
 	TargetPlatform      string                        `json:"target_platform"`
 	Product             ProductFacts                  `json:"product"`
 	SKU                 SKUFacts                      `json:"sku"`
@@ -338,6 +344,7 @@ type JobDocument struct {
 	TemplateVersionPublicID string             `json:"template_version_id"`
 	TargetPlatform          string             `json:"target_platform"`
 	Locale                  string             `json:"locale"`
+	OutputLocales           []string           `json:"output_locales"`
 	Status                  models.AIJobStatus `json:"status"`
 	SnapshotSchema          string             `json:"snapshot_schema"`
 	InputSnapshot           json.RawMessage    `json:"input_snapshot"`
@@ -500,6 +507,7 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 			return err
 		}
 		locale := normalized.Locale
+		outputLocales := append([]string(nil), normalized.OutputLocales...)
 		orderedCanvases := imageCanvasFacts(resolvedCanvases)
 		styleReferences := []StyleReferenceFacts{}
 		structureReferences := []StructureReferenceFacts{}
@@ -518,7 +526,7 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 				return err
 			}
 		}
-		snapshot := makeProductSnapshot(sku, sop, captureSOPPublicID, template, version, selectedSlots, assets, locale, normalized.UserPreference, normalized.GenerationOverrides, orderedCanvases)
+		snapshot := makeProductSnapshot(sku, sop, captureSOPPublicID, template, version, selectedSlots, assets, locale, outputLocales, normalized.UserPreference, normalized.GenerationOverrides, orderedCanvases)
 		snapshot.StyleReferences = styleReferences
 		snapshot.StructureReferences = structureReferences
 		snapshot.BrandIcons = brandIcons
@@ -541,7 +549,11 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 			return err
 		}
 		key := normalized.IdempotencyKey
-		job := models.AIJob{PublicID: uuid.NewString(), SKUID: sku.ID, AIContentTemplateVersionID: version.ID, TargetPlatform: template.TargetPlatform, Locale: locale, Status: models.AIJobQueued, SnapshotSchema: ProductSnapshotSchemaV1, InputSnapshotJSON: snapshotJSON, CreatedBySnapshotJSON: creatorJSON, ModelSnapshotJSON: modelJSON, CreatedByID: normalized.CreatedByID, IdempotencyKey: &key, RequestSHA256: requestHash}
+		outputLocalesJSON, err := json.Marshal(outputLocales)
+		if err != nil {
+			return err
+		}
+		job := models.AIJob{PublicID: uuid.NewString(), SKUID: sku.ID, AIContentTemplateVersionID: version.ID, TargetPlatform: template.TargetPlatform, Locale: locale, OutputLocalesJSON: outputLocalesJSON, Status: models.AIJobQueued, SnapshotSchema: ProductSnapshotSchemaV2, InputSnapshotJSON: snapshotJSON, CreatedBySnapshotJSON: creatorJSON, ModelSnapshotJSON: modelJSON, CreatedByID: normalized.CreatedByID, IdempotencyKey: &key, RequestSHA256: requestHash}
 		if err := tx.Create(&job).Error; err != nil {
 			return fmt.Errorf("create AI job: %w", err)
 		}
@@ -603,7 +615,7 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 		}
 		job.Items = items
 		job.SKU = sku
-		metadata, _ := json.Marshal(map[string]any{"snapshot_schema": ProductSnapshotSchemaV1, "slot_keys": normalized.SelectedSlotKeys, "asset_count": len(assetIDs), "brand_icon_ids": normalized.SelectedBrandIconIDs, "style_reference_ids": normalized.SelectedStyleReferenceIDs, "external_reference_ids": normalized.SelectedReferenceItemIDs, "structure_reference_count": len(structureReferences), "request_sha256": requestHash, "image_canvases": orderedCanvases, "created_by": creatorSnapshot, "model_snapshot": modelSnapshot})
+		metadata, _ := json.Marshal(map[string]any{"snapshot_schema": ProductSnapshotSchemaV2, "output_locales": outputLocales, "slot_keys": normalized.SelectedSlotKeys, "asset_count": len(assetIDs), "brand_icon_ids": normalized.SelectedBrandIconIDs, "style_reference_ids": normalized.SelectedStyleReferenceIDs, "external_reference_ids": normalized.SelectedReferenceItemIDs, "structure_reference_count": len(structureReferences), "request_sha256": requestHash, "image_canvases": orderedCanvases, "created_by": creatorSnapshot, "model_snapshot": modelSnapshot})
 		jobID, actorID := job.ID, normalized.CreatedByID
 		audit := models.AIAuditEvent{PublicID: uuid.NewString(), EventType: "ai_job.created", EntityType: "ai_job", EntityPublicID: job.PublicID, ActorID: &actorID, AIJobID: &jobID, MetadataJSON: metadata}
 		if err := tx.Create(&audit).Error; err != nil {
@@ -653,6 +665,7 @@ var localePattern = regexp.MustCompile(`^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$`)
 var canvasKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$`)
 
 func normalizeCreateJobInput(input CreateJobInput) (CreateJobInput, string, error) {
+	legacyLocaleRequest := len(input.OutputLocales) == 0
 	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
 	if !idempotencyKeyPattern.MatchString(input.IdempotencyKey) {
 		return input, "", ErrIdempotencyKeyInvalid
@@ -668,15 +681,25 @@ func normalizeCreateJobInput(input CreateJobInput) (CreateJobInput, string, erro
 	}
 	input.SKUID = parsedSKUID.String()
 	input.Locale = strings.TrimSpace(input.Locale)
-	if len(input.Locale) == 0 || len(input.Locale) > 32 || !localePattern.MatchString(input.Locale) {
-		return input, "", ErrLocaleInvalid
+	if len(input.OutputLocales) == 0 {
+		locale, err := normalizeLocale(input.Locale)
+		if err != nil {
+			return input, "", err
+		}
+		input.Locale, input.OutputLocales = locale, []string{locale}
+	} else {
+		if !validOutputLocales(input.OutputLocales) {
+			return input, "", ErrOutputLocalesInvalid
+		}
+		input.OutputLocales = append([]string(nil), input.OutputLocales...)
+		if input.Locale != "" {
+			locale, err := normalizeLocale(input.Locale)
+			if err != nil || locale != input.OutputLocales[0] {
+				return input, "", ErrOutputLocalesInvalid
+			}
+		}
+		input.Locale = input.OutputLocales[0]
 	}
-	parts := strings.Split(input.Locale, "-")
-	parts[0] = strings.ToLower(parts[0])
-	if len(parts) > 1 && len(parts[1]) == 2 {
-		parts[1] = strings.ToUpper(parts[1])
-	}
-	input.Locale = strings.Join(parts, "-")
 	input.UserPreference = strings.TrimSpace(input.UserPreference)
 	if utf8.RuneCountInString(input.UserPreference) > 1000 {
 		return input, "", ErrUserPreferenceInvalid
@@ -766,16 +789,42 @@ func normalizeCreateJobInput(input CreateJobInput) (CreateJobInput, string, erro
 		BrandIcons         []string                      `json:"selected_brand_icon_ids,omitempty"`
 		ExternalReferences []string                      `json:"selected_reference_item_ids,omitempty"`
 		Locale             string                        `json:"locale"`
+		OutputLocales      []string                      `json:"output_locales,omitempty"`
 		Preference         string                        `json:"user_preference"`
 		Overrides          map[string]GenerationOverride `json:"generation_overrides"`
 		Canvases           []ImageCanvas                 `json:"image_canvases,omitempty"`
-	}{input.SKUID, input.TemplateVersionPublicID, slots, assets, input.SelectedStyleReferenceIDs, input.SelectedBrandIconIDs, input.SelectedReferenceItemIDs, input.Locale, input.UserPreference, input.GenerationOverrides, input.ImageCanvases}
+	}{input.SKUID, input.TemplateVersionPublicID, slots, assets, input.SelectedStyleReferenceIDs, input.SelectedBrandIconIDs, input.SelectedReferenceItemIDs, input.Locale, func() []string {
+		if legacyLocaleRequest {
+			return nil
+		}
+		return input.OutputLocales
+	}(), input.UserPreference, input.GenerationOverrides, input.ImageCanvases}
 	encoded, err := json.Marshal(canonical)
 	if err != nil {
 		return input, "", err
 	}
 	digest := sha256.Sum256(encoded)
 	return input, fmt.Sprintf("%x", digest[:]), nil
+}
+
+func normalizeLocale(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if len(value) == 0 || len(value) > 32 || !localePattern.MatchString(value) {
+		return "", ErrLocaleInvalid
+	}
+	parts := strings.Split(value, "-")
+	parts[0] = strings.ToLower(parts[0])
+	if len(parts) > 1 && len(parts[1]) == 2 {
+		parts[1] = strings.ToUpper(parts[1])
+	}
+	return strings.Join(parts, "-"), nil
+}
+
+func validOutputLocales(values []string) bool {
+	if len(values) == 1 {
+		return values[0] == "en" || values[0] == "zh-CN"
+	}
+	return len(values) == 2 && values[0] == "en" && values[1] == "zh-CN"
 }
 
 func dedupeStrings(values []string) []string {
@@ -1442,7 +1491,7 @@ func loadPublishedSOP(tx *gorm.DB, categoryID uint) (models.SOPVersion, string, 
 	return version, sop.PublicID, nil
 }
 
-func makeProductSnapshot(sku models.SKU, sop models.SOPVersion, captureSOPPublicID string, template models.AIContentTemplate, version models.AIContentTemplateVersion, slots []models.AIContentSlot, assets []models.Asset, locale, preference string, overrides map[string]GenerationOverride, canvases []ImageCanvas) ProductSnapshotV1 {
+func makeProductSnapshot(sku models.SKU, sop models.SOPVersion, captureSOPPublicID string, template models.AIContentTemplate, version models.AIContentTemplateVersion, slots []models.AIContentSlot, assets []models.Asset, locale string, outputLocales []string, preference string, overrides map[string]GenerationOverride, canvases []ImageCanvas) ProductSnapshotV1 {
 	tags := make([]string, 0, len(sku.Tags))
 	for _, tag := range sku.Tags {
 		tags = append(tags, tag.Name)
@@ -1467,7 +1516,7 @@ func makeProductSnapshot(sku models.SKU, sop models.SOPVersion, captureSOPPublic
 	if overrides == nil {
 		overrides = map[string]GenerationOverride{}
 	}
-	return ProductSnapshotV1{Schema: ProductSnapshotSchemaV1, Locale: locale, TargetPlatform: template.TargetPlatform, Product: ProductFacts{Name: sku.Product.Name, Brand: sku.Product.Brand, Description: sku.Product.Description, Category: CategoryFacts{NameZH: sku.Product.CatalogCategory.Name, NameEN: sku.Product.CatalogCategory.NameEN}}, SKU: SKUFacts{PublicID: sku.PublicID, Code: sku.Code, Color: sku.Color, Size: sku.Size, CompatibleDeviceModel: sku.CompatibleDeviceModel, PlatformTitle: sku.PlatformTitle, SellingPoints: sku.SellingPoints, Tags: tags}, SOP: SOPFacts{PublicID: captureSOPPublicID, VersionPublicID: sop.PublicID, VersionNumber: sop.VersionNumber, SchemaVersion: sop.SchemaVersion, Name: LocalizedNameFacts{ZH: sop.NameZH, EN: sop.NameEN}, Description: LocalizedNameFacts{ZH: sop.DescriptionZH, EN: sop.DescriptionEN}, CoordinateSystem: sop.CoordinateSystem, Views: views}, Template: TemplateFacts{TemplatePublicID: template.PublicID, VersionPublicID: version.PublicID, VersionNumber: version.VersionNumber, PromptCompilerVersion: version.PromptCompilerVersion, PlatformPrompt: version.PlatformPrompt, SelectedSlots: selectedSlots}, SelectedAssets: assetFacts, UserPreference: preference, GenerationOverrides: overrides, ImageCanvases: canvases}
+	return ProductSnapshotV1{Schema: ProductSnapshotSchemaV2, Locale: locale, OutputLocales: append([]string(nil), outputLocales...), TargetPlatform: template.TargetPlatform, Product: ProductFacts{Name: sku.Product.Name, Brand: sku.Product.Brand, Description: sku.Product.Description, Category: CategoryFacts{NameZH: sku.Product.CatalogCategory.Name, NameEN: sku.Product.CatalogCategory.NameEN}}, SKU: SKUFacts{PublicID: sku.PublicID, Code: sku.Code, Color: sku.Color, Size: sku.Size, CompatibleDeviceModel: sku.CompatibleDeviceModel, PlatformTitle: sku.PlatformTitle, SellingPoints: sku.SellingPoints, Tags: tags}, SOP: SOPFacts{PublicID: captureSOPPublicID, VersionPublicID: sop.PublicID, VersionNumber: sop.VersionNumber, SchemaVersion: sop.SchemaVersion, Name: LocalizedNameFacts{ZH: sop.NameZH, EN: sop.NameEN}, Description: LocalizedNameFacts{ZH: sop.DescriptionZH, EN: sop.DescriptionEN}, CoordinateSystem: sop.CoordinateSystem, Views: views}, Template: TemplateFacts{TemplatePublicID: template.PublicID, VersionPublicID: version.PublicID, VersionNumber: version.VersionNumber, PromptCompilerVersion: version.PromptCompilerVersion, PlatformPrompt: version.PlatformPrompt, SelectedSlots: selectedSlots}, SelectedAssets: assetFacts, UserPreference: preference, GenerationOverrides: overrides, ImageCanvases: canvases}
 }
 
 func requiresCompatibleDeviceModel(slots []models.AIContentSlot) bool {
@@ -1559,7 +1608,18 @@ func jobDocument(job models.AIJob, versionPublicID string) JobDocument {
 	if allPriced {
 		reconciliationStatus = "pending"
 	}
-	return JobDocument{PublicID: job.PublicID, SKUID: job.SKU.PublicID, TemplateVersionPublicID: versionPublicID, TargetPlatform: job.TargetPlatform, Locale: job.Locale, Status: job.Status, SnapshotSchema: job.SnapshotSchema, InputSnapshot: append(json.RawMessage(nil), job.InputSnapshotJSON...), CreatedBy: creator, CreatedBySnapshot: creator, ModelSnapshot: modelSnapshot, StartedAt: job.StartedAt, CompletedAt: job.CompletedAt, CancelledAt: job.CancelledAt, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt, Items: items, TotalTokens: totalTokens, EstimatedAmountUSD: money.Format(estimatedTotal), ReconciledAmountUSD: "0.00000000", ReconciliationStatus: reconciliationStatus}
+	return JobDocument{PublicID: job.PublicID, SKUID: job.SKU.PublicID, TemplateVersionPublicID: versionPublicID, TargetPlatform: job.TargetPlatform, Locale: job.Locale, OutputLocales: outputLocalesForJob(job), Status: job.Status, SnapshotSchema: job.SnapshotSchema, InputSnapshot: append(json.RawMessage(nil), job.InputSnapshotJSON...), CreatedBy: creator, CreatedBySnapshot: creator, ModelSnapshot: modelSnapshot, StartedAt: job.StartedAt, CompletedAt: job.CompletedAt, CancelledAt: job.CancelledAt, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt, Items: items, TotalTokens: totalTokens, EstimatedAmountUSD: money.Format(estimatedTotal), ReconciledAmountUSD: "0.00000000", ReconciliationStatus: reconciliationStatus}
+}
+
+func outputLocalesForJob(job models.AIJob) []string {
+	var locales []string
+	if json.Unmarshal(job.OutputLocalesJSON, &locales) == nil && validOutputLocales(locales) {
+		return locales
+	}
+	if job.Locale != "" {
+		return []string{job.Locale}
+	}
+	return []string{}
 }
 
 func loadJobAuditSnapshots(tx *gorm.DB, actorID uint) (JobCreatorSnapshot, JobModelSnapshot, error) {

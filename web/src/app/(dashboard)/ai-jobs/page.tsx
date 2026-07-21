@@ -20,6 +20,11 @@ function JobBadge({ status, label }: { status: AiJobStatus; label: string }) {
   return <Badge variant={variant}>{label}</Badge>;
 }
 
+function outputLanguageLabel(locales: string[], zh: boolean) {
+  if (locales.length === 2) return zh ? "双语（English → 简体中文）" : "Bilingual (English → Simplified Chinese)";
+  return locales[0] === "en" ? "English" : (zh ? "简体中文" : "Simplified Chinese");
+}
+
 export default function AiJobsPage() {
   const { language, t } = useLanguage();
   const zh = language === "zh";
@@ -46,6 +51,7 @@ export default function AiJobsPage() {
     { accessorKey: "public_id", header: t("job"), cell: ({ row }) => <span className="font-mono text-xs">{row.original.public_id.slice(0, 8)}</span> },
     { accessorFn: (row) => row.input_snapshot.sku.code, id: "sku", header: t("sku"), cell: ({ row }) => <Link className="font-medium text-primary hover:underline" href={`/ai-jobs/${row.original.public_id}`}>{row.original.input_snapshot.sku.code}</Link> },
     { accessorKey: "target_platform", header: t("platform") },
+    { accessorFn: (row) => (row.output_locales ?? [row.locale]).join(","), id: "output_locales", header: zh ? "输出语言" : "Output language", cell: ({ row }) => outputLanguageLabel(row.original.output_locales ?? [row.original.locale], zh) },
     { accessorFn: (row) => `${row.created_by?.name ?? ""} ${row.created_by?.email ?? ""}`, id: "creator", header: zh ? "发起人" : "Created by", cell: ({ row }) => row.original.created_by?.public_id ? <div><p className="font-medium">{row.original.created_by.name}</p><p className="text-xs text-muted-foreground">{row.original.created_by.email}</p></div> : <span className="text-muted-foreground">{zh ? "旧任务未记录" : "Not recorded for legacy job"}</span> },
     { accessorFn: (row) => `${row.model_snapshot?.text_model ?? ""} ${row.model_snapshot?.image_responses_model ?? ""} ${row.model_snapshot?.image_generation_model ?? ""}`, id: "models", header: zh ? "模型" : "Models", cell: ({ row }) => row.original.model_snapshot?.text_model ? <div className="space-y-1 font-mono text-xs"><p>{row.original.model_snapshot.text_model}</p><p className="text-muted-foreground">{row.original.model_snapshot.image_api_mode === "images" ? row.original.model_snapshot.image_generation_model : row.original.model_snapshot.image_responses_model} · {row.original.model_snapshot.image_api_mode}</p></div> : <span className="text-muted-foreground">{zh ? "旧任务未记录" : "Not recorded"}</span> },
 	{ accessorKey: "total_tokens", header: "Token", cell: ({ row }) => <span className="tabular-nums">{(row.original.total_tokens ?? 0).toLocaleString()}</span> },

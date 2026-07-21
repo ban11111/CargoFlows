@@ -95,6 +95,34 @@ func TestMigrationSeedsAIWorkerConcurrencyDefaultsIdempotently(t *testing.T) {
 	}
 }
 
+func TestBackfillAIJobOutputLocalesUsesLegacyLocaleIdempotently(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&models.AIJob{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`INSERT INTO ai_jobs
+		(id, public_id, sk_uid, ai_content_template_version_id, target_platform, locale, output_locales_json, status, snapshot_schema, input_snapshot_json, created_by_snapshot_json, model_snapshot_json, created_by_id, request_sha256, created_at, updated_at)
+		VALUES (?, ?, 1, 1, 'lazada', ?, NULL, 'queued', 'cargoflows_product_generation_v1', '{}', '{}', '{}', 1, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`, 1, uuid.NewString(), "zh-CN").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := backfillAIJobOutputLocales(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := backfillAIJobOutputLocales(db); err != nil {
+		t.Fatalf("second backfill: %v", err)
+	}
+	var job models.AIJob
+	if err := db.First(&job, 1).Error; err != nil {
+		t.Fatal(err)
+	}
+	if string(job.OutputLocalesJSON) != `["zh-CN"]` {
+		t.Fatalf("output locales = %s", job.OutputLocalesJSON)
+	}
+}
+
 func TestUserMigrationPromotesOneOwnerAndCollapsesLegacyRoles(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {

@@ -253,6 +253,23 @@ type seoTextCandidate struct {
 	SourceFields     *[]string `json:"source_fields"`
 }
 
+type localizedTextCandidate struct {
+	Localizations *map[string]json.RawMessage `json:"localizations"`
+	SourceFields  *[]string                   `json:"source_fields"`
+}
+
+type localizedTitleContent struct {
+	Title    *string   `json:"title"`
+	Keywords *[]string `json:"keywords"`
+}
+
+type localizedSEOContent struct {
+	ShortDescription *string   `json:"short_description"`
+	SellingPoints    *[]string `json:"selling_points"`
+	LongDescription  *string   `json:"long_description"`
+	SearchKeywords   *[]string `json:"search_keywords"`
+}
+
 type textLengthBounds struct {
 	MinLength *int `json:"minLength"`
 	MaxLength *int `json:"maxLength"`
@@ -265,15 +282,21 @@ func validateTextCandidates(outputJSON []byte, prompt CompiledTextPrompt) error 
 	if len(outputJSON) == 0 || strictJSONDecode(outputJSON, &envelope) != nil || envelope.Candidates == nil || len(*envelope.Candidates) != prompt.CandidateCount {
 		return ErrTextProviderInvalidResponse
 	}
-	bounds, err := textResponseLengthBounds(prompt)
-	if err != nil {
-		return ErrTextProviderInvalidResponse
-	}
 	rules, requiredValues, err := textPromptValidationRules(prompt)
 	if err != nil {
 		return ErrTextProviderInvalidResponse
 	}
 	for _, raw := range *envelope.Candidates {
+		if prompt.CompilerVersion == TextPromptCompilerVersion {
+			if !validateLocalizedTextCandidate(raw, prompt.SchemaName, prompt, rules, requiredValues) {
+				return ErrTextProviderInvalidResponse
+			}
+			continue
+		}
+		bounds, err := textResponseLengthBounds(prompt)
+		if err != nil {
+			return ErrTextProviderInvalidResponse
+		}
 		switch prompt.SchemaName {
 		case "cargoflows_product_title":
 			var candidate titleTextCandidate
@@ -291,6 +314,54 @@ func validateTextCandidates(outputJSON []byte, prompt CompiledTextPrompt) error 
 		}
 	}
 	return nil
+}
+
+func validateLocalizedTextCandidate(raw json.RawMessage, schemaName string, prompt CompiledTextPrompt, rules textConstraintRules, requiredValues map[string][]string) bool {
+	var candidate localizedTextCandidate
+	if strictJSONDecode(raw, &candidate) != nil || candidate.Localizations == nil || candidate.SourceFields == nil {
+		return false
+	}
+	locales := promptOutputLocales(prompt)
+	if len(*candidate.Localizations) != len(locales) {
+		return false
+	}
+	bounds := textLengthBounds{MinLength: rules.MinLength, MaxLength: rules.MaxLength}
+	for _, locale := range locales {
+		localized, ok := (*candidate.Localizations)[locale]
+		if !ok {
+			return false
+		}
+		if schemaName == "cargoflows_product_title" {
+			var content localizedTitleContent
+			if strictJSONDecode(localized, &content) != nil || content.Title == nil || content.Keywords == nil || !withinTextBounds(*content.Title, bounds) || !validateTextRuleValues([]string{*content.Title}, *content.Keywords, rules, requiredValues) {
+				return false
+			}
+		} else if schemaName == "cargoflows_product_seo" {
+			var content localizedSEOContent
+			if strictJSONDecode(localized, &content) != nil || content.ShortDescription == nil || content.SellingPoints == nil || content.LongDescription == nil || content.SearchKeywords == nil || !withinTextBounds(*content.ShortDescription, bounds) || !withinTextBounds(*content.LongDescription, bounds) {
+				return false
+			}
+			values := []string{*content.ShortDescription, *content.LongDescription}
+			values = append(values, (*content.SellingPoints)...)
+			if !validateTextRuleValues(values, *content.SearchKeywords, rules, requiredValues) {
+				return false
+			}
+		} else {
+			return false
+		}
+	}
+	return true
+}
+
+func promptOutputLocales(prompt CompiledTextPrompt) []string {
+	var input struct {
+		OutputLocales []string `json:"output_locales"`
+		Locale        string   `json:"locale"`
+	}
+	if json.Unmarshal(prompt.InputJSON, &input) == nil && validOutputLocales(input.OutputLocales) {
+		return input.OutputLocales
+	}
+	return []string{input.Locale}
 }
 
 func textPromptValidationRules(prompt CompiledTextPrompt) (textConstraintRules, map[string][]string, error) {

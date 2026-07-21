@@ -657,6 +657,16 @@ func TestAIJobEndpointsUseTypedArraysUUIDsAndSafeDTOs(t *testing.T) {
 	if !isUUID(job.PublicID) || job.SKUID != sku.PublicID || len(job.Items) != 1 || !isUUID(job.Items[0].PublicID) || job.CreatedBy.PublicID != operator.PublicID || job.CreatedBy.Email != operator.Email {
 		t.Fatalf("invalid public job DTO: %s", created.Body.String())
 	}
+	bilingualBody := fmt.Sprintf(`{"sku_id":%q,"template_version_id":%q,"selected_slot_keys":["title"],"selected_asset_ids":[],"output_locales":["en","zh-CN"]}`, sku.PublicID, version.PublicID)
+	bilingual := aiRequestWithIdempotency(t, server, token, http.MethodPost, "/api/v1/ai-jobs", bilingualBody, "http-job-bilingual-0001")
+	if bilingual.Code != http.StatusCreated || !strings.Contains(bilingual.Body.String(), `"locale":"en"`) || !strings.Contains(bilingual.Body.String(), `"output_locales":["en","zh-CN"]`) {
+		t.Fatalf("bilingual create = %d %s", bilingual.Code, bilingual.Body.String())
+	}
+	reversedBody := strings.Replace(bilingualBody, `["en","zh-CN"]`, `["zh-CN","en"]`, 1)
+	reversed := aiRequestWithIdempotency(t, server, token, http.MethodPost, "/api/v1/ai-jobs", reversedBody, "http-job-reversed-locales-0001")
+	if reversed.Code != http.StatusBadRequest {
+		t.Fatalf("reversed locales = %d %s", reversed.Code, reversed.Body.String())
+	}
 	spoofBody := strings.Replace(createBody, `"locale":"zh-CN"}`, `"locale":"zh-CN","created_by":{"public_id":"`+uuid.NewString()+`","name":"Impostor","email":"impostor@example.test"}}`, 1)
 	spoofed := aiRequestWithIdempotency(t, server, token, http.MethodPost, "/api/v1/ai-jobs", spoofBody, "http-job-spoof-0001")
 	if spoofed.Code != http.StatusBadRequest {

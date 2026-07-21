@@ -39,6 +39,7 @@ type createAIJobRequest struct {
 	SelectedBrandIconIDs      []string                         `json:"selected_brand_icon_ids"`
 	SelectedReferenceItemIDs  []string                         `json:"selected_reference_item_ids"`
 	Locale                    string                           `json:"locale"`
+	OutputLocales             []string                         `json:"output_locales"`
 	UserPreference            string                           `json:"user_preference"`
 	GenerationOverrides       map[string]ai.GenerationOverride `json:"generation_overrides"`
 	ImageCanvases             []ai.ImageCanvas                 `json:"image_canvases"`

@@ -2546,7 +2546,9 @@ export interface components {
             selected_brand_icon_ids?: string[];
             /** @description Optional items from published same-category AI reference SOPs. */
             selected_reference_item_ids?: string[];
-            locale: string;
+            locale?: string;
+            /** @description Ordered output policy. Supported values are [en], [zh-CN], and [en, zh-CN]. */
+            output_locales?: ("en" | "zh-CN")[];
             /** @description Optional L4 user instruction stored immutably in the job snapshot. */
             user_preference?: string;
             /** @description Per-selected-slot overrides; each supplied value must appear in the published slot's matching allowed_* array. */
@@ -2555,7 +2557,7 @@ export interface components {
             };
             /** @description Explicit generated image canvases. Each canvas independently selects one or more published image requirements; requirements may be reused across canvases. */
             image_canvases?: components["schemas"]["AIJobImageCanvas"][];
-        };
+        } | unknown | unknown;
         AIJobImageCanvas: {
             canvas_key: string;
             slot_keys: string[];
@@ -2683,10 +2685,11 @@ export interface components {
             template_version_id: string;
             target_platform: string;
             locale: string;
+            output_locales: ("en" | "zh-CN")[];
             /** @enum {string} */
             status: "queued" | "running" | "partial" | "completed" | "failed" | "cancelled";
             /** @enum {string} */
-            snapshot_schema: "cargoflows_product_generation_v1";
+            snapshot_schema: "cargoflows_product_generation_v1" | "cargoflows_product_generation_v2";
             input_snapshot: components["schemas"]["ProductSnapshotV1"];
             created_by: components["schemas"]["AIJobCreator"];
             created_by_snapshot: components["schemas"]["AIJobCreator"];
@@ -2971,9 +2974,21 @@ export interface components {
             after: {
                 [key: string]: unknown;
             };
+            localizations: components["schemas"]["AITextApplicationLocalePreview"][];
+        };
+        AITextApplicationLocalePreview: {
+            /** @enum {string} */
+            locale: "en" | "zh-CN";
+            before: {
+                [key: string]: unknown;
+            };
+            after: {
+                [key: string]: unknown;
+            };
         };
         AITextApplicationResult: {
             content: components["schemas"]["PlatformContent"];
+            contents: components["schemas"]["PlatformContent"][];
             replayed: boolean;
         };
         AIJobSlotSnapshot: {
@@ -3104,8 +3119,9 @@ export interface components {
         };
         ProductSnapshotV1: {
             /** @enum {string} */
-            schema: "cargoflows_product_generation_v1";
+            schema: "cargoflows_product_generation_v1" | "cargoflows_product_generation_v2";
             locale: string;
+            output_locales?: ("en" | "zh-CN")[];
             target_platform: string;
             product: components["schemas"]["AISnapshotProduct"];
             sku: components["schemas"]["AISnapshotSKU"];

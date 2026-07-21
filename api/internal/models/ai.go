@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -180,6 +181,7 @@ type AIJob struct {
 	AIContentTemplateVersionID uint        `gorm:"index;not null" json:"-"`
 	TargetPlatform             string      `gorm:"size:80;index;not null" json:"target_platform"`
 	Locale                     string      `gorm:"size:32;not null" json:"locale"`
+	OutputLocalesJSON          []byte      `gorm:"type:json" json:"-"`
 	Status                     AIJobStatus `gorm:"size:32;index;not null;default:queued" json:"status"`
 	SnapshotSchema             string      `gorm:"size:64;not null" json:"snapshot_schema"`
 	InputSnapshotJSON          []byte      `gorm:"type:json;not null" json:"input_snapshot"`
@@ -198,6 +200,9 @@ type AIJob struct {
 }
 
 func (job *AIJob) BeforeCreate(*gorm.DB) error {
+	if len(job.OutputLocalesJSON) == 0 && job.Locale != "" {
+		job.OutputLocalesJSON, _ = json.Marshal([]string{job.Locale})
+	}
 	if len(job.CreatedBySnapshotJSON) == 0 {
 		job.CreatedBySnapshotJSON = []byte(`{}`)
 	}

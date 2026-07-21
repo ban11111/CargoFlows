@@ -161,8 +161,8 @@ func (s *Server) createAIJob(c *gin.Context) {
 		respondAIBadRequest(c, err)
 		return
 	}
-	if !isUUID(req.SKUID) || !isUUID(req.TemplateVersionPublicID) || len(req.SelectedSlotKeys) == 0 || req.SelectedAssetIDs == nil || !allUUIDs(*req.SelectedAssetIDs) || strings.TrimSpace(req.Locale) == "" {
-		respondAIBadRequest(c, errors.New("sku_id, a UUID template_version_id, locale, selected_asset_ids array, and at least one selected_slot_key are required"))
+	if !isUUID(req.SKUID) || !isUUID(req.TemplateVersionPublicID) || len(req.SelectedSlotKeys) == 0 || req.SelectedAssetIDs == nil || !allUUIDs(*req.SelectedAssetIDs) || strings.TrimSpace(req.Locale) == "" && len(req.OutputLocales) == 0 {
+		respondAIBadRequest(c, errors.New("sku_id, a UUID template_version_id, locale or output_locales, selected_asset_ids array, and at least one selected_slot_key are required"))
 		return
 	}
 	value, err := s.ai.Jobs.Create(c.Request.Context(), ai.CreateJobInput{
@@ -171,7 +171,7 @@ func (s *Server) createAIJob(c *gin.Context) {
 		SelectedStyleReferenceIDs: req.SelectedStyleReferenceIDs,
 		SelectedBrandIconIDs:      req.SelectedBrandIconIDs,
 		SelectedReferenceItemIDs:  req.SelectedReferenceItemIDs,
-		Locale:                    req.Locale, CreatedByID: currentUser(c).ID,
+		Locale:                    req.Locale, OutputLocales: req.OutputLocales, CreatedByID: currentUser(c).ID,
 		IdempotencyKey: c.GetHeader("Idempotency-Key"), UserPreference: req.UserPreference, GenerationOverrides: req.GenerationOverrides,
 		ImageCanvases: req.ImageCanvases,
 	})
@@ -778,7 +778,7 @@ func respondAIError(c *gin.Context, err error) {
 		respondAIBadRequest(c, err)
 	case errors.Is(err, ai.ErrCompatibleDeviceModelRequired):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "sku_compatible_device_model_required", "message": err.Error()})
-	case errors.Is(err, ai.ErrIdempotencyKeyInvalid), errors.Is(err, ai.ErrLocaleInvalid), errors.Is(err, ai.ErrUserPreferenceInvalid), errors.Is(err, ai.ErrUserPreferenceNotAllowed), errors.Is(err, ai.ErrGenerationOverrideInvalid), errors.Is(err, ai.ErrTemplateVersionIDInvalid), errors.Is(err, ai.ErrSKUIDInvalid), errors.Is(err, ai.ErrAssetIDInvalid):
+	case errors.Is(err, ai.ErrIdempotencyKeyInvalid), errors.Is(err, ai.ErrLocaleInvalid), errors.Is(err, ai.ErrOutputLocalesInvalid), errors.Is(err, ai.ErrUserPreferenceInvalid), errors.Is(err, ai.ErrUserPreferenceNotAllowed), errors.Is(err, ai.ErrGenerationOverrideInvalid), errors.Is(err, ai.ErrTemplateVersionIDInvalid), errors.Is(err, ai.ErrSKUIDInvalid), errors.Is(err, ai.ErrAssetIDInvalid):
 		respondAIBadRequest(c, err)
 	case errors.Is(err, ai.ErrPublishedTemplateConfigInvalid):
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "ai_template_configuration_invalid", "message": "Published AI template configuration is invalid"})
