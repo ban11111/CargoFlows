@@ -32,7 +32,7 @@ func seedAIJobFixture(t *testing.T) (*gorm.DB, aiJobFixture) {
 		t.Fatal(err)
 	}
 	if err := db.AutoMigrate(
-		&models.User{}, &models.Category{}, &models.Tag{}, &models.Product{}, &models.SKU{},
+		&models.User{}, &models.Category{}, &models.Tag{}, &models.Brand{}, &models.BrandIcon{}, &models.Product{}, &models.SKU{},
 		&models.CaptureSOP{}, &models.SOPVersion{}, &models.SOPView{}, &models.PhotoSession{}, &models.Asset{},
 		&models.AIContentTemplate{}, &models.AIContentTemplateVersion{}, &models.AIContentSlot{}, &models.AIJob{}, &models.AIJobItem{}, &models.AIExecution{}, &models.AIAuditEvent{},
 		&models.ModelFamily{}, &models.ModelFamilyMember{}, &models.StyleReferenceGrant{}, &models.ModelFamilyReferenceAsset{},
@@ -118,6 +118,35 @@ func seedAIJobFixture(t *testing.T) (*gorm.DB, aiJobFixture) {
 		t.Fatal(err)
 	}
 	return db, aiJobFixture{SKU: sku, OtherSKU: otherSKU, PublishedVersion: published, DraftVersion: draft, ApprovedAsset: approved, OtherAsset: otherAsset, Operator: operator}
+}
+
+func TestLoadBrandIconsRequiresActiveIconsFromExactBrand(t *testing.T) {
+	db, _ := seedAIJobFixture(t)
+	brand := models.Brand{Name: "CargoFlows", NameKey: "cargoflows"}
+	other := models.Brand{Name: "Other", NameKey: "other"}
+	if err := db.Create(&brand).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&other).Error; err != nil {
+		t.Fatal(err)
+	}
+	active := models.BrandIcon{BrandID: brand.ID, Name: "Primary", ObjectKey: "brand/primary.png", MIMEType: "image/png", Width: 100, Height: 40, ByteCount: 1000, SHA256: strings.Repeat("a", 64), SortOrder: 1, Status: "active"}
+	disabled := models.BrandIcon{BrandID: brand.ID, Name: "Old", ObjectKey: "brand/old.png", MIMEType: "image/png", Width: 100, Height: 40, ByteCount: 1000, SHA256: strings.Repeat("b", 64), SortOrder: 2, Status: "disabled"}
+	foreign := models.BrandIcon{BrandID: other.ID, Name: "Foreign", ObjectKey: "brand/foreign.png", MIMEType: "image/png", Width: 100, Height: 40, ByteCount: 1000, SHA256: strings.Repeat("c", 64), SortOrder: 1, Status: "active"}
+	for _, icon := range []*models.BrandIcon{&active, &disabled, &foreign} {
+		if err := db.Create(icon).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	facts, err := loadBrandIcons(db, &brand.ID, []string{active.PublicID})
+	if err != nil || len(facts) != 1 || facts[0].Name != "Primary" || facts[0].SHA256 != active.SHA256 {
+		t.Fatalf("active brand icon facts = %#v, %v", facts, err)
+	}
+	for _, id := range []string{disabled.PublicID, foreign.PublicID} {
+		if _, err := loadBrandIcons(db, &brand.ID, []string{id}); !errors.Is(err, ErrBrandIconNotEligible) {
+			t.Fatalf("icon %s error = %v", id, err)
+		}
+	}
 }
 
 func TestCreateJobSnapshotsOnlyWhitelistedFactsAndSelectedSlots(t *testing.T) {

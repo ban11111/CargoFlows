@@ -12,6 +12,8 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 
 const skuPublicID = "11111111-1111-4111-8111-111111111111";
 const assetPublicID = "22222222-2222-4222-8222-222222222222";
+const brandPublicID = "33333333-3333-4333-8333-333333333333";
+const brandIconPublicID = "44444444-4444-4444-8444-444444444444";
 
 function Providers({ children }: { children: ReactNode }) {
   return <LanguageProvider><LanguageToggle /><QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}>{children}</QueryClientProvider></LanguageProvider>;
@@ -33,7 +35,8 @@ function installWizardFetch(assetViewKey = "reference_front") {
   const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const path = String(input);
     requests.push({ path, init, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-    if (path.endsWith("/skus")) return new Response(JSON.stringify({ data: [{ public_id: skuPublicID, code: "CF-CASE-CLR-IP17", status: "active", product: { name: "Clear Case" } }] }), { status: 200 });
+    if (path.endsWith("/skus")) return new Response(JSON.stringify({ data: [{ public_id: skuPublicID, code: "CF-CASE-CLR-IP17", status: "active", product: { name: "Clear Case", brand: "CargoFlows", brand_id: brandPublicID } }] }), { status: 200 });
+	if (path.includes(`/brands/${brandPublicID}/icons`)) return new Response(JSON.stringify({ data: [{ public_id: brandIconPublicID, name: "Primary", notes: "", media_url: `/api/v1/brand-icons/${brandIconPublicID}/media`, status: "active" }] }), { status: 200 });
     if (path.endsWith("/ai-content-templates")) return new Response(JSON.stringify({ data: [template] }), { status: 200 });
     if (path.includes("/assets/review/hierarchy")) return new Response(JSON.stringify({ data: [{ id: 1, name: "配件", name_en: "Accessories", is_system: false, skus: [{ public_id: skuPublicID, code: "CF-CASE-CLR-IP17", product_name: "Clear Case", tags: [], assets: [{ public_id: assetPublicID, media_url: `/api/v1/assets/${assetPublicID}/media`, review_status: "approved", captured_at: "2026-07-17T00:00:00Z", sop_view_key: assetViewKey, sop_view_name: { "zh-CN": "正面", en: "Front" }, photo_session_code: "PS-1" }] }] }] }), { status: 200 });
     if (path.endsWith("/ai-jobs") && init?.method === "POST") return new Response(JSON.stringify({ public_id: "job-created" }), { status: 201 });
@@ -66,7 +69,7 @@ describe("NewAIJobPage", () => {
 
     await waitFor(() => expect(push).toHaveBeenCalledWith("/ai-jobs/job-created"));
     const post = requests.find((request) => request.path.endsWith("/ai-jobs") && request.init?.method === "POST");
-    expect(post?.body).toMatchObject({ sku_id: skuPublicID, template_version_id: "version-1", selected_slot_keys: ["hero"], selected_asset_ids: [assetPublicID], locale: "zh-CN", user_preference: "保留透明材质", generation_overrides: { hero: { candidate_count: 1, size: "1024x1024", quality: "high", style: "简洁" } } });
+    expect(post?.body).toMatchObject({ sku_id: skuPublicID, template_version_id: "version-1", selected_slot_keys: ["hero"], selected_asset_ids: [assetPublicID], selected_brand_icon_ids: [brandIconPublicID], locale: "zh-CN", user_preference: "保留透明材质", generation_overrides: { hero: { candidate_count: 1, size: "1024x1024", quality: "high", style: "简洁" } } });
     expect(new Headers(post?.init?.headers).get("Idempotency-Key")).toMatch(/^ai-job-/);
   });
 

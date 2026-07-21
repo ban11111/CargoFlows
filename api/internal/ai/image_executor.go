@@ -243,6 +243,13 @@ func (e *ImageExecutor) prepare(ctx context.Context, leased LeasedItem) (prepare
 			}
 			keys = append(keys, asset.ObjectKey)
 		}
+		for _, reference := range snapshot.BrandIcons {
+			var stored models.BrandIcon
+			if err := tx.Where("public_id = ? AND sha256 = ?", reference.PublicID, reference.SHA256).First(&stored).Error; err != nil || stored.ObjectKey == "" {
+				return invalidExecutionInput("frozen brand icon is unavailable")
+			}
+			keys = append(keys, stored.ObjectKey)
+		}
 		for _, reference := range snapshot.StructureReferences {
 			var stored models.ModelFamilyReferenceAsset
 			if err := tx.Where("public_id = ? AND derivative_sha256 = ?", reference.PublicID, reference.DerivativeSHA256).First(&stored).Error; err != nil || stored.DerivativeObjectKey == "" {

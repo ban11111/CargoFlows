@@ -25,7 +25,7 @@ interface SKUListItem {
   platform_title: string;
   selling_points: string;
   status: "active" | "draft" | "disabled";
-  product: { category_id: number; name: string; brand: string; category: string; category_record?: { name: string; name_en?: string } };
+  product: { category_id: number; brand_id: string; name: string; brand: string; category: string; category_record?: { name: string; name_en?: string } };
   tags: Array<{ name: string }>;
 }
 
@@ -52,6 +52,7 @@ export default function SkusPage() {
       method: "PATCH",
       body: JSON.stringify({
         category_id: sku.product.category_id,
+		brand_id: sku.product.brand_id,
         product_name: sku.product.name,
         brand: sku.product.brand,
         code: sku.code,

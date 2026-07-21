@@ -26,6 +26,7 @@ type createAIJobRequest struct {
 	SelectedSlotKeys          []string                         `json:"selected_slot_keys"`
 	SelectedAssetIDs          *[]string                        `json:"selected_asset_ids"`
 	SelectedStyleReferenceIDs []string                         `json:"selected_style_reference_ids"`
+	SelectedBrandIconIDs      []string                         `json:"selected_brand_icon_ids"`
 	Locale                    string                           `json:"locale"`
 	UserPreference            string                           `json:"user_preference"`
 	GenerationOverrides       map[string]ai.GenerationOverride `json:"generation_overrides"`

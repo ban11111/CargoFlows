@@ -160,6 +160,118 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/brands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listBrands"];
+        put?: never;
+        post: operations["createBrand"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/brands/{brand_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["updateBrand"];
+        trace?: never;
+    };
+    "/brands/{brand_id}/icons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listBrandIcons"];
+        put?: never;
+        post: operations["completeBrandIconUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/brands/{brand_id}/icons/upload-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createBrandIconUploadURL"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/brands/{brand_id}/icons/{icon_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["updateBrandIcon"];
+        trace?: never;
+    };
+    "/brands/{brand_id}/icon-order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["reorderBrandIcons"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/brand-icons/{icon_id}/media": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["brandIconMedia"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/capture-sops": {
         parameters: {
             query?: never;
@@ -1444,6 +1556,12 @@ export interface components {
         SKUMutationRequest: {
             category_id?: number;
             product_name: string;
+            /** Format: uuid */
+            brand_id?: string;
+            /**
+             * @deprecated
+             * @description Legacy brand name; new clients should send brand_id.
+             */
             brand?: string;
             category?: string;
             code: string;
@@ -1470,6 +1588,8 @@ export interface components {
         };
         SKUProduct: {
             category_id: number;
+            /** @description Empty when no brand is assigned. */
+            brand_id: string;
             name: string;
             brand: string;
             category: string;
@@ -1494,6 +1614,40 @@ export interface components {
             updated_at: string;
             product: components["schemas"]["SKUProduct"];
             tags: components["schemas"]["Tag"][];
+        };
+        Brand: {
+            /** Format: uuid */
+            public_id: string;
+            name: string;
+            icon_count: number;
+            product_count: number;
+        };
+        BrandIcon: {
+            /** Format: uuid */
+            public_id: string;
+            name: string;
+            notes: string;
+            media_url: string;
+            /** @enum {string} */
+            mime_type: "image/png" | "image/jpeg" | "image/webp";
+            width: number;
+            height: number;
+            byte_count: number;
+            sha256: string;
+            sort_order: number;
+            /** @enum {string} */
+            status: "active" | "disabled";
+        };
+        BrandIconUploadEnvelope: {
+            /** @enum {string} */
+            method: "PUT";
+            upload_url: string;
+            /** Format: uuid */
+            completion_token: string;
+            expires_in: number;
+            headers: {
+                [key: string]: string;
+            };
         };
         CreateInventoryAdjustmentRequest: {
             quantity_delta: number;
@@ -1520,6 +1674,8 @@ export interface components {
             selected_asset_ids: string[];
             /** @description Optional administrator-approved cross-SKU style grants. */
             selected_style_reference_ids?: string[];
+            /** @description Optional active icons belonging to the target SKU brand. */
+            selected_brand_icon_ids?: string[];
             locale: string;
             /** @description Optional L4 user instruction stored immutably in the job snapshot. */
             user_preference?: string;
@@ -1979,6 +2135,19 @@ export interface components {
             image_canvases?: components["schemas"]["AIJobImageCanvas"][];
             style_references?: components["schemas"]["AISnapshotStyleReference"][];
             structure_references?: components["schemas"]["AISnapshotStructureReference"][];
+            brand_icons?: components["schemas"]["AISnapshotBrandIcon"][];
+        };
+        AISnapshotBrandIcon: {
+            /** Format: uuid */
+            public_id: string;
+            name: string;
+            notes: string;
+            /** @enum {string} */
+            mime_type: "image/png" | "image/jpeg" | "image/webp";
+            width: number;
+            height: number;
+            byte_count: number;
+            sha256: string;
         };
         AISnapshotStyleReference: {
             /** Format: uuid */
@@ -2992,6 +3161,247 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalServerError"];
+        };
+    };
+    listBrands: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Brands */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["Brand"][];
+                    };
+                };
+            };
+        };
+    };
+    createBrand: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Brand"];
+                };
+            };
+        };
+    };
+    updateBrand: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Brand"];
+                };
+            };
+        };
+    };
+    listBrandIcons: {
+        parameters: {
+            query?: {
+                status?: "active";
+            };
+            header?: never;
+            path: {
+                brand_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Icons */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["BrandIcon"][];
+                    };
+                };
+            };
+        };
+    };
+    completeBrandIconUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    completion_token: string;
+                    name: string;
+                    notes?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrandIcon"];
+                };
+            };
+        };
+    };
+    createBrandIconUploadURL: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    file_name: string;
+                    /** @enum {string} */
+                    content_type: "image/png" | "image/jpeg" | "image/webp";
+                };
+            };
+        };
+        responses: {
+            /** @description Upload details */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrandIconUploadEnvelope"];
+                };
+            };
+        };
+    };
+    updateBrandIcon: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand_id: string;
+                icon_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    notes?: string;
+                    /** @enum {string} */
+                    status?: "active" | "disabled";
+                };
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrandIcon"];
+                };
+            };
+        };
+    };
+    reorderBrandIcons: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                brand_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    icon_ids: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Reordered */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    brandIconMedia: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                icon_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Private image bytes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     listCaptureSOPs: {

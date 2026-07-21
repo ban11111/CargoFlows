@@ -128,6 +128,7 @@ func (s *Server) changePassword(c *gin.Context) {
 type createSKURequest struct {
 	CategoryID        uint     `json:"category_id"`
 	ProductName       string   `json:"product_name" binding:"required"`
+	BrandID           string   `json:"brand_id"`
 	Brand             string   `json:"brand"`
 	Category          string   `json:"category"`
 	Code              string   `json:"code" binding:"required"`
@@ -144,6 +145,7 @@ type createSKURequest struct {
 
 type skuProductDTO struct {
 	CategoryID      uint            `json:"category_id"`
+	BrandID         string          `json:"brand_id"`
 	Name            string          `json:"name"`
 	Brand           string          `json:"brand"`
 	Category        string          `json:"category"`
@@ -181,11 +183,15 @@ func publicTagDTOs(tags []models.Tag) []publicTagDTO {
 }
 
 func skuDTOFromModel(value models.SKU) skuDTO {
+	brandID := ""
+	if value.Product.BrandRecord != nil {
+		brandID = value.Product.BrandRecord.PublicID
+	}
 	return skuDTO{
 		PublicID: value.PublicID, Code: value.Code, Color: value.Color, Size: value.Size, Barcode: value.Barcode,
 		Stock: value.Stock, LowStockThreshold: value.LowStockThreshold, PlatformTitle: value.PlatformTitle,
 		SellingPoints: value.SellingPoints, Status: value.Status, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
-		Product: skuProductDTO{CategoryID: value.Product.CategoryID, Name: value.Product.Name, Brand: value.Product.Brand,
+		Product: skuProductDTO{CategoryID: value.Product.CategoryID, BrandID: brandID, Name: value.Product.Name, Brand: value.Product.Brand,
 			Category: value.Product.Category, Description: value.Product.Description, CatalogCategory: value.Product.CatalogCategory},
 		Tags: publicTagDTOs(value.Tags),
 	}
@@ -193,7 +199,7 @@ func skuDTOFromModel(value models.SKU) skuDTO {
 
 func (s *Server) listSKUs(c *gin.Context) {
 	var skus []models.SKU
-	query := s.db.Preload("Product.CatalogCategory").Preload("Tags").Joins("JOIN products ON products.id = skus.product_id").Order("skus.updated_at DESC")
+	query := s.db.Preload("Product.CatalogCategory").Preload("Product.BrandRecord").Preload("Tags").Joins("JOIN products ON products.id = skus.product_id").Order("skus.updated_at DESC")
 	if categoryID := c.Query("category_id"); categoryID != "" {
 		query = query.Where("products.category_id = ?", categoryID)
 	}
@@ -229,7 +235,15 @@ func (s *Server) createSKU(c *gin.Context) {
 		if err != nil {
 			return err
 		}
-		product := models.Product{CategoryID: category.ID, Name: req.ProductName, Brand: req.Brand, Category: category.Name}
+		brand, err := s.resolveBrand(tx, req.BrandID, req.Brand, currentUser(c))
+		if err != nil {
+			return err
+		}
+		product := models.Product{CategoryID: category.ID, Name: req.ProductName, Category: category.Name}
+		if brand != nil {
+			product.BrandID = &brand.ID
+			product.Brand = brand.Name
+		}
 		if err := tx.Create(&product).Error; err != nil {
 			return err
 		}
@@ -255,7 +269,7 @@ func (s *Server) createSKU(c *gin.Context) {
 		if err := tx.Model(&sku).Association("Tags").Replace(tags); err != nil {
 			return err
 		}
-		return tx.Preload("Product.CatalogCategory").Preload("Tags").First(&sku, sku.ID).Error
+		return tx.Preload("Product.CatalogCategory").Preload("Product.BrandRecord").Preload("Tags").First(&sku, sku.ID).Error
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
@@ -271,7 +285,7 @@ func (s *Server) getSKU(c *gin.Context) {
 		return
 	}
 	var sku models.SKU
-	if err := s.db.Preload("Product.CatalogCategory").Preload("Tags").Where("public_id = ?", publicID).First(&sku).Error; err != nil {
+	if err := s.db.Preload("Product.CatalogCategory").Preload("Product.BrandRecord").Preload("Tags").Where("public_id = ?", publicID).First(&sku).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"message": "sku not found"})
 		return
 	}
@@ -284,7 +298,7 @@ func (s *Server) updateSKU(c *gin.Context) {
 		return
 	}
 	var sku models.SKU
-	if err := s.db.Preload("Product.CatalogCategory").Preload("Tags").Where("public_id = ?", publicID).First(&sku).Error; err != nil {
+	if err := s.db.Preload("Product.CatalogCategory").Preload("Product.BrandRecord").Preload("Tags").Where("public_id = ?", publicID).First(&sku).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"message": "sku not found"})
 		return
 	}
@@ -315,7 +329,17 @@ func (s *Server) updateSKU(c *gin.Context) {
 		}
 
 		sku.Product.Name = req.ProductName
-		sku.Product.Brand = req.Brand
+		brand, err := s.resolveBrand(tx, req.BrandID, req.Brand, currentUser(c))
+		if err != nil {
+			return err
+		}
+		if brand == nil {
+			sku.Product.BrandID = nil
+			sku.Product.Brand = ""
+		} else {
+			sku.Product.BrandID = &brand.ID
+			sku.Product.Brand = brand.Name
+		}
 		sku.Product.CategoryID = category.ID
 		sku.Product.Category = category.Name
 		if err := tx.Save(&sku.Product).Error; err != nil {
@@ -335,8 +359,40 @@ func (s *Server) updateSKU(c *gin.Context) {
 		return
 	}
 
-	_ = s.db.Preload("Product.CatalogCategory").Preload("Tags").First(&sku, sku.ID).Error
+	_ = s.db.Preload("Product.CatalogCategory").Preload("Product.BrandRecord").Preload("Tags").First(&sku, sku.ID).Error
 	c.JSON(http.StatusOK, skuDTOFromModel(sku))
+}
+
+func (s *Server) resolveBrand(tx *gorm.DB, publicID, legacyName string, user models.User) (*models.Brand, error) {
+	publicID = strings.TrimSpace(publicID)
+	legacyName = strings.TrimSpace(legacyName)
+	if publicID == "" && legacyName == "" {
+		return nil, nil
+	}
+	var brand models.Brand
+	if publicID != "" {
+		if !isUUID(publicID) {
+			return nil, errors.New("brand_id must be a UUID")
+		}
+		if err := tx.Where("public_id = ?", publicID).First(&brand).Error; err != nil {
+			return nil, errors.New("brand not found")
+		}
+		return &brand, nil
+	}
+	key := strings.ToLower(legacyName)
+	if err := tx.Where("name_key = ?", key).First(&brand).Error; err == nil {
+		return &brand, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	if user.Role != models.RoleSuperAdmin && user.Role != models.RoleAdmin {
+		return nil, errors.New("brand must already exist")
+	}
+	brand = models.Brand{PublicID: uuid.NewString(), Name: legacyName, NameKey: key}
+	if err := tx.Create(&brand).Error; err != nil {
+		return nil, err
+	}
+	return &brand, nil
 }
 
 func (s *Server) deleteSKU(c *gin.Context) {

@@ -153,6 +153,54 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalServerError' }
+  /brands:
+    get:
+      operationId: listBrands
+      responses:
+        '200': { description: Brands, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/Brand' } } } } } } }
+    post:
+      operationId: createBrand
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [name], properties: { name: { type: string, minLength: 1, maxLength: 120 } } } } } }
+      responses: { '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Brand' } } } } }
+  /brands/{brand_id}:
+    patch:
+      operationId: updateBrand
+      parameters: [{ in: path, name: brand_id, required: true, schema: { type: string, format: uuid } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [name], properties: { name: { type: string, minLength: 1, maxLength: 120 } } } } } }
+      responses: { '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/Brand' } } } } }
+  /brands/{brand_id}/icons:
+    get:
+      operationId: listBrandIcons
+      parameters: [{ in: path, name: brand_id, required: true, schema: { type: string, format: uuid } }, { in: query, name: status, schema: { type: string, enum: [active] } }]
+      responses: { '200': { description: Icons, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/BrandIcon' } } } } } } } }
+    post:
+      operationId: completeBrandIconUpload
+      parameters: [{ in: path, name: brand_id, required: true, schema: { type: string, format: uuid } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [completion_token, name], properties: { completion_token: { type: string, format: uuid }, name: { type: string, minLength: 1, maxLength: 120 }, notes: { type: string, maxLength: 500 } } } } } }
+      responses: { '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/BrandIcon' } } } } }
+  /brands/{brand_id}/icons/upload-url:
+    post:
+      operationId: createBrandIconUploadURL
+      parameters: [{ in: path, name: brand_id, required: true, schema: { type: string, format: uuid } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [file_name, content_type], properties: { file_name: { type: string }, content_type: { type: string, enum: [image/png, image/jpeg, image/webp] } } } } } }
+      responses: { '200': { description: Upload details, content: { application/json: { schema: { $ref: '#/components/schemas/BrandIconUploadEnvelope' } } } } }
+  /brands/{brand_id}/icons/{icon_id}:
+    patch:
+      operationId: updateBrandIcon
+      parameters: [{ in: path, name: brand_id, required: true, schema: { type: string, format: uuid } }, { in: path, name: icon_id, required: true, schema: { type: string, format: uuid } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, properties: { name: { type: string }, notes: { type: string }, status: { type: string, enum: [active, disabled] } } } } } }
+      responses: { '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/BrandIcon' } } } } }
+  /brands/{brand_id}/icon-order:
+    put:
+      operationId: reorderBrandIcons
+      parameters: [{ in: path, name: brand_id, required: true, schema: { type: string, format: uuid } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [icon_ids], properties: { icon_ids: { type: array, uniqueItems: true, items: { type: string, format: uuid } } } } } } }
+      responses: { '200': { description: Reordered } }
+  /brand-icons/{icon_id}/media:
+    get:
+      operationId: brandIconMedia
+      parameters: [{ in: path, name: icon_id, required: true, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: Private image bytes } }
   /capture-sops:
     post:
       operationId: createCaptureSOP
@@ -1315,7 +1363,8 @@ components:
       properties:
         category_id: { type: integer, minimum: 1 }
         product_name: { type: string, minLength: 1 }
-        brand: { type: string }
+        brand_id: { type: string, format: uuid }
+        brand: { type: string, deprecated: true, description: Legacy brand name; new clients should send brand_id. }
         category: { type: string }
         code: { type: string, minLength: 1 }
         color: { type: string }
@@ -1340,9 +1389,10 @@ components:
     SKUProduct:
       type: object
       additionalProperties: false
-      required: [category_id, name, brand, category, description, category_record]
+      required: [category_id, brand_id, name, brand, category, description, category_record]
       properties:
         category_id: { type: integer, minimum: 1 }
+        brand_id: { type: string, description: Empty when no brand is assigned. }
         name: { type: string }
         brand: { type: string }
         category: { type: string }
@@ -1367,6 +1417,41 @@ components:
         updated_at: { type: string, format: date-time }
         product: { $ref: '#/components/schemas/SKUProduct' }
         tags: { type: array, items: { $ref: '#/components/schemas/Tag' } }
+    Brand:
+      type: object
+      additionalProperties: false
+      required: [public_id, name, icon_count, product_count]
+      properties:
+        public_id: { type: string, format: uuid }
+        name: { type: string }
+        icon_count: { type: integer, minimum: 0 }
+        product_count: { type: integer, minimum: 0 }
+    BrandIcon:
+      type: object
+      additionalProperties: false
+      required: [public_id, name, notes, media_url, mime_type, width, height, byte_count, sha256, sort_order, status]
+      properties:
+        public_id: { type: string, format: uuid }
+        name: { type: string }
+        notes: { type: string }
+        media_url: { type: string }
+        mime_type: { type: string, enum: [image/png, image/jpeg, image/webp] }
+        width: { type: integer }
+        height: { type: integer }
+        byte_count: { type: integer }
+        sha256: { type: string }
+        sort_order: { type: integer }
+        status: { type: string, enum: [active, disabled] }
+    BrandIconUploadEnvelope:
+      type: object
+      additionalProperties: false
+      required: [method, upload_url, completion_token, expires_in, headers]
+      properties:
+        method: { type: string, enum: [PUT] }
+        upload_url: { type: string }
+        completion_token: { type: string, format: uuid }
+        expires_in: { type: integer }
+        headers: { type: object, additionalProperties: { type: string } }
     CreateInventoryAdjustmentRequest:
       type: object
       additionalProperties: false
@@ -1396,6 +1481,7 @@ components:
         selected_slot_keys: { type: array, minItems: 1, uniqueItems: true, items: { type: string, minLength: 1, maxLength: 80 } }
         selected_asset_ids: { type: array, items: { type: string, format: uuid }, description: Duplicate public UUIDs are accepted and normalized to one ordered reference. }
         selected_style_reference_ids: { type: array, uniqueItems: true, items: { type: string, format: uuid }, description: Optional administrator-approved cross-SKU style grants. }
+        selected_brand_icon_ids: { type: array, maxItems: 8, uniqueItems: true, items: { type: string, format: uuid }, description: Optional active icons belonging to the target SKU brand. }
         locale: { type: string, minLength: 2, maxLength: 32, pattern: '^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$' }
         user_preference: { type: string, maxLength: 1000, description: Optional L4 user instruction stored immutably in the job snapshot. }
         generation_overrides:
@@ -1835,6 +1921,20 @@ components:
         image_canvases: { type: array, items: { $ref: '#/components/schemas/AIJobImageCanvas' } }
         style_references: { type: array, items: { $ref: '#/components/schemas/AISnapshotStyleReference' } }
         structure_references: { type: array, items: { $ref: '#/components/schemas/AISnapshotStructureReference' } }
+        brand_icons: { type: array, maxItems: 8, items: { $ref: '#/components/schemas/AISnapshotBrandIcon' } }
+    AISnapshotBrandIcon:
+      type: object
+      additionalProperties: false
+      required: [public_id, name, notes, mime_type, width, height, byte_count, sha256]
+      properties:
+        public_id: { type: string, format: uuid }
+        name: { type: string }
+        notes: { type: string }
+        mime_type: { type: string, enum: [image/png, image/jpeg, image/webp] }
+        width: { type: integer, minimum: 1 }
+        height: { type: integer, minimum: 1 }
+        byte_count: { type: integer, minimum: 1 }
+        sha256: { type: string }
     AISnapshotStyleReference:
       type: object
       additionalProperties: false
