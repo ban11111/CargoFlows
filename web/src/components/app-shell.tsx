@@ -12,6 +12,7 @@ import {
   LogOut,
   Menu,
   Package,
+	Shapes,
   Settings2,
   Ship,
   Users,
@@ -31,6 +32,7 @@ type NavGroup = "navGroupOperations" | "navGroupIntelligence" | "navGroupSystem"
 
 const navItems: Array<{ href: Route; labelKey: MessageKey; icon: typeof Package; group: NavGroup; permission?: "admin" | "super" }> = [
   { href: "/skus", labelKey: "navSku", icon: Package, group: "navGroupOperations" },
+	{ href: "/brands", labelKey: "navBrands", icon: Shapes, group: "navGroupOperations", permission: "admin" },
   { href: "/model-families", labelKey: "navModelFamilies", icon: Boxes, group: "navGroupOperations" },
   { href: "/capture", labelKey: "navCapture", icon: Camera, group: "navGroupOperations" },
   { href: "/categories", labelKey: "navCategories", icon: FolderTree, group: "navGroupOperations" },
@@ -118,7 +120,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const currentUser = useCurrentUser();
   const role = currentUser.data?.role;
   const pathname = usePathname() ?? "";
-  const requiredPermission = pathname.startsWith("/settings/openai") ? "super" : pathname.startsWith("/users") || pathname.startsWith("/assets/review") ? "admin" : undefined;
+  const requiredPermission = pathname.startsWith("/settings/openai") ? "super" : pathname.startsWith("/users") || pathname.startsWith("/assets/review") || pathname.startsWith("/brands") ? "admin" : undefined;
   const denied = !currentUser.isPending && !hasPermission(role, requiredPermission);
 
   useEffect(() => {

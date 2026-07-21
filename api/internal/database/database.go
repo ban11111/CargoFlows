@@ -99,6 +99,9 @@ func migrateSchema(db *gorm.DB) error {
 		&models.User{},
 		&models.Category{},
 		&models.Tag{},
+		&models.Brand{},
+		&models.BrandIcon{},
+		&models.BrandIconUpload{},
 		&models.Product{},
 		&models.SKU{},
 		&models.ModelFamily{},
@@ -136,7 +139,36 @@ func migrateSchema(db *gorm.DB) error {
 	); err != nil {
 		return err
 	}
+	if err := backfillBrands(db); err != nil {
+		return err
+	}
 	return backfillAIModelConfiguration(db)
+}
+
+func backfillBrands(db *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		var products []models.Product
+		if err := tx.Where("brand_id IS NULL AND TRIM(brand) <> ''").Find(&products).Error; err != nil {
+			return err
+		}
+		for _, product := range products {
+			name := strings.TrimSpace(product.Brand)
+			key := strings.ToLower(name)
+			var brand models.Brand
+			if err := tx.Where("name_key = ?", key).First(&brand).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+				brand = models.Brand{PublicID: uuid.NewString(), Name: name, NameKey: key}
+				if err := tx.Create(&brand).Error; err != nil {
+					return err
+				}
+			} else if err != nil {
+				return err
+			}
+			if err := tx.Model(&models.Product{}).Where("id = ?", product.ID).Updates(map[string]any{"brand_id": brand.ID, "brand": brand.Name}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func backfillAIModelConfiguration(db *gorm.DB) error {

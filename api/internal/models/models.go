@@ -61,6 +61,7 @@ func (user *User) BeforeCreate(*gorm.DB) error {
 
 type Product struct {
 	ID              uint      `gorm:"primaryKey" json:"id"`
+	BrandID         *uint     `gorm:"index" json:"-"`
 	CategoryID      uint      `gorm:"index" json:"category_id"`
 	Name            string    `gorm:"size:180;not null" json:"name"`
 	Brand           string    `gorm:"size:120" json:"brand"`
@@ -70,7 +71,55 @@ type Product struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 	SKUs            []SKU     `json:"skus,omitempty"`
 	CatalogCategory Category  `gorm:"foreignKey:CategoryID" json:"category_record"`
+	BrandRecord     *Brand    `gorm:"foreignKey:BrandID" json:"-"`
 }
+
+type Brand struct {
+	ID        uint        `gorm:"primaryKey" json:"-"`
+	PublicID  string      `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
+	Name      string      `gorm:"size:120;not null" json:"name"`
+	NameKey   string      `gorm:"size:120;uniqueIndex;not null" json:"-"`
+	CreatedAt time.Time   `json:"created_at"`
+	UpdatedAt time.Time   `json:"updated_at"`
+	Icons     []BrandIcon `json:"icons,omitempty"`
+}
+
+func (brand *Brand) BeforeCreate(*gorm.DB) error { return ensurePublicID(&brand.PublicID) }
+
+type BrandIcon struct {
+	ID        uint      `gorm:"primaryKey" json:"-"`
+	PublicID  string    `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
+	BrandID   uint      `gorm:"index;not null" json:"-"`
+	Name      string    `gorm:"size:120;not null" json:"name"`
+	Notes     string    `gorm:"size:500;not null;default:''" json:"notes"`
+	ObjectKey string    `gorm:"size:500;uniqueIndex;not null" json:"-"`
+	MIMEType  string    `gorm:"size:80;not null" json:"mime_type"`
+	Width     int       `gorm:"not null" json:"width"`
+	Height    int       `gorm:"not null" json:"height"`
+	ByteCount int64     `gorm:"not null" json:"byte_count"`
+	SHA256    string    `gorm:"size:64;not null" json:"sha256"`
+	SortOrder int       `gorm:"not null;default:1" json:"sort_order"`
+	Status    string    `gorm:"size:32;index;not null;default:active" json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Brand     Brand     `json:"-"`
+}
+
+func (icon *BrandIcon) BeforeCreate(*gorm.DB) error { return ensurePublicID(&icon.PublicID) }
+
+type BrandIconUpload struct {
+	ID           uint       `gorm:"primaryKey" json:"-"`
+	PublicID     string     `gorm:"size:36;uniqueIndex;not null" json:"-"`
+	BrandID      uint       `gorm:"index;not null" json:"-"`
+	CreatedByID  uint       `gorm:"index;not null" json:"-"`
+	TemporaryKey string     `gorm:"size:500;uniqueIndex;not null" json:"-"`
+	ContentType  string     `gorm:"size:80;not null" json:"-"`
+	ExpiresAt    time.Time  `gorm:"index;not null" json:"-"`
+	ConsumedAt   *time.Time `gorm:"index" json:"-"`
+	CreatedAt    time.Time  `json:"-"`
+}
+
+func (upload *BrandIconUpload) BeforeCreate(*gorm.DB) error { return ensurePublicID(&upload.PublicID) }
 
 type SKU struct {
 	ID                uint      `gorm:"primaryKey" json:"-"`

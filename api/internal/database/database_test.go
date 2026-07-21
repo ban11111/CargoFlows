@@ -41,6 +41,40 @@ type oldUser struct {
 
 func (oldUser) TableName() string { return "users" }
 
+func TestBackfillBrandsGroupsNamesCaseInsensitivelyAndIsIdempotent(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&models.Brand{}, &models.Product{}); err != nil {
+		t.Fatal(err)
+	}
+	products := []models.Product{{Name: "One", Brand: " CargoFlows "}, {Name: "Two", Brand: "cargoflows"}, {Name: "Unbranded", Brand: " "}}
+	for index := range products {
+		if err := db.Create(&products[index]).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := backfillBrands(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := backfillBrands(db); err != nil {
+		t.Fatal(err)
+	}
+	var brands int64
+	if err := db.Model(&models.Brand{}).Count(&brands).Error; err != nil || brands != 1 {
+		t.Fatalf("brand count = %d, %v", brands, err)
+	}
+	var linked int64
+	if err := db.Model(&models.Product{}).Where("brand_id IS NOT NULL").Count(&linked).Error; err != nil || linked != 2 {
+		t.Fatalf("linked product count = %d, %v", linked, err)
+	}
+	var blank models.Product
+	if err := db.Where("name = ?", "Unbranded").First(&blank).Error; err != nil || blank.BrandID != nil {
+		t.Fatalf("blank brand was linked: %#v, %v", blank.BrandID, err)
+	}
+}
+
 func TestUserMigrationPromotesOneOwnerAndCollapsesLegacyRoles(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {

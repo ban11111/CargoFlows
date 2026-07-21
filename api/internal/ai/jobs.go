@@ -43,6 +43,7 @@ var (
 	ErrSKUIDInvalid                   = errors.New("SKU ID must be a UUID")
 	ErrAssetIDInvalid                 = errors.New("asset IDs must be UUIDs")
 	ErrStyleReferenceNotEligible      = errors.New("style references must be approved grants")
+	ErrBrandIconNotEligible           = errors.New("brand icons must be active and belong to the SKU brand")
 )
 
 type CreateJobInput struct {
@@ -51,6 +52,7 @@ type CreateJobInput struct {
 	SelectedSlotKeys          []string
 	SelectedAssetIDs          []string
 	SelectedStyleReferenceIDs []string
+	SelectedBrandIconIDs      []string
 	Locale                    string
 	CreatedByID               uint
 	IdempotencyKey            string
@@ -198,6 +200,18 @@ type ProductSnapshotV1 struct {
 	ImageCanvases       []ImageCanvas                 `json:"image_canvases,omitempty"`
 	StyleReferences     []StyleReferenceFacts         `json:"style_references,omitempty"`
 	StructureReferences []StructureReferenceFacts     `json:"structure_references,omitempty"`
+	BrandIcons          []BrandIconFacts              `json:"brand_icons,omitempty"`
+}
+
+type BrandIconFacts struct {
+	PublicID  string `json:"public_id"`
+	Name      string `json:"name"`
+	Notes     string `json:"notes"`
+	MIMEType  string `json:"mime_type"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	ByteCount int64  `json:"byte_count"`
+	SHA256    string `json:"sha256"`
 }
 
 type StyleReferenceFacts struct {
@@ -346,6 +360,9 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 		if len(normalized.SelectedStyleReferenceIDs) > 0 && !hasImageSlot(selectedSlots) {
 			return ErrStyleReferenceNotEligible
 		}
+		if len(normalized.SelectedBrandIconIDs) > 0 && !hasImageSlot(selectedSlots) {
+			return ErrBrandIconNotEligible
+		}
 		resolvedCanvases, err := resolveImageCanvases(selectedSlots, normalized.ImageCanvases)
 		if err != nil {
 			return err
@@ -365,7 +382,12 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 		orderedCanvases := imageCanvasFacts(resolvedCanvases)
 		styleReferences := []StyleReferenceFacts{}
 		structureReferences := []StructureReferenceFacts{}
+		brandIcons := []BrandIconFacts{}
 		if hasImageSlot(selectedSlots) {
+			brandIcons, err = loadBrandIcons(tx, sku.Product.BrandID, normalized.SelectedBrandIconIDs)
+			if err != nil {
+				return err
+			}
 			styleReferences, err = loadStyleReferences(tx, normalized.SelectedStyleReferenceIDs)
 			if err != nil {
 				return err
@@ -378,6 +400,7 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 		snapshot := makeProductSnapshot(sku, sop, captureSOPPublicID, template, version, selectedSlots, assets, locale, normalized.UserPreference, normalized.GenerationOverrides, orderedCanvases)
 		snapshot.StyleReferences = styleReferences
 		snapshot.StructureReferences = structureReferences
+		snapshot.BrandIcons = brandIcons
 		snapshotJSON, err := json.Marshal(snapshot)
 		if err != nil {
 			return fmt.Errorf("marshal AI job snapshot: %w", err)
@@ -457,7 +480,7 @@ func (s *JobService) Create(ctx context.Context, input CreateJobInput) (JobDocum
 		}
 		job.Items = items
 		job.SKU = sku
-		metadata, _ := json.Marshal(map[string]any{"snapshot_schema": ProductSnapshotSchemaV1, "slot_keys": normalized.SelectedSlotKeys, "asset_count": len(assetIDs), "style_reference_ids": normalized.SelectedStyleReferenceIDs, "structure_reference_count": len(structureReferences), "request_sha256": requestHash, "image_canvases": orderedCanvases, "created_by": creatorSnapshot, "model_snapshot": modelSnapshot})
+		metadata, _ := json.Marshal(map[string]any{"snapshot_schema": ProductSnapshotSchemaV1, "slot_keys": normalized.SelectedSlotKeys, "asset_count": len(assetIDs), "brand_icon_ids": normalized.SelectedBrandIconIDs, "style_reference_ids": normalized.SelectedStyleReferenceIDs, "structure_reference_count": len(structureReferences), "request_sha256": requestHash, "image_canvases": orderedCanvases, "created_by": creatorSnapshot, "model_snapshot": modelSnapshot})
 		jobID, actorID := job.ID, normalized.CreatedByID
 		audit := models.AIAuditEvent{PublicID: uuid.NewString(), EventType: "ai_job.created", EntityType: "ai_job", EntityPublicID: job.PublicID, ActorID: &actorID, AIJobID: &jobID, MetadataJSON: metadata}
 		if err := tx.Create(&audit).Error; err != nil {
@@ -558,6 +581,19 @@ func normalizeCreateJobInput(input CreateJobInput) (CreateJobInput, string, erro
 	}
 	sort.Strings(styles)
 	input.SelectedStyleReferenceIDs = dedupeStrings(styles)
+	brandIcons := make([]string, 0, len(input.SelectedBrandIconIDs))
+	for _, value := range input.SelectedBrandIconIDs {
+		parsed, err := uuid.Parse(strings.TrimSpace(value))
+		if err != nil || parsed == uuid.Nil {
+			return input, "", ErrBrandIconNotEligible
+		}
+		brandIcons = append(brandIcons, parsed.String())
+	}
+	sort.Strings(brandIcons)
+	input.SelectedBrandIconIDs = dedupeStrings(brandIcons)
+	if len(input.SelectedBrandIconIDs) > 8 {
+		return input, "", ErrBrandIconNotEligible
+	}
 	if input.GenerationOverrides == nil {
 		input.GenerationOverrides = map[string]GenerationOverride{}
 	}
@@ -594,11 +630,12 @@ func normalizeCreateJobInput(input CreateJobInput) (CreateJobInput, string, erro
 		Slots           []string                      `json:"selected_slot_keys"`
 		Assets          []string                      `json:"selected_asset_ids"`
 		StyleReferences []string                      `json:"selected_style_reference_ids,omitempty"`
+		BrandIcons      []string                      `json:"selected_brand_icon_ids,omitempty"`
 		Locale          string                        `json:"locale"`
 		Preference      string                        `json:"user_preference"`
 		Overrides       map[string]GenerationOverride `json:"generation_overrides"`
 		Canvases        []ImageCanvas                 `json:"image_canvases,omitempty"`
-	}{input.SKUID, input.TemplateVersionPublicID, slots, assets, input.SelectedStyleReferenceIDs, input.Locale, input.UserPreference, input.GenerationOverrides, input.ImageCanvases}
+	}{input.SKUID, input.TemplateVersionPublicID, slots, assets, input.SelectedStyleReferenceIDs, input.SelectedBrandIconIDs, input.Locale, input.UserPreference, input.GenerationOverrides, input.ImageCanvases}
 	encoded, err := json.Marshal(canonical)
 	if err != nil {
 		return input, "", err
@@ -688,7 +725,7 @@ func (s *JobService) Get(ctx context.Context, publicID string) (JobDocument, err
 
 func loadJobSKU(tx *gorm.DB, publicID string) (models.SKU, error) {
 	var sku models.SKU
-	err := tx.Preload("Product.CatalogCategory").Preload("Tags", func(db *gorm.DB) *gorm.DB { return db.Order("tags.name ASC, tags.id ASC") }).Where("public_id = ?", publicID).First(&sku).Error
+	err := tx.Preload("Product.CatalogCategory").Preload("Product.BrandRecord").Preload("Tags", func(db *gorm.DB) *gorm.DB { return db.Order("tags.name ASC, tags.id ASC") }).Where("public_id = ?", publicID).First(&sku).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return sku, ErrSKUNotFound
 	}
@@ -784,6 +821,30 @@ func loadStyleReferences(tx *gorm.DB, requested []string) ([]StyleReferenceFacts
 			return nil, ErrStyleReferenceNotEligible
 		}
 		result = append(result, StyleReferenceFacts{PublicID: grant.PublicID, Version: grant.Version, SourceSKUPublicID: grant.Asset.SKU.PublicID, Description: LocalizedNameFacts{ZH: grant.DescriptionZH, EN: grant.DescriptionEN}, DerivativeSHA256: grant.DerivativeSHA256, ReviewedByPublicID: users[grant.ReviewedByID]})
+	}
+	return result, nil
+}
+
+func loadBrandIcons(tx *gorm.DB, brandID *uint, requested []string) ([]BrandIconFacts, error) {
+	if len(requested) == 0 {
+		return []BrandIconFacts{}, nil
+	}
+	if brandID == nil || len(requested) > 8 {
+		return nil, ErrBrandIconNotEligible
+	}
+	var icons []models.BrandIcon
+	if err := tx.Where("public_id IN ? AND brand_id = ? AND status = ?", requested, *brandID, "active").Order("sort_order ASC, public_id ASC").Find(&icons).Error; err != nil {
+		return nil, err
+	}
+	if len(icons) != len(requested) {
+		return nil, ErrBrandIconNotEligible
+	}
+	result := make([]BrandIconFacts, 0, len(icons))
+	for _, icon := range icons {
+		if icon.ObjectKey == "" || icon.SHA256 == "" {
+			return nil, ErrBrandIconNotEligible
+		}
+		result = append(result, BrandIconFacts{PublicID: icon.PublicID, Name: icon.Name, Notes: icon.Notes, MIMEType: icon.MIMEType, Width: icon.Width, Height: icon.Height, ByteCount: icon.ByteCount, SHA256: icon.SHA256})
 	}
 	return result, nil
 }

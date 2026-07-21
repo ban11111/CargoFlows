@@ -127,6 +127,7 @@ func (s *Server) createAIJob(c *gin.Context) {
 		SKUID: req.SKUID, TemplateVersionPublicID: req.TemplateVersionPublicID,
 		SelectedSlotKeys: req.SelectedSlotKeys, SelectedAssetIDs: *req.SelectedAssetIDs,
 		SelectedStyleReferenceIDs: req.SelectedStyleReferenceIDs,
+		SelectedBrandIconIDs:      req.SelectedBrandIconIDs,
 		Locale:                    req.Locale, CreatedByID: currentUser(c).ID,
 		IdempotencyKey: c.GetHeader("Idempotency-Key"), UserPreference: req.UserPreference, GenerationOverrides: req.GenerationOverrides,
 		ImageCanvases: req.ImageCanvases,
@@ -707,7 +708,7 @@ func respondAIError(c *gin.Context, err error) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "ai_template_configuration_invalid", "message": "Published AI template configuration is invalid"})
 	case errors.Is(err, ai.ErrIdempotencyConflict):
 		c.JSON(http.StatusConflict, gin.H{"code": "idempotency_conflict", "message": err.Error()})
-	case errors.Is(err, ai.ErrAssetNotEligible), errors.Is(err, ai.ErrStyleReferenceNotEligible), errors.Is(err, ai.ErrPublishedSOPNotFound):
+	case errors.Is(err, ai.ErrAssetNotEligible), errors.Is(err, ai.ErrStyleReferenceNotEligible), errors.Is(err, ai.ErrBrandIconNotEligible), errors.Is(err, ai.ErrPublishedSOPNotFound):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "job_input_not_eligible", "message": err.Error()})
 	case errors.Is(err, ai.ErrTemplateVersionImmutable), errors.Is(err, ai.ErrTemplateDraftExists), errors.Is(err, ai.ErrTemplateSourceNotPublished):
 		c.JSON(http.StatusConflict, gin.H{"code": "lifecycle_conflict", "message": err.Error()})

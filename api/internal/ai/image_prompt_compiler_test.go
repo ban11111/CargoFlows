@@ -69,6 +69,26 @@ func TestCompileImagePromptLayersProductAndCoordinateRules(t *testing.T) {
 	}
 }
 
+func TestCompileImagePromptPlacesRecolorableBrandIconAfterProductSources(t *testing.T) {
+	snapshot, slot := imagePromptFixture()
+	snapshot.BrandIcons = []BrandIconFacts{{PublicID: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", Name: "Primary wordmark", Notes: "Horizontal", MIMEType: "image/png", Width: 400, Height: 120, ByteCount: 2048, SHA256: strings.Repeat("c", 64)}}
+	compiled, err := CompileImagePrompt(snapshot, slot, ImageTurnInput{Operation: models.AIExecutionGenerate, ThreadPublicID: "thread-brand"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ordered := string(compiled.OrderedInputListJSON)
+	lastSource := strings.LastIndex(ordered, `"kind":"product_visual"`)
+	brand := strings.Index(ordered, `"kind":"brand_icon_reference"`)
+	if lastSource < 0 || brand <= lastSource {
+		t.Fatalf("brand icon order is invalid: %s", ordered)
+	}
+	for _, required := range []string{"colors are adaptable", "recolor", "Never redraw", "not mandatory in every image", "aspect ratio"} {
+		if !strings.Contains(compiled.Instructions, required) {
+			t.Fatalf("brand instructions missing %q", required)
+		}
+	}
+}
+
 func TestCompileImagePromptCombinesChosenRequirementsOnOneCanvas(t *testing.T) {
 	snapshot, hero := imagePromptFixture()
 	detail := hero

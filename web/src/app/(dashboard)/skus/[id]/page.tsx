@@ -28,6 +28,7 @@ interface SKUDetail {
   tags: Array<{ name: string }>;
   product: {
     category_id: number;
+	brand_id: string;
     name: string;
     brand: string;
     category: string;
@@ -55,6 +56,7 @@ export default function SkuDetailPage() {
         method: "PATCH",
         body: JSON.stringify({
           category_id: sku.product.category_id,
+		  brand_id: sku.product.brand_id,
           product_name: sku.product.name,
           brand: sku.product.brand,
           category: sku.product.category,
@@ -157,7 +159,7 @@ export default function SkuDetailPage() {
   );
 }
 
-function skuFormValue(sku: SKUDetail): SKUFormValue { return { category_id: sku.product.category_id, product_name: sku.product.name, brand: sku.product.brand, category: sku.product.category, code: sku.code, color: sku.color, size: sku.size, barcode: sku.barcode, stock: sku.stock, low_stock_threshold: sku.low_stock_threshold, platform_title: sku.platform_title, selling_points: sku.selling_points, status: sku.status, tags: sku.tags.map((tag) => tag.name) }; }
+function skuFormValue(sku: SKUDetail): SKUFormValue { return { category_id: sku.product.category_id, product_name: sku.product.name, brand: sku.product.brand, brand_id: sku.product.brand_id ?? "", category: sku.product.category, code: sku.code, color: sku.color, size: sku.size, barcode: sku.barcode, stock: sku.stock, low_stock_threshold: sku.low_stock_threshold, platform_title: sku.platform_title, selling_points: sku.selling_points, status: sku.status, tags: sku.tags.map((tag) => tag.name) }; }
 
 function Field({ label, value }: { label: string; value: string }) {
   return (

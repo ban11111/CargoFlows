@@ -15,6 +15,7 @@ export interface SKUFormValue {
   category_id: number;
   product_name: string;
   brand: string;
+	brand_id: string;
   category: string;
   code: string;
   color: string;
@@ -29,8 +30,9 @@ export interface SKUFormValue {
 }
 
 interface Category { id: number; name: string; name_en: string }
+interface Brand { public_id: string; name: string }
 
-const emptyValue: SKUFormValue = { category_id: 0, product_name: "", brand: "", category: "", code: "", color: "", size: "", barcode: "", stock: 0, low_stock_threshold: 0, platform_title: "", selling_points: "", status: "draft", tags: [] };
+const emptyValue: SKUFormValue = { category_id: 0, product_name: "", brand: "", brand_id: "", category: "", code: "", color: "", size: "", barcode: "", stock: 0, low_stock_threshold: 0, platform_title: "", selling_points: "", status: "draft", tags: [] };
 
 export function SKUForm({ initial, mode, busy, onCancel, onSubmit }: { initial?: SKUFormValue; mode: "create" | "edit"; busy?: boolean; onCancel?: () => void; onSubmit: (value: SKUFormValue) => void }) {
   const { language } = useLanguage();
@@ -39,6 +41,7 @@ export function SKUForm({ initial, mode, busy, onCancel, onSubmit }: { initial?:
   const [tags, setTags] = useState((initial?.tags ?? []).join(", "));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const categories = useQuery({ queryKey: ["categories"], queryFn: () => apiRequest<{ data: Category[] }>("/categories") });
+	const brands = useQuery({ queryKey: ["brands"], queryFn: () => apiRequest<{ data: Brand[] }>("/brands") });
   const text = zh ? { productName: "商品名称", brand: "品牌", category: "分类", code: "SKU 编码", color: "颜色", size: "规格 / 型号", barcode: "条码", stock: "初始库存", threshold: "低库存阈值", platformTitle: "平台标题", sellingPoints: "卖点", status: "状态", tags: "标签（逗号分隔）", active: "启用", draft: "草稿", disabled: "停用", save: mode === "create" ? "创建 SKU" : "保存修改", cancel: "取消", required: "请填写此字段", chooseCategory: "请选择分类" } : { productName: "Product name", brand: "Brand", category: "Category", code: "SKU code", color: "Color", size: "Specification / model", barcode: "Barcode", stock: "Initial stock", threshold: "Low-stock threshold", platformTitle: "Platform title", sellingPoints: "Selling points", status: "Status", tags: "Tags (comma-separated)", active: "Active", draft: "Draft", disabled: "Disabled", save: mode === "create" ? "Create SKU" : "Save changes", cancel: "Cancel", required: "This field is required", chooseCategory: "Choose a category" };
 
   function set<K extends keyof SKUFormValue>(key: K, next: SKUFormValue[K]) { setValue((current) => ({ ...current, [key]: next })); }
@@ -57,7 +60,7 @@ export function SKUForm({ initial, mode, busy, onCancel, onSubmit }: { initial?:
   return <form className="space-y-5" onSubmit={submit}>
     <div className="grid gap-4 sm:grid-cols-2">
       <FormField error={errors.product_name} id="sku-product-name" label={text.productName}><Input id="sku-product-name" maxLength={180} onChange={(event) => set("product_name", event.target.value)} value={value.product_name} /></FormField>
-      <FormField id="sku-brand" label={text.brand}><Input id="sku-brand" maxLength={120} onChange={(event) => set("brand", event.target.value)} value={value.brand} /></FormField>
+	  <FormField id="sku-brand" label={text.brand}><select className="h-9 w-full rounded-md border border-border bg-card px-3 text-sm" id="sku-brand" onChange={(event) => { const brand = brands.data?.data.find((item) => item.public_id === event.target.value); setValue((current) => ({ ...current, brand_id: event.target.value, brand: brand?.name ?? "" })); }} value={value.brand_id}><option value="">{zh ? "无品牌" : "No brand"}</option>{brands.data?.data.map((brand) => <option key={brand.public_id} value={brand.public_id}>{brand.name}</option>)}</select></FormField>
       <FormField error={errors.category_id} id="sku-category" label={text.category}><select className="h-9 w-full rounded-md border border-border bg-card px-3 text-sm" id="sku-category" onChange={(event) => set("category_id", Number(event.target.value))} value={value.category_id}><option value={0}>{text.chooseCategory}</option>{categories.data?.data.map((category) => <option key={category.id} value={category.id}>{categoryLabel(category, language)}</option>)}</select></FormField>
       <FormField error={errors.code} id="sku-code" label={text.code}><Input id="sku-code" maxLength={80} onChange={(event) => set("code", event.target.value)} value={value.code} /></FormField>
       <FormField id="sku-color" label={text.color}><Input id="sku-color" maxLength={80} onChange={(event) => set("color", event.target.value)} value={value.color} /></FormField>
