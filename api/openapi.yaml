@@ -197,6 +197,31 @@ paths:
       responses:
         '201': { description: Posted reversal, content: { application/json: { schema: { $ref: '#/components/schemas/InventoryTransaction' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
+  /inventory-transactions/{transaction_id}/corrections/preview:
+    parameters: [ { in: path, name: transaction_id, required: true, schema: { type: string, format: uuid } } ]
+    post:
+      operationId: previewInventoryCorrection
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/InventoryCorrectionRequest' } } } }
+      responses:
+        '200': { description: Correction impact preview, content: { application/json: { schema: { $ref: '#/components/schemas/InventoryCorrectionResult' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /inventory-transactions/{transaction_id}/corrections:
+    parameters: [ { in: path, name: transaction_id, required: true, schema: { type: string, format: uuid } } ]
+    get:
+      operationId: listInventoryCorrections
+      responses:
+        '200': { description: Immutable correction versions, content: { application/json: { schema: { type: object, required: [data], properties: { data: { type: array, items: { $ref: '#/components/schemas/InventoryCorrection' } } } } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: createInventoryCorrection
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/InventoryCorrectionRequest' } } } }
+      responses:
+        '201': { description: Correction created, content: { application/json: { schema: { $ref: '#/components/schemas/InventoryCorrectionResult' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Idempotency or concurrent correction conflict, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
   /brands:
     get:
       operationId: listBrands
@@ -1817,9 +1842,10 @@ components:
         updated_at: { type: string, format: date-time }
         lines: { type: array, items: { $ref: '#/components/schemas/InventoryTransactionLine' } }
         charges: { type: array, items: { $ref: '#/components/schemas/InventoryCharge' } }
+        corrections: { type: array, items: { $ref: '#/components/schemas/InventoryCorrection' } }
     InventoryTransactionLine:
       type: object
-      required: [public_id, quantity_delta, source_currency, source_unit_price, fx_rate_to_sgd, fx_rate_source, merchandise_amount_sgd, allocated_charges_sgd, landed_unit_cost_sgd, movement_cost_sgd, quantity_before, quantity_after, average_cost_before_sgd, average_cost_after_sgd, inventory_value_before_sgd, inventory_value_after_sgd, sku]
+      required: [public_id, quantity_delta, source_currency, source_unit_price, fx_rate_to_sgd, fx_rate_source, merchandise_amount_sgd, allocated_charges_sgd, landed_unit_cost_sgd, movement_cost_sgd, quantity_before, quantity_after, average_cost_before_sgd, average_cost_after_sgd, inventory_value_before_sgd, inventory_value_after_sgd, effective_merchandise_amount_sgd, effective_allocated_charges_sgd, effective_landed_unit_cost_sgd, effective_movement_cost_sgd, effective_average_cost_before_sgd, effective_average_cost_after_sgd, effective_inventory_value_before_sgd, effective_inventory_value_after_sgd, cost_version, sku]
       properties:
         public_id: { type: string, format: uuid }
         quantity_delta: { type: integer }
@@ -1838,6 +1864,15 @@ components:
         average_cost_after_sgd: { type: string }
         inventory_value_before_sgd: { type: string }
         inventory_value_after_sgd: { type: string }
+        effective_merchandise_amount_sgd: { type: string }
+        effective_allocated_charges_sgd: { type: string }
+        effective_landed_unit_cost_sgd: { type: string }
+        effective_movement_cost_sgd: { type: string }
+        effective_average_cost_before_sgd: { type: string }
+        effective_average_cost_after_sgd: { type: string }
+        effective_inventory_value_before_sgd: { type: string }
+        effective_inventory_value_after_sgd: { type: string }
+        cost_version: { type: integer, minimum: 0 }
         sku: { $ref: '#/components/schemas/SKU' }
     InventoryCharge:
       type: object
@@ -1851,6 +1886,88 @@ components:
         fx_rate_date: { type: string, format: date-time, nullable: true }
         fx_rate_source: { type: string }
         amount_sgd: { type: string }
+    InventoryCorrectionRequest:
+      type: object
+      additionalProperties: false
+      required: [kind, reason]
+      properties:
+        kind: { type: string, enum: [void, cost, quantity] }
+        reason: { type: string, minLength: 1 }
+        lines: { type: array, items: { $ref: '#/components/schemas/InventoryTransactionLineRequest' } }
+        charges: { type: array, items: { $ref: '#/components/schemas/InventoryChargeRequest' } }
+    InventoryCorrectionImpact:
+      type: object
+      required: [sku_id, sku_code, current_average_cost_sgd, effective_average_cost_sgd, current_inventory_value_sgd, effective_inventory_value_sgd, inventory_value_delta_sgd, historical_outflow_cost_delta_sgd, affected_transaction_count]
+      properties:
+        sku_id: { type: string, format: uuid }
+        sku_code: { type: string }
+        current_average_cost_sgd: { type: string }
+        effective_average_cost_sgd: { type: string }
+        current_inventory_value_sgd: { type: string }
+        effective_inventory_value_sgd: { type: string }
+        inventory_value_delta_sgd: { type: string }
+        historical_outflow_cost_delta_sgd: { type: string }
+        affected_transaction_count: { type: integer, minimum: 0 }
+    InventoryCorrection:
+      type: object
+      required: [public_id, kind, reason, version, inventory_value_delta_sgd, historical_outflow_cost_delta_sgd, created_at]
+      properties:
+        public_id: { type: string, format: uuid }
+        kind: { type: string, enum: [void, cost, quantity] }
+        reason: { type: string }
+        version: { type: integer, minimum: 1 }
+        inventory_value_delta_sgd: { type: string }
+        historical_outflow_cost_delta_sgd: { type: string }
+        created_at: { type: string, format: date-time }
+        created_by: { $ref: '#/components/schemas/User' }
+        result_transaction: { $ref: '#/components/schemas/InventoryTransaction' }
+        lines: { type: array, items: { $ref: '#/components/schemas/InventoryCorrectionLine' } }
+        charges: { type: array, items: { $ref: '#/components/schemas/InventoryCorrectionCharge' } }
+        revisions: { type: array, items: { $ref: '#/components/schemas/InventoryCostRevision' } }
+    InventoryCorrectionLine:
+      type: object
+      required: [public_id, quantity_delta, source_currency, source_unit_price, fx_rate_to_sgd, sku]
+      properties:
+        public_id: { type: string, format: uuid }
+        quantity_delta: { type: integer }
+        source_currency: { type: string }
+        source_unit_price: { type: string }
+        fx_rate_to_sgd: { type: string }
+        sku: { $ref: '#/components/schemas/SKU' }
+    InventoryCorrectionCharge:
+      type: object
+      required: [public_id, ordinal, type, source_currency, source_amount, fx_rate_to_sgd]
+      properties:
+        public_id: { type: string, format: uuid }
+        ordinal: { type: integer, minimum: 0 }
+        type: { type: string }
+        source_currency: { type: string }
+        source_amount: { type: string }
+        fx_rate_to_sgd: { type: string }
+    InventoryCostRevision:
+      type: object
+      required: [public_id, effective_merchandise_amount_sgd, effective_allocated_charges_sgd, effective_landed_unit_cost_sgd, effective_movement_cost_sgd, effective_average_cost_before_sgd, effective_average_cost_after_sgd, effective_inventory_value_before_sgd, effective_inventory_value_after_sgd, created_at, transaction_line]
+      properties:
+        public_id: { type: string, format: uuid }
+        effective_merchandise_amount_sgd: { type: string }
+        effective_allocated_charges_sgd: { type: string }
+        effective_landed_unit_cost_sgd: { type: string }
+        effective_movement_cost_sgd: { type: string }
+        effective_average_cost_before_sgd: { type: string }
+        effective_average_cost_after_sgd: { type: string }
+        effective_inventory_value_before_sgd: { type: string }
+        effective_inventory_value_after_sgd: { type: string }
+        created_at: { type: string, format: date-time }
+        transaction_line: { $ref: '#/components/schemas/InventoryTransactionLine' }
+    InventoryCorrectionResult:
+      type: object
+      required: [strategy, inventory_value_delta_sgd, historical_outflow_cost_delta_sgd, impacts]
+      properties:
+        strategy: { type: string, enum: [exact_reversal, moving_average_recost, current_quantity_adjustment] }
+        inventory_value_delta_sgd: { type: string }
+        historical_outflow_cost_delta_sgd: { type: string }
+        impacts: { type: array, items: { $ref: '#/components/schemas/InventoryCorrectionImpact' } }
+        correction: { $ref: '#/components/schemas/InventoryCorrection' }
     AIReferenceSOP:
       type: object
       additionalProperties: false

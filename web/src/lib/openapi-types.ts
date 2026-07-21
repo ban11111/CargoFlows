@@ -230,6 +230,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/inventory-transactions/{transaction_id}/corrections/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                transaction_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["previewInventoryCorrection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/inventory-transactions/{transaction_id}/corrections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                transaction_id: string;
+            };
+            cookie?: never;
+        };
+        get: operations["listInventoryCorrections"];
+        put?: never;
+        post: operations["createInventoryCorrection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/brands": {
         parameters: {
             query?: never;
@@ -2182,6 +2218,7 @@ export interface components {
             updated_at: string;
             lines: components["schemas"]["InventoryTransactionLine"][];
             charges: components["schemas"]["InventoryCharge"][];
+            corrections?: components["schemas"]["InventoryCorrection"][];
         };
         InventoryTransactionLine: {
             /** Format: uuid */
@@ -2203,6 +2240,15 @@ export interface components {
             average_cost_after_sgd: string;
             inventory_value_before_sgd: string;
             inventory_value_after_sgd: string;
+            effective_merchandise_amount_sgd: string;
+            effective_allocated_charges_sgd: string;
+            effective_landed_unit_cost_sgd: string;
+            effective_movement_cost_sgd: string;
+            effective_average_cost_before_sgd: string;
+            effective_average_cost_after_sgd: string;
+            effective_inventory_value_before_sgd: string;
+            effective_inventory_value_after_sgd: string;
+            cost_version: number;
             sku: components["schemas"]["SKU"];
         };
         InventoryCharge: {
@@ -2216,6 +2262,83 @@ export interface components {
             fx_rate_date?: string | null;
             fx_rate_source: string;
             amount_sgd: string;
+        };
+        InventoryCorrectionRequest: {
+            /** @enum {string} */
+            kind: "void" | "cost" | "quantity";
+            reason: string;
+            lines?: components["schemas"]["InventoryTransactionLineRequest"][];
+            charges?: components["schemas"]["InventoryChargeRequest"][];
+        };
+        InventoryCorrectionImpact: {
+            /** Format: uuid */
+            sku_id: string;
+            sku_code: string;
+            current_average_cost_sgd: string;
+            effective_average_cost_sgd: string;
+            current_inventory_value_sgd: string;
+            effective_inventory_value_sgd: string;
+            inventory_value_delta_sgd: string;
+            historical_outflow_cost_delta_sgd: string;
+            affected_transaction_count: number;
+        };
+        InventoryCorrection: {
+            /** Format: uuid */
+            public_id: string;
+            /** @enum {string} */
+            kind: "void" | "cost" | "quantity";
+            reason: string;
+            version: number;
+            inventory_value_delta_sgd: string;
+            historical_outflow_cost_delta_sgd: string;
+            /** Format: date-time */
+            created_at: string;
+            created_by?: components["schemas"]["User"];
+            result_transaction?: components["schemas"]["InventoryTransaction"];
+            lines?: components["schemas"]["InventoryCorrectionLine"][];
+            charges?: components["schemas"]["InventoryCorrectionCharge"][];
+            revisions?: components["schemas"]["InventoryCostRevision"][];
+        };
+        InventoryCorrectionLine: {
+            /** Format: uuid */
+            public_id: string;
+            quantity_delta: number;
+            source_currency: string;
+            source_unit_price: string;
+            fx_rate_to_sgd: string;
+            sku: components["schemas"]["SKU"];
+        };
+        InventoryCorrectionCharge: {
+            /** Format: uuid */
+            public_id: string;
+            ordinal: number;
+            type: string;
+            source_currency: string;
+            source_amount: string;
+            fx_rate_to_sgd: string;
+        };
+        InventoryCostRevision: {
+            /** Format: uuid */
+            public_id: string;
+            effective_merchandise_amount_sgd: string;
+            effective_allocated_charges_sgd: string;
+            effective_landed_unit_cost_sgd: string;
+            effective_movement_cost_sgd: string;
+            effective_average_cost_before_sgd: string;
+            effective_average_cost_after_sgd: string;
+            effective_inventory_value_before_sgd: string;
+            effective_inventory_value_after_sgd: string;
+            /** Format: date-time */
+            created_at: string;
+            transaction_line: components["schemas"]["InventoryTransactionLine"];
+        };
+        InventoryCorrectionResult: {
+            /** @enum {string} */
+            strategy: "exact_reversal" | "moving_average_recost" | "current_quantity_adjustment";
+            inventory_value_delta_sgd: string;
+            historical_outflow_cost_delta_sgd: string;
+            impacts: components["schemas"]["InventoryCorrectionImpact"][];
+            correction?: components["schemas"]["InventoryCorrection"];
         };
         AIReferenceSOP: {
             /** Format: uuid */
@@ -4193,6 +4316,99 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+        };
+    };
+    previewInventoryCorrection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                transaction_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InventoryCorrectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Correction impact preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryCorrectionResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listInventoryCorrections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                transaction_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Immutable correction versions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["InventoryCorrection"][];
+                    };
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createInventoryCorrection: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Actor-scoped create key. Reusing it with the same normalized request returns the original job; different input returns 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                transaction_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InventoryCorrectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Correction created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryCorrectionResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            /** @description Idempotency or concurrent correction conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     listBrands: {
