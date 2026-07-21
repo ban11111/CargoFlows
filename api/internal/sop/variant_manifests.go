@@ -791,7 +791,7 @@ func validateEvidenceAsset(tx *gorm.DB, publicID string, skuID uint) error {
 	if err := tx.Where("public_id = ?", publicID).First(&asset).Error; err != nil {
 		return ErrVariantManifestInvalid
 	}
-	if asset.SKUID != skuID || asset.ReviewStatus != "approved" || !strings.HasPrefix(asset.MIMEType, "image/") || asset.Width <= 0 || asset.Height <= 0 || asset.ByteCount <= 0 || !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(asset.SHA256) {
+	if asset.SKUID != skuID || asset.ReviewStatus != "approved" || asset.OriginType == "ai_generated" || !strings.HasPrefix(asset.MIMEType, "image/") || asset.Width <= 0 || asset.Height <= 0 || asset.ByteCount <= 0 || !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(asset.SHA256) {
 		return ErrVariantManifestInvalid
 	}
 	return nil
@@ -832,7 +832,7 @@ func validateManifestVersion(version *models.VariantIdentityManifestVersion, fam
 	return issues
 }
 func validateAssetRecord(asset models.Asset, skuID uint) error {
-	if asset.SKUID != skuID || asset.ReviewStatus != "approved" || !strings.HasPrefix(asset.MIMEType, "image/") || asset.Width <= 0 || asset.Height <= 0 || asset.ByteCount <= 0 || !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(asset.SHA256) {
+	if asset.SKUID != skuID || asset.ReviewStatus != "approved" || asset.OriginType == "ai_generated" || !strings.HasPrefix(asset.MIMEType, "image/") || asset.Width <= 0 || asset.Height <= 0 || asset.ByteCount <= 0 || !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(asset.SHA256) {
 		return ErrVariantManifestInvalid
 	}
 	return nil

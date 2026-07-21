@@ -139,14 +139,29 @@ func (s *objectStore) ReadSource(ctx context.Context, objectKey string) (ai.Imag
 		return ai.ImageInput{}, err
 	}
 	defer object.Close()
-	value, err := io.ReadAll(io.LimitReader(object, 50<<20+1))
+	info, err := object.Stat()
+	if err != nil {
+		return ai.ImageInput{}, err
+	}
+	value, err := io.ReadAll(io.LimitReader(object, (50<<20)+1))
 	if err != nil {
 		return ai.ImageInput{}, err
 	}
 	if len(value) > 50<<20 {
 		return ai.ImageInput{}, fmt.Errorf("source image exceeds byte limit")
 	}
-	return ai.ImageInput{Bytes: value}, nil
+	return ai.ImageInput{Bytes: value, MIMEType: info.ContentType}, nil
+}
+
+func (s *objectStore) StoreReferenceDerivative(ctx context.Context, objectKey, mimeType string, value []byte) error {
+	if objectKey == "" || len(value) == 0 || (mimeType != "image/png" && mimeType != "image/jpeg" && mimeType != "image/webp") {
+		return fmt.Errorf("invalid reference derivative")
+	}
+	if err := s.ensureBucket(ctx); err != nil {
+		return err
+	}
+	_, err := s.internal.PutObject(ctx, s.bucket, objectKey, bytes.NewReader(value), int64(len(value)), minio.PutObjectOptions{ContentType: mimeType, DisableMultipart: true})
+	return err
 }
 
 func (s *objectStore) ReadGenerated(ctx context.Context, objectKey string) (ai.ImageInput, error) {
@@ -158,14 +173,18 @@ func (s *objectStore) ReadGenerated(ctx context.Context, objectKey string) (ai.I
 		return ai.ImageInput{}, err
 	}
 	defer object.Close()
-	value, err := io.ReadAll(io.LimitReader(object, 50<<20+1))
+	info, err := object.Stat()
+	if err != nil {
+		return ai.ImageInput{}, err
+	}
+	value, err := io.ReadAll(io.LimitReader(object, (50<<20)+1))
 	if err != nil {
 		return ai.ImageInput{}, err
 	}
 	if len(value) > 50<<20 {
 		return ai.ImageInput{}, fmt.Errorf("generated image exceeds byte limit")
 	}
-	return ai.ImageInput{Bytes: value}, nil
+	return ai.ImageInput{Bytes: value, MIMEType: info.ContentType}, nil
 }
 
 func (s *objectStore) promoteSource(ctx context.Context, temporaryKey, finalKey, mimeType string, value []byte) error {
@@ -183,6 +202,43 @@ func (s *objectStore) promoteSource(ctx context.Context, temporaryKey, finalKey,
 
 func (s *objectStore) deleteSource(ctx context.Context, objectKey string) error {
 	return s.internal.RemoveObject(ctx, s.bucket, objectKey, minio.RemoveObjectOptions{})
+}
+
+func (s *objectStore) StoreAIMask(ctx context.Context, objectKey string, value []byte) error {
+	if !strings.HasPrefix(objectKey, "ai-masks/") || len(value) == 0 {
+		return fmt.Errorf("invalid AI mask")
+	}
+	if err := s.ensureBucket(ctx); err != nil {
+		return err
+	}
+	_, err := s.internal.PutObject(ctx, s.bucket, objectKey, bytes.NewReader(value), int64(len(value)), minio.PutObjectOptions{ContentType: "image/png", DisableMultipart: true})
+	return err
+}
+
+func (s *objectStore) PromoteGeneratedAsset(ctx context.Context, generatedKey, sourceKey, mimeType string) error {
+	if !strings.HasPrefix(sourceKey, "ai-generated-assets/") {
+		return fmt.Errorf("invalid generated asset key")
+	}
+	if err := s.ensureGeneratedBucket(ctx); err != nil {
+		return err
+	}
+	if err := s.ensureBucket(ctx); err != nil {
+		return err
+	}
+	object, err := s.internal.GetObject(ctx, s.aiBucket, generatedKey, minio.GetObjectOptions{})
+	if err != nil {
+		return err
+	}
+	defer object.Close()
+	info, err := object.Stat()
+	if err != nil {
+		return err
+	}
+	if info.Size <= 0 || info.Size > 50<<20 {
+		return fmt.Errorf("generated asset exceeds byte limit")
+	}
+	_, err = s.internal.PutObject(ctx, s.bucket, sourceKey, object, info.Size, minio.PutObjectOptions{ContentType: mimeType, DisableMultipart: true})
+	return err
 }
 
 func (s *objectStore) ClaimGenerated(ctx context.Context, objectKey, mimeType string, value []byte) (ai.GeneratedObjectClaim, error) {

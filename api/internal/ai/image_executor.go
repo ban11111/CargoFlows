@@ -39,6 +39,8 @@ type preparedImageExecution struct {
 	job        models.AIJob
 	item       models.AIJobItem
 	sourceKeys []string
+	parentKey  string
+	maskKey    string
 	completed  bool
 }
 
@@ -51,6 +53,13 @@ func (e *ImageExecutor) Execute(ctx context.Context, leased LeasedItem) error {
 		return err
 	}
 	inputs := make([]ImageInput, 0, len(p.sourceKeys))
+	if p.parentKey != "" {
+		input, readErr := e.storage.ReadGenerated(ctx, p.parentKey)
+		if readErr != nil {
+			return e.fail(ctx, p, models.AIExecutionFailed, "Selected parent image is unavailable", "")
+		}
+		inputs = append(inputs, input)
+	}
 	for _, key := range p.sourceKeys {
 		input, readErr := e.storage.ReadSource(ctx, key)
 		if readErr != nil {
@@ -63,6 +72,15 @@ func (e *ImageExecutor) Execute(ctx context.Context, leased LeasedItem) error {
 			clearByteSlice(inputs[i].Bytes)
 		}
 	}()
+	var mask *ImageInput
+	if p.maskKey != "" {
+		value, readErr := e.storage.ReadSource(ctx, p.maskKey)
+		if readErr != nil || value.MIMEType != "image/png" {
+			return e.fail(ctx, p, models.AIExecutionFailed, "Image edit mask is unavailable", "")
+		}
+		mask = &value
+		defer clearByteSlice(value.Bytes)
+	}
 
 	credential, err := e.credentials.DecryptActiveCredential(ctx)
 	defer clearBytes(credential.APIKey)
@@ -75,6 +93,10 @@ func (e *ImageExecutor) Execute(ctx context.Context, leased LeasedItem) error {
 	if apiMode == "images" {
 		runtimeModel = configuredModel(modelSnapshot.ImageGenerationModel, configuredModel(credential.ImageGenerationModel, DefaultOpenAIImageGenerationModel))
 	}
+	if mask != nil {
+		apiMode = "images"
+		runtimeModel = configuredModel(modelSnapshot.ImageGenerationModel, configuredModel(credential.ImageGenerationModel, DefaultOpenAIImageGenerationModel))
+	}
 	if err := bindExecutionModel(ctx, e.db, &p.execution, runtimeModel); err != nil {
 		return e.fail(ctx, p, models.AIExecutionFailed, "OpenAI model selection could not be stored", "")
 	}
@@ -84,7 +106,7 @@ func (e *ImageExecutor) Execute(ctx context.Context, leased LeasedItem) error {
 	if err := e.dispatch(ctx, leased, p, credential); err != nil {
 		return e.fail(ctx, p, models.AIExecutionFailed, "OpenAI dispatch failed before a confirmed call", "")
 	}
-	response, providerErr := e.provider.Generate(ctx, credential.APIKey, ImageRequest{Model: runtimeModel, APIMode: apiMode, Prompt: p.prompt, Inputs: inputs, Metadata: map[string]string{"job_id": p.job.PublicID, "job_item_id": p.item.PublicID, "execution_id": p.execution.PublicID}})
+	response, providerErr := e.provider.Generate(ctx, credential.APIKey, ImageRequest{Model: runtimeModel, APIMode: apiMode, Prompt: p.prompt, Inputs: inputs, Mask: mask, Metadata: map[string]string{"job_id": p.job.PublicID, "job_item_id": p.item.PublicID, "execution_id": p.execution.PublicID}})
 	clearBytes(credential.APIKey)
 	if providerErr != nil {
 		status, safe := imageProviderFailureState(providerErr)
@@ -158,7 +180,28 @@ func (e *ImageExecutor) prepare(ctx context.Context, leased LeasedItem) (prepare
 		} else if err != nil {
 			return err
 		}
-		prompt, err := CompileImagePrompt(snapshot, slot, ImageTurnInput{Operation: models.AIExecutionGenerate, ThreadPublicID: thread.PublicID})
+		var turn models.AIImageTurn
+		turnErr := tx.Where("ai_image_thread_id = ? AND status = ?", thread.ID, models.AIImageTurnQueued).Order("sequence ASC").First(&turn).Error
+		if errors.Is(turnErr, gorm.ErrRecordNotFound) {
+			turn = models.AIImageTurn{PublicID: uuid.NewString(), AIImageThreadID: thread.ID, Sequence: 1, Operation: models.AIExecutionGenerate, RequestedCandidateCount: 1, Status: models.AIImageTurnQueued, ActorID: job.CreatedByID, ActorSnapshotJSON: job.CreatedBySnapshotJSON}
+		} else if turnErr != nil {
+			return turnErr
+		}
+		parentPublicID, parentKey := "", ""
+		if turn.ParentResultID != nil {
+			var parent models.AIImageResult
+			if err := tx.First(&parent, *turn.ParentResultID).Error; err != nil {
+				return err
+			}
+			parentPublicID, parentKey = parent.PublicID, parent.ObjectKey
+		}
+		oneCandidate := 1
+		prompt, err := CompileImagePrompt(snapshot, slot, ImageTurnInput{Operation: turn.Operation, ThreadPublicID: thread.PublicID, ParentThreadPublicID: func() string {
+			if turn.ParentResultID != nil {
+				return thread.PublicID
+			}
+			return ""
+		}(), ParentResultPublicID: parentPublicID, UserInstruction: turn.UserInstruction, Size: turn.Size, Quality: turn.Quality, Style: turn.Style, CandidateCount: &oneCandidate})
 		if err != nil {
 			return invalidExecutionInput("image prompt compilation failed")
 		}
@@ -166,13 +209,17 @@ func (e *ImageExecutor) prepare(ctx context.Context, leased LeasedItem) (prepare
 		if err != nil {
 			return err
 		}
-		turn := models.AIImageTurn{PublicID: uuid.NewString(), AIImageThreadID: thread.ID, Sequence: 1, Operation: models.AIExecutionGenerate, RequestedCandidateCount: 1, Size: prompt.ToolConfig.Size, Quality: prompt.ToolConfig.Quality, Style: imagePromptStyle(prompt), CompiledRequestMetadataJSON: metadata, Status: models.AIImageTurnQueued, ActorID: job.CreatedByID}
-		if err := tx.Create(&turn).Error; err != nil {
+		turn.Size, turn.Quality, turn.Style, turn.CompiledRequestMetadataJSON = prompt.ToolConfig.Size, prompt.ToolConfig.Quality, imagePromptStyle(prompt), metadata
+		if turn.ID == 0 {
+			if err := tx.Create(&turn).Error; err != nil {
+				return err
+			}
+		} else if err := tx.Model(&turn).Updates(map[string]any{"size": turn.Size, "quality": turn.Quality, "style": turn.Style, "compiled_request_metadata_json": metadata}).Error; err != nil {
 			return err
 		}
 		now := e.clock.Now()
 		requestConfig, _ := json.Marshal(map[string]any{"model": e.model, "size": prompt.ToolConfig.Size, "quality": prompt.ToolConfig.Quality, "store": false})
-		execution := models.AIExecution{PublicID: uuid.NewString(), AIJobItemID: item.ID, AIImageTurnID: &turn.ID, Operation: models.AIExecutionGenerate, Status: models.AIExecutionPreparing, AttemptNumber: item.AttemptCount, L0PolicyVersion: prompt.LayerVersions.L0, L1ProductContextVersion: prompt.LayerVersions.L1, L2TemplateVersionPublicID: prompt.LayerVersions.L2, L3ContentSlotPublicID: prompt.LayerVersions.L3, NormalizedInputJSON: prompt.NormalizedInputJSON, OrderedInputListJSON: prompt.OrderedInputListJSON, CompiledPrompt: prompt.Instructions, CompiledPromptSHA256: prompt.SHA256, UserInstruction: snapshot.UserPreference, Model: e.model, RequestedModel: e.model, APIMode: "responses", RequestConfigJSON: requestConfig, WorkerID: leased.LeaseOwner, LeaseExpiresAt: item.LeaseExpiresAt, StartedAt: &now}
+		execution := models.AIExecution{PublicID: uuid.NewString(), AIJobItemID: item.ID, AIImageTurnID: &turn.ID, Operation: turn.Operation, Status: models.AIExecutionPreparing, AttemptNumber: item.AttemptCount, L0PolicyVersion: prompt.LayerVersions.L0, L1ProductContextVersion: prompt.LayerVersions.L1, L2TemplateVersionPublicID: prompt.LayerVersions.L2, L3ContentSlotPublicID: prompt.LayerVersions.L3, NormalizedInputJSON: prompt.NormalizedInputJSON, OrderedInputListJSON: prompt.OrderedInputListJSON, CompiledPrompt: prompt.Instructions, CompiledPromptSHA256: prompt.SHA256, UserInstruction: turn.UserInstruction, Model: e.model, RequestedModel: e.model, APIMode: "responses", RequestConfigJSON: requestConfig, WorkerID: leased.LeaseOwner, LeaseExpiresAt: item.LeaseExpiresAt, StartedAt: &now}
 		if err := tx.Create(&execution).Error; err != nil {
 			return err
 		}
@@ -181,7 +228,7 @@ func (e *ImageExecutor) prepare(ctx context.Context, leased LeasedItem) (prepare
 			return invalidExecutionInput("image item requires selected assets")
 		}
 		var assets []models.Asset
-		if err := tx.Where("public_id IN ? AND sk_uid = ? AND review_status = ?", ids, job.SKUID, "approved").Find(&assets).Error; err != nil || len(assets) != len(ids) {
+		if err := tx.Where("public_id IN ? AND sk_uid = ? AND review_status = ? AND origin_type <> ?", ids, job.SKUID, "approved", "ai_generated").Find(&assets).Error; err != nil || len(assets) != len(ids) {
 			return invalidExecutionInput("selected source asset is unavailable")
 		}
 		byID := make(map[string]models.Asset, len(assets))
@@ -196,7 +243,21 @@ func (e *ImageExecutor) prepare(ctx context.Context, leased LeasedItem) (prepare
 			}
 			keys = append(keys, asset.ObjectKey)
 		}
-		result = preparedImageExecution{execution: execution, turn: turn, prompt: prompt, job: job, item: item, sourceKeys: keys}
+		for _, reference := range snapshot.StructureReferences {
+			var stored models.ModelFamilyReferenceAsset
+			if err := tx.Where("public_id = ? AND derivative_sha256 = ?", reference.PublicID, reference.DerivativeSHA256).First(&stored).Error; err != nil || stored.DerivativeObjectKey == "" {
+				return invalidExecutionInput("frozen structure reference is unavailable")
+			}
+			keys = append(keys, stored.DerivativeObjectKey)
+		}
+		for _, reference := range snapshot.StyleReferences {
+			var stored models.StyleReferenceGrant
+			if err := tx.Where("public_id = ? AND derivative_sha256 = ?", reference.PublicID, reference.DerivativeSHA256).First(&stored).Error; err != nil || stored.DerivativeObjectKey == "" {
+				return invalidExecutionInput("frozen style reference is unavailable")
+			}
+			keys = append(keys, stored.DerivativeObjectKey)
+		}
+		result = preparedImageExecution{execution: execution, turn: turn, prompt: prompt, job: job, item: item, sourceKeys: keys, parentKey: parentKey, maskKey: turn.MaskObjectKey}
 		return nil
 	})
 	return result, err
@@ -258,7 +319,7 @@ func (e *ImageExecutor) persistResult(ctx context.Context, p preparedImageExecut
 		if execution.Status != models.AIExecutionCallingOpenAI {
 			return ErrExecutionNeedsAttention
 		}
-		result := models.AIImageResult{PublicID: uuid.NewString(), AIImageTurnID: p.turn.ID, AIExecutionID: execution.ID, CandidateIndex: 1, ObjectKey: stored.ObjectKey, MIMEType: stored.MIMEType, Width: stored.Width, Height: stored.Height, ByteCount: stored.ByteCount, SHA256: stored.SHA256, ProviderImageCallID: response.ImageCallID}
+		result := models.AIImageResult{PublicID: uuid.NewString(), AIImageTurnID: p.turn.ID, AIExecutionID: execution.ID, ParentResultID: p.turn.ParentResultID, CandidateIndex: 1, ObjectKey: stored.ObjectKey, MIMEType: stored.MIMEType, Width: stored.Width, Height: stored.Height, ByteCount: stored.ByteCount, SHA256: stored.SHA256, ProviderImageCallID: response.ImageCallID}
 		if err := tx.Create(&result).Error; err != nil {
 			return err
 		}

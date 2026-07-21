@@ -746,6 +746,7 @@ func (s *Server) completeAssetUpload(c *gin.Context) {
 		Height:         metadata.Height,
 		ByteCount:      metadata.ByteCount,
 		SHA256:         metadata.SHA256,
+		OriginType:     "captured",
 		CapturedAt:     capturedAt,
 	}
 	asset, created, err := s.createCompletedAsset(asset)
@@ -992,6 +993,8 @@ func (s *Server) listAssetsForReview(c *gin.Context) {
 			SOPViewKey:       asset.SOPView.PresetKey,
 			SOPViewName:      localizedViewName{ZHCN: asset.SOPView.NameZH, EN: asset.SOPView.NameEN},
 			PhotoSessionCode: asset.PhotoSession.Code,
+			OriginType:       asset.OriginType,
+			SourceSummary:    safeAssetSourceSummary(asset.ProvenanceJSON),
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"data": items})
@@ -1007,6 +1010,8 @@ type assetReviewItem struct {
 	SOPViewKey       string            `json:"sop_view_key"`
 	SOPViewName      localizedViewName `json:"sop_view_name"`
 	PhotoSessionCode string            `json:"photo_session_code"`
+	OriginType       string            `json:"origin_type"`
+	SourceSummary    map[string]string `json:"source_summary"`
 }
 
 type reviewAssetRequest struct {

@@ -21,14 +21,15 @@ type openAIModelSelectionRequest struct {
 }
 
 type createAIJobRequest struct {
-	SKUID                   string                           `json:"sku_id"`
-	TemplateVersionPublicID string                           `json:"template_version_id"`
-	SelectedSlotKeys        []string                         `json:"selected_slot_keys"`
-	SelectedAssetIDs        *[]string                        `json:"selected_asset_ids"`
-	Locale                  string                           `json:"locale"`
-	UserPreference          string                           `json:"user_preference"`
-	GenerationOverrides     map[string]ai.GenerationOverride `json:"generation_overrides"`
-	ImageCanvases           []ai.ImageCanvas                 `json:"image_canvases"`
+	SKUID                     string                           `json:"sku_id"`
+	TemplateVersionPublicID   string                           `json:"template_version_id"`
+	SelectedSlotKeys          []string                         `json:"selected_slot_keys"`
+	SelectedAssetIDs          *[]string                        `json:"selected_asset_ids"`
+	SelectedStyleReferenceIDs []string                         `json:"selected_style_reference_ids"`
+	Locale                    string                           `json:"locale"`
+	UserPreference            string                           `json:"user_preference"`
+	GenerationOverrides       map[string]ai.GenerationOverride `json:"generation_overrides"`
+	ImageCanvases             []ai.ImageCanvas                 `json:"image_canvases"`
 }
 
 type editAITextResultRequest struct {

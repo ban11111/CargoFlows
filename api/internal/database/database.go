@@ -107,6 +107,8 @@ func migrateSchema(db *gorm.DB) error {
 		&models.VariantIdentityManifestVersion{},
 		&models.VariantDifferenceRegion{},
 		&models.VariantDifferenceRegionEvidenceAsset{},
+		&models.StyleReferenceGrant{},
+		&models.ModelFamilyReferenceAsset{},
 		&models.InventoryAdjustment{},
 		&models.CaptureSOP{},
 		&models.SOPVersion{},

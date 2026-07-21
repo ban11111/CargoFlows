@@ -1,16 +1,23 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"image/png"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"cargoflows/api/internal/ai"
 	"cargoflows/api/internal/models"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 func (s *Server) getOpenAISetting(c *gin.Context) {
@@ -119,7 +126,8 @@ func (s *Server) createAIJob(c *gin.Context) {
 	value, err := s.ai.Jobs.Create(c.Request.Context(), ai.CreateJobInput{
 		SKUID: req.SKUID, TemplateVersionPublicID: req.TemplateVersionPublicID,
 		SelectedSlotKeys: req.SelectedSlotKeys, SelectedAssetIDs: *req.SelectedAssetIDs,
-		Locale: req.Locale, CreatedByID: currentUser(c).ID,
+		SelectedStyleReferenceIDs: req.SelectedStyleReferenceIDs,
+		Locale:                    req.Locale, CreatedByID: currentUser(c).ID,
 		IdempotencyKey: c.GetHeader("Idempotency-Key"), UserPreference: req.UserPreference, GenerationOverrides: req.GenerationOverrides,
 		ImageCanvases: req.ImageCanvases,
 	})
@@ -197,6 +205,178 @@ func (s *Server) listAIImageResults(c *gin.Context) {
 		values[index].MediaURL = "/api/v1/ai-jobs/" + c.Param("job_id") + "/image-results/" + values[index].PublicID + "/media"
 	}
 	c.JSON(http.StatusOK, gin.H{"data": values})
+}
+
+func (s *Server) listAIImageThreads(c *gin.Context) {
+	if !requireAIUUIDParam(c, "job_id") {
+		return
+	}
+	values, err := s.ai.ImageResults.ListThreads(c.Request.Context(), c.Param("job_id"))
+	if err != nil {
+		respondAIError(c, err)
+		return
+	}
+	if values == nil {
+		values = []ai.ImageThreadDocument{}
+	}
+	c.JSON(http.StatusOK, gin.H{"data": values})
+}
+
+func (s *Server) createAIImageTurn(c *gin.Context) {
+	if !requireAIUUIDParam(c, "job_id") || !requireAIUUIDParam(c, "item_id") {
+		return
+	}
+	operation, parent, instruction := "", "", ""
+	var mask *ai.ImageTurnMask
+	if strings.HasPrefix(c.ContentType(), "multipart/form-data") {
+		if err := c.Request.ParseMultipartForm(20 << 20); err != nil {
+			respondAIBadRequest(c, errors.New("invalid image edit form"))
+			return
+		}
+		operation, parent, instruction = c.PostForm("operation"), c.PostForm("parent_result_id"), c.PostForm("user_instruction")
+		file, header, err := c.Request.FormFile("mask")
+		if err == nil {
+			defer file.Close()
+			if header.Size <= 0 || header.Size > 10<<20 {
+				respondAIBadRequest(c, errors.New("mask must be a PNG smaller than 10 MB"))
+				return
+			}
+			value, readErr := io.ReadAll(io.LimitReader(file, (10<<20)+1))
+			if readErr != nil || len(value) > 10<<20 {
+				respondAIBadRequest(c, errors.New("mask could not be read"))
+				return
+			}
+			decoded, decodeErr := png.Decode(bytes.NewReader(value))
+			if decodeErr != nil {
+				respondAIBadRequest(c, errors.New("mask must be a valid PNG"))
+				return
+			}
+			bounds := decoded.Bounds()
+			editable, protected := false, false
+			for y := bounds.Min.Y; y < bounds.Max.Y && (!editable || !protected); y++ {
+				for x := bounds.Min.X; x < bounds.Max.X; x++ {
+					_, _, _, alpha := decoded.At(x, y).RGBA()
+					editable = editable || alpha < 0xffff
+					protected = protected || alpha > 0
+				}
+			}
+			if !editable || !protected {
+				respondAIBadRequest(c, errors.New("mask must contain both a marked edit region and a protected region"))
+				return
+			}
+			validated, validErr := (&ai.ImageStorage{}).Validate(ai.ImageValidationRequest{Bytes: value, MaxBytes: 10 << 20, MaxPixels: 20_000_000})
+			if validErr != nil {
+				respondAIBadRequest(c, errors.New("mask dimensions or content are invalid"))
+				return
+			}
+			key := "ai-masks/" + uuid.NewString() + "-" + validated.SHA256 + ".png"
+			store, ok := s.storage.(interface {
+				StoreAIMask(context.Context, string, []byte) error
+			})
+			if !ok || store.StoreAIMask(c.Request.Context(), key, value) != nil {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"code": "object_storage_unavailable", "message": "mask could not be stored"})
+				return
+			}
+			mask = &ai.ImageTurnMask{ObjectKey: key, SHA256: validated.SHA256, Width: bounds.Dx(), Height: bounds.Dy(), ByteCount: int64(len(value))}
+		}
+	} else {
+		var req struct {
+			Operation       string `json:"operation"`
+			ParentResultID  string `json:"parent_result_id"`
+			UserInstruction string `json:"user_instruction"`
+		}
+		if err := decodeJSONStrict(c, &req); err != nil {
+			respondAIBadRequest(c, err)
+			return
+		}
+		operation, parent, instruction = req.Operation, req.ParentResultID, req.UserInstruction
+	}
+	value, err := s.ai.ImageResults.CreateTurn(c.Request.Context(), ai.CreateImageTurnInput{JobPublicID: c.Param("job_id"), ItemPublicID: c.Param("item_id"), Operation: operation, ParentResultPublicID: parent, UserInstruction: instruction, ActorID: currentUser(c).ID, Mask: mask})
+	if err != nil {
+		if mask != nil {
+			_ = s.storage.deleteSource(context.WithoutCancel(c.Request.Context()), mask.ObjectKey)
+		}
+		respondAIError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, value)
+}
+
+func (s *Server) selectAIImageResult(c *gin.Context) {
+	if !requireAIUUIDParam(c, "job_id") || !requireAIUUIDParam(c, "item_id") || !requireAIUUIDParam(c, "result_id") {
+		return
+	}
+	if err := s.ai.ImageResults.Select(c.Request.Context(), c.Param("job_id"), c.Param("item_id"), c.Param("result_id"), currentUser(c).ID); err != nil {
+		respondAIError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"selected_result_id": c.Param("result_id")})
+}
+
+func (s *Server) submitAIImageResultToAssets(c *gin.Context) {
+	if !requireAIUUIDParam(c, "job_id") || !requireAIUUIDParam(c, "item_id") || !requireAIUUIDParam(c, "result_id") {
+		return
+	}
+	var row struct {
+		ResultID, SelectedResultID, SKUID, JobID, ItemID uint
+		ObjectKey, MIMEType, SHA256                      string
+		Width, Height                                    int
+		ByteCount                                        int64
+		CreatedAt                                        time.Time
+		Model, APIMode, RequestID                        string
+	}
+	err := s.db.Table("ai_image_results AS result").Select("result.id AS result_id,thread.selected_result_id,job.sk_uid,item.ai_job_id AS job_id,item.id AS item_id,result.object_key,result.mime_type,result.sha256,result.width,result.height,result.byte_count,result.created_at,execution.model,execution.api_mode,execution.open_ai_request_id AS request_id").Joins("JOIN ai_image_turns AS turn ON turn.id=result.ai_image_turn_id").Joins("JOIN ai_image_threads AS thread ON thread.id=turn.ai_image_thread_id").Joins("JOIN ai_job_items AS item ON item.id=thread.ai_job_item_id").Joins("JOIN ai_jobs AS job ON job.id=item.ai_job_id").Joins("JOIN ai_executions AS execution ON execution.id=result.ai_execution_id").Where("job.public_id=? AND item.public_id=? AND result.public_id=?", c.Param("job_id"), c.Param("item_id"), c.Param("result_id")).Scan(&row).Error
+	if err != nil || row.ResultID == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "image result not found"})
+		return
+	}
+	if row.SelectedResultID != row.ResultID {
+		c.JSON(http.StatusConflict, gin.H{"code": "image_result_not_selected", "message": "select this image before submitting it to the asset library"})
+		return
+	}
+	var existing models.Asset
+	if err := s.db.Where("source_ai_image_result_id=?", row.ResultID).First(&existing).Error; err == nil {
+		c.JSON(http.StatusOK, gin.H{"public_id": existing.PublicID, "review_status": existing.ReviewStatus, "origin_type": existing.OriginType})
+		return
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		respondAIError(c, err)
+		return
+	}
+	ext := "png"
+	if row.MIMEType == "image/jpeg" {
+		ext = "jpg"
+	} else if row.MIMEType == "image/webp" {
+		ext = "webp"
+	}
+	key := fmt.Sprintf("ai-generated-assets/%s/%s.%s", c.Param("job_id"), c.Param("result_id"), ext)
+	promoter, ok := s.storage.(interface {
+		PromoteGeneratedAsset(context.Context, string, string, string) error
+	})
+	if !ok || promoter.PromoteGeneratedAsset(c.Request.Context(), row.ObjectKey, key, row.MIMEType) != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"code": "object_storage_unavailable", "message": "generated image could not be copied to the asset library"})
+		return
+	}
+	provenance, _ := json.Marshal(map[string]any{"source": "ai_generated", "job_id": c.Param("job_id"), "job_item_id": c.Param("item_id"), "image_result_id": c.Param("result_id"), "model": row.Model, "api_mode": row.APIMode, "provider_request_id": row.RequestID, "submitted_by": currentUser(c).PublicID})
+	asset := models.Asset{PublicID: uuid.NewString(), SKUID: row.SKUID, ObjectKey: key, OriginalURL: s.storage.assetURL(key), ReviewStatus: "pending", MIMEType: row.MIMEType, Width: row.Width, Height: row.Height, ByteCount: row.ByteCount, SHA256: row.SHA256, OriginType: "ai_generated", SourceAIImageResultID: &row.ResultID, ProvenanceJSON: provenance, CapturedAt: row.CreatedAt}
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&asset).Error; err != nil {
+			return err
+		}
+		actor := currentUser(c).ID
+		metadata, _ := json.Marshal(map[string]any{"asset_id": asset.PublicID, "image_result_id": c.Param("result_id"), "review_status": "pending"})
+		return tx.Create(&models.AIAuditEvent{PublicID: uuid.NewString(), EventType: "ai_image.submitted_to_assets", EntityType: "asset", EntityPublicID: asset.PublicID, ActorID: &actor, AIJobID: &row.JobID, AIJobItemID: &row.ItemID, MetadataJSON: metadata}).Error
+	})
+	if err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			if s.db.Where("source_ai_image_result_id=?", row.ResultID).First(&existing).Error == nil {
+				c.JSON(http.StatusOK, gin.H{"public_id": existing.PublicID, "review_status": existing.ReviewStatus, "origin_type": existing.OriginType})
+				return
+			}
+		}
+		respondAIError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"public_id": asset.PublicID, "review_status": asset.ReviewStatus, "origin_type": asset.OriginType})
 }
 
 func (s *Server) aiImageResultMedia(c *gin.Context) {
@@ -509,6 +689,12 @@ func respondAIError(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
 	case errors.Is(err, ai.ErrTextResultNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
+	case errors.Is(err, ai.ErrImageResultNotFound), errors.Is(err, ai.ErrImageThreadNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
+	case errors.Is(err, ai.ErrImageTurnInvalid):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "image_turn_invalid", "message": err.Error()})
+	case errors.Is(err, ai.ErrImageTurnConflict), errors.Is(err, ai.ErrImageResultNotSelected):
+		c.JSON(http.StatusConflict, gin.H{"code": "lifecycle_conflict", "message": err.Error()})
 	case errors.Is(err, ai.ErrTextResultInvalid):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "text_result_invalid", "message": err.Error()})
 	case errors.Is(err, ai.ErrTextResultLifecycleConflict), errors.Is(err, ai.ErrTextResultApprovalRequired), errors.Is(err, ai.ErrTextResultNotEffective):
@@ -521,7 +707,7 @@ func respondAIError(c *gin.Context, err error) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "ai_template_configuration_invalid", "message": "Published AI template configuration is invalid"})
 	case errors.Is(err, ai.ErrIdempotencyConflict):
 		c.JSON(http.StatusConflict, gin.H{"code": "idempotency_conflict", "message": err.Error()})
-	case errors.Is(err, ai.ErrAssetNotEligible), errors.Is(err, ai.ErrPublishedSOPNotFound):
+	case errors.Is(err, ai.ErrAssetNotEligible), errors.Is(err, ai.ErrStyleReferenceNotEligible), errors.Is(err, ai.ErrPublishedSOPNotFound):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "job_input_not_eligible", "message": err.Error()})
 	case errors.Is(err, ai.ErrTemplateVersionImmutable), errors.Is(err, ai.ErrTemplateDraftExists), errors.Is(err, ai.ErrTemplateSourceNotPublished):
 		c.JSON(http.StatusConflict, gin.H{"code": "lifecycle_conflict", "message": err.Error()})

@@ -27,6 +27,7 @@ type ImageRequest struct {
 	APIMode  string
 	Prompt   CompiledImagePrompt
 	Inputs   []ImageInput
+	Mask     *ImageInput
 	Metadata map[string]string
 }
 

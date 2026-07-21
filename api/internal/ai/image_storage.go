@@ -126,6 +126,27 @@ func (s *ImageStorage) ReadSource(ctx context.Context, objectKey string) (ImageI
 	return ImageInput{MIMEType: validated.MIMEType, Bytes: input.Bytes}, nil
 }
 
+func (s *ImageStorage) ReadGenerated(ctx context.Context, objectKey string) (ImageInput, error) {
+	if s == nil || s.objects == nil || !safeGeneratedObjectKey(objectKey) {
+		return ImageInput{}, ErrGeneratedImageReference
+	}
+	reader, ok := s.objects.(interface {
+		ReadGenerated(context.Context, string) (ImageInput, error)
+	})
+	if !ok {
+		return ImageInput{}, ErrImageStorageUnavailable
+	}
+	input, err := reader.ReadGenerated(ctx, objectKey)
+	if err != nil {
+		return ImageInput{}, ErrImageStorageUnavailable
+	}
+	validated, err := s.Validate(ImageValidationRequest{Bytes: input.Bytes})
+	if err != nil {
+		return ImageInput{}, err
+	}
+	return ImageInput{MIMEType: validated.MIMEType, Bytes: input.Bytes}, nil
+}
+
 func (s *ImageStorage) GeneratedReadURL(ctx context.Context, objectKey string) (string, error) {
 	if s == nil || s.objects == nil || !safeGeneratedObjectKey(objectKey) {
 		return "", ErrGeneratedImageReference

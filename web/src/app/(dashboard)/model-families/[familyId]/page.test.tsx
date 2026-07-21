@@ -56,4 +56,33 @@ describe("model family detail", () => {
     expect(await screen.findByRole("button", { name: "编辑资料" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "归档型号组" })).toBeInTheDocument();
   });
+
+  it("authorizes only an explicit same-family structural reference", async () => {
+    const assetID = "44444444-4444-4444-8444-444444444444";
+    let submitted: FormData | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/auth/me")) return response({ role: "admin" });
+      if (url.endsWith("/skus")) return response({ data: [sku] });
+      if (url.includes("/variant-identity")) return response({ code: "not_found" }, 404);
+      if (url.includes("/assets/review?status=approved")) return response({ data: [{ public_id: assetID, sku_id: skuID, media_url: "/media", origin_type: "captured" }] });
+      if (url.endsWith("/reference-assets") && init?.method === "POST") {
+        submitted = init.body as FormData;
+        return response({ public_id: "55555555-5555-4555-8555-555555555555" }, 201);
+      }
+      if (url.endsWith("/reference-assets")) return response({ data: [] });
+      return response(family);
+    });
+    render(<ModelFamilyDetailPage />, { wrapper: Providers });
+
+    const assetSelect = await screen.findByLabelText("选择同型号组素材");
+    fireEvent.change(assetSelect, { target: { value: assetID } });
+    fireEvent.change(screen.getByLabelText(/禁止继承区域蒙版/), { target: { files: [new File(["png"], "mask.png", { type: "image/png" })] } });
+    fireEvent.click(screen.getByRole("button", { name: "生成派生图并授权" }));
+
+    await waitFor(() => expect(submitted).toBeDefined());
+    expect(submitted?.get("asset_id")).toBe(assetID);
+    expect(submitted?.get("role")).toBe("geometry_only");
+    expect(submitted?.get("forbidden_identity_mask")).toBeInstanceOf(File);
+  });
 });

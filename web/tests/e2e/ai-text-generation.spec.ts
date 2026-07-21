@@ -34,7 +34,7 @@ test("real API and worker complete fake-provider title review and application", 
   await page.locator("#slots\\.0-en").fill("Product title");
   await page.locator("#slots\\.0-prompt").fill("生成准确、自然并适合搜索的商品标题。不得虚构商品属性。");
   await page.getByRole("button", { name: "创建草稿" }).click();
-  await expect(page.getByRole("button", { name: "草稿已创建" })).toBeDisabled();
+  await expect(page.getByText("V1 · draft")).toBeVisible();
   await page.getByRole("button", { name: "运行发布校验" }).click();
   await expect(page.getByText("校验通过，可以发布。")).toBeVisible();
   await page.getByRole("button", { name: "发布版本" }).click();

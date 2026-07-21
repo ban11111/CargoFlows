@@ -309,6 +309,12 @@ type AIImageTurn struct {
 	Quality                     string               `gorm:"size:32;not null;default:medium" json:"quality"`
 	Style                       string               `gorm:"size:64;not null;default:default" json:"style"`
 	UserInstruction             string               `gorm:"type:text" json:"user_instruction"`
+	ActorSnapshotJSON           []byte               `gorm:"type:json;not null" json:"-"`
+	MaskObjectKey               string               `gorm:"size:768" json:"-"`
+	MaskSHA256                  string               `gorm:"size:64;index" json:"-"`
+	MaskWidth                   int                  `gorm:"not null;default:0" json:"-"`
+	MaskHeight                  int                  `gorm:"not null;default:0" json:"-"`
+	MaskByteCount               int64                `gorm:"not null;default:0" json:"-"`
 	CompiledRequestMetadataJSON []byte               `gorm:"type:json;not null" json:"-"`
 	Status                      AIImageTurnStatus    `gorm:"size:32;index;not null;default:queued" json:"status"`
 	ActorID                     uint                 `gorm:"index;not null" json:"-"`
@@ -325,6 +331,9 @@ type AIImageTurn struct {
 func (turn *AIImageTurn) BeforeCreate(db *gorm.DB) error {
 	if len(turn.CompiledRequestMetadataJSON) == 0 {
 		turn.CompiledRequestMetadataJSON = []byte(`{}`)
+	}
+	if len(turn.ActorSnapshotJSON) == 0 {
+		turn.ActorSnapshotJSON = []byte(`{}`)
 	}
 	if turn.Status == "" {
 		turn.Status = AIImageTurnQueued

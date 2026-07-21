@@ -23,6 +23,7 @@ type Override = components["schemas"]["AIJobGenerationOverride"];
 type SKU = { public_id: string; code: string; status: string; product: { name: string } };
 type AssetCategory = components["schemas"]["AssetReviewCategory"];
 type ReviewAsset = AssetCategory["skus"][number]["assets"][number];
+type StyleReference = { public_id: string; source_sku_id: string; description_zh: string; description_en: string; derivative_sha256: string; status: string };
 type CanvasDraft = { key: string; slotKeys: string[] };
 type OptionEntry = { key: string; slot: Slot; requirements?: Slot[]; canvas?: CanvasDraft };
 
@@ -68,6 +69,7 @@ export default function NewAIJobPage() {
   const [locale, setLocale] = useState("zh-CN");
   const [selectedSlots, setSelectedSlots] = useState<string[]>([]);
   const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
+  const [selectedStyleReferences, setSelectedStyleReferences] = useState<string[]>([]);
   const [overrides, setOverrides] = useState<Record<string, Override>>({});
   const [customCanvases, setCustomCanvases] = useState(false);
   const [canvases, setCanvases] = useState<CanvasDraft[]>([]);
@@ -79,6 +81,7 @@ export default function NewAIJobPage() {
   const skusQuery = useQuery({ queryKey: ["skus", "ai-job-options"], queryFn: () => apiRequest<{ data: SKU[] }>("/skus") });
   const templatesQuery = useQuery({ queryKey: ["ai-content-templates"], queryFn: () => apiRequest<{ data: Template[] }>("/ai-content-templates") });
   const assetsQuery = useQuery({ queryKey: ["assets", "review", "hierarchy", "approved"], queryFn: () => apiRequest<{ data: AssetCategory[] }>("/assets/review/hierarchy?status=approved") });
+  const stylesQuery = useQuery({ queryKey: ["style-reference-grants"], queryFn: () => apiRequest<{ data: StyleReference[] }>("/style-reference-grants") });
 
   const versions = useMemo(() => (templatesQuery.data?.data ?? []).flatMap((template) => template.versions.filter((version) => version.status === "published").map((version) => ({ template, version }))), [templatesQuery.data]);
   const selection = versions.find(({ version }) => version.public_id === versionID);
@@ -94,8 +97,9 @@ export default function NewAIJobPage() {
     ? [...chosenTextSlots.map((slot) => ({ key: slot.slot_key, slot })), ...canvasEntries.filter(({ requirements }) => requirements.length > 0).map(({ canvas, requirements }) => ({ key: canvas.key, slot: requirements[0], requirements, canvas }))]
     : chosenSlots.map((slot) => ({ key: slot.slot_key, slot }));
   const approvedForSKU = useMemo(() => (assetsQuery.data?.data ?? []).flatMap((category) => category.skus).find((sku) => sku.public_id === skuID)?.assets.filter((asset) => asset.review_status === "approved") ?? [], [assetsQuery.data, skuID]);
-  const visualAssets = approvedForSKU.filter((asset) => asset.sop_view_key !== "supplemental_info");
-  const informationAssets = approvedForSKU.filter((asset) => asset.sop_view_key === "supplemental_info");
+  const identityAssets = approvedForSKU.filter((asset) => (asset as ReviewAsset & { origin_type?: string }).origin_type !== "ai_generated");
+  const visualAssets = identityAssets.filter((asset) => asset.sop_view_key !== "supplemental_info");
+  const informationAssets = identityAssets.filter((asset) => asset.sop_view_key === "supplemental_info");
   const selectedVisualAssets = visualAssets.filter((asset) => selectedAssets.includes(asset.public_id));
   const selectedAssetViews = useMemo(() => new Set(approvedForSKU.filter((asset) => asset.sop_view_key !== "supplemental_info" && selectedAssets.includes(asset.public_id)).map((asset) => asset.sop_view_key)), [approvedForSKU, selectedAssets]);
   const assetBlockages = chosenImageSlots.map((slot) => ({ slot, missing: list<string>((slot.constraints as Record<string, unknown>).required_views).filter((view) => !selectedAssetViews.has(view)) })).filter(({ missing }) => selectedVisualAssets.length === 0 || missing.length > 0);
@@ -114,6 +118,7 @@ export default function NewAIJobPage() {
         template_version_id: versionID,
         selected_slot_keys: selectedSlots,
         selected_asset_ids: selectedAssets,
+        selected_style_reference_ids: selectedStyleReferences,
         locale,
         ...(allAllowPreference && preference.trim() ? { user_preference: preference.trim() } : {}),
         ...(Object.keys(generationOverrides).length ? { generation_overrides: generationOverrides } : {}),
@@ -127,13 +132,15 @@ export default function NewAIJobPage() {
 
   const steps = [t("aiJobStepSetup"), t("aiJobStepSlots"), t("aiJobStepAssets"), t("aiJobStepOptions"), t("aiJobStepConfirm")];
   const stepTitles = [t("aiJobStepSetup"), t("selectOutputSlots"), t("reviewApprovedAssets"), t("generationOptions"), t("confirmAIJob")];
+	// Style grants are optional; a temporary failure must not block ordinary
+	// same-SKU text or image task creation.
   const allLoaded = skusQuery.isSuccess && templatesQuery.isSuccess && assetsQuery.isSuccess;
   const loadFailed = skusQuery.isError || templatesQuery.isError || assetsQuery.isError;
 
   function selectSKU(next: string) {
     setSkuID(next);
     const assets = (assetsQuery.data?.data ?? []).flatMap((category) => category.skus).find((sku) => sku.public_id === next)?.assets ?? [];
-    setSelectedAssets(assets.filter((asset) => asset.review_status === "approved").map((asset) => asset.public_id));
+		setSelectedAssets(assets.filter((asset) => asset.review_status === "approved" && (asset as ReviewAsset & { origin_type?: string }).origin_type !== "ai_generated").map((asset) => asset.public_id));
   }
 
   function selectVersion(next: string) {
@@ -253,7 +260,7 @@ export default function NewAIJobPage() {
         </fieldset> : null}
       </div> : null}
 
-      {step === 3 ? <div className="space-y-4"><div className="rounded-lg border border-primary/20 bg-primary/5 p-4"><div className="flex items-center gap-2 font-medium"><ImageIcon className="h-4 w-4 text-primary" />{selectedAssets.length} {t("approvedImages")}</div><p className="mt-1 text-sm text-muted-foreground">{t("approvedAssetsHelp")}</p></div>{assetBlockages.length ? <div className="space-y-2 rounded-lg border border-warning/30 bg-warning/5 p-4" role="status"><p className="text-sm font-medium text-warning">{t("requiredAssetViewsMissing")}</p>{assetBlockages.map(({ slot, missing }) => <p className="text-xs text-muted-foreground" key={slot.public_id}>{zh ? slot.name_zh : slot.name_en}: {missing.length ? missing.join(", ") : t("imageAssetRequired")}</p>)}</div> : null}{approvedForSKU.length ? <div className="space-y-5"><AssetGroup assets={visualAssets} label={zh ? "商品外观图" : "Product visuals"} selected={selectedAssets} setSelected={setSelectedAssets} zh={zh} /><AssetGroup assets={informationAssets} help={zh ? "仅作为卖点、规格和说明书中的可见事实来源，不作为商品外观或风格参考。" : "Used only as a factual source for visible specifications, selling points, and manual content—not as an appearance or style reference."} label={zh ? "补充资料" : "Supplemental information"} selected={selectedAssets} setSelected={setSelectedAssets} zh={zh} /></div> : <p className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">{t("noApprovedAssets")}</p>}</div> : null}
+      {step === 3 ? <div className="space-y-4"><div className="rounded-lg border border-primary/20 bg-primary/5 p-4"><div className="flex items-center gap-2 font-medium"><ImageIcon className="h-4 w-4 text-primary" />{selectedAssets.length} {t("approvedImages")}</div><p className="mt-1 text-sm text-muted-foreground">{t("approvedAssetsHelp")}</p></div>{assetBlockages.length ? <div className="space-y-2 rounded-lg border border-warning/30 bg-warning/5 p-4" role="status"><p className="text-sm font-medium text-warning">{t("requiredAssetViewsMissing")}</p>{assetBlockages.map(({ slot, missing }) => <p className="text-xs text-muted-foreground" key={slot.public_id}>{zh ? slot.name_zh : slot.name_en}: {missing.length ? missing.join(", ") : t("imageAssetRequired")}</p>)}</div> : null}{identityAssets.length ? <div className="space-y-5"><AssetGroup assets={visualAssets} label={zh ? "目标 SKU 身份素材" : "Target SKU identity assets"} selected={selectedAssets} setSelected={setSelectedAssets} zh={zh} /><AssetGroup assets={informationAssets} help={zh ? "仅作为卖点、规格和说明书中的可见事实来源，不作为商品外观或风格参考。" : "Used only as a factual source for visible specifications, selling points, and manual content—not as an appearance or style reference."} label={zh ? "补充资料" : "Supplemental information"} selected={selectedAssets} setSelected={setSelectedAssets} zh={zh} /></div> : <p className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">{t("noApprovedAssets")}</p>}<fieldset className="space-y-3 rounded-lg border border-border p-4"><legend className="px-1 text-sm font-semibold">{zh ? "跨 SKU 风格参考（可选）" : "Cross-SKU style references (optional)"}</legend><p className="text-xs leading-5 text-muted-foreground">{zh ? "仅传递已审核派生图中的背景、灯光、构图和氛围；来源商品主体已被排除，不能作为身份或事实依据。" : "Only approved derivatives may transfer background, lighting, composition, and atmosphere. Source-product identity is excluded and never establishes facts."}</p><div className="grid gap-2 sm:grid-cols-2">{(stylesQuery.data?.data ?? []).map((style) => <label className={`flex min-h-14 cursor-pointer items-start gap-3 rounded-lg border p-3 ${selectedStyleReferences.includes(style.public_id) ? "border-primary bg-primary/5" : "border-border"}`} key={style.public_id}><input checked={selectedStyleReferences.includes(style.public_id)} className="mt-0.5 h-5 w-5" onChange={() => setSelectedStyleReferences((current) => current.includes(style.public_id) ? current.filter((id) => id !== style.public_id) : [...current, style.public_id])} type="checkbox" /><span className="text-sm">{zh ? style.description_zh : style.description_en}</span></label>)}</div>{stylesQuery.data?.data.length === 0 ? <p className="text-sm text-muted-foreground">{zh ? "暂无管理员审核通过的风格参考。" : "No administrator-approved style references yet."}</p> : null}</fieldset><section className="rounded-lg border border-border bg-muted/30 p-4"><h3 className="text-sm font-semibold">{zh ? "型号组结构参考" : "Model-family structure references"}</h3><p className="mt-1 text-xs leading-5 text-muted-foreground">{zh ? "系统会自动解析同型号组内已批准的灰度结构派生图；颜色、标签、接口、控制件、配件和包装始终禁止继承。" : "The server automatically resolves approved grayscale derivatives from the same model family. Color, labels, ports, controls, accessories, and packaging are always forbidden."}</p></section></div> : null}
 
       {step === 4 ? <div className="space-y-4">{optionEntries.map((entry, index) => {
         const { slot } = entry;

@@ -26,6 +26,7 @@ import (
 )
 
 type fakeAssetStorage struct {
+	mu            sync.Mutex
 	exists        bool
 	err           error
 	source        []byte
@@ -56,6 +57,8 @@ func (s *fakeAssetStorage) assetURL(objectKey string) string {
 }
 
 func (s *fakeAssetStorage) objectExists(_ context.Context, objectKey string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.objects != nil {
 		_, exists := s.objects[objectKey]
 		return exists, s.err
@@ -64,6 +67,8 @@ func (s *fakeAssetStorage) objectExists(_ context.Context, objectKey string) (bo
 }
 
 func (s *fakeAssetStorage) ReadSource(_ context.Context, objectKey string) (ai.ImageInput, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.err != nil {
 		return ai.ImageInput{}, s.err
 	}
@@ -81,6 +86,8 @@ func (s *fakeAssetStorage) ReadSource(_ context.Context, objectKey string) (ai.I
 }
 
 func (s *fakeAssetStorage) promoteSource(_ context.Context, temporaryKey, finalKey, _ string, value []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.err != nil {
 		return s.err
 	}
@@ -93,10 +100,49 @@ func (s *fakeAssetStorage) promoteSource(_ context.Context, temporaryKey, finalK
 }
 
 func (s *fakeAssetStorage) deleteSource(_ context.Context, objectKey string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.objects != nil {
 		delete(s.objects, objectKey)
 	}
 	return s.err
+}
+
+func (s *fakeAssetStorage) StoreReferenceDerivative(_ context.Context, objectKey, _ string, value []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.err != nil {
+		return s.err
+	}
+	if s.objects == nil {
+		s.objects = map[string][]byte{}
+	}
+	s.objects[objectKey] = append([]byte(nil), value...)
+	return nil
+}
+
+func (s *fakeAssetStorage) PromoteGeneratedAsset(_ context.Context, sourceKey, targetKey, _ string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.err != nil {
+		return s.err
+	}
+	value, ok := s.objects[sourceKey]
+	if !ok {
+		return errors.New("generated object not found")
+	}
+	s.objects[targetKey] = append([]byte(nil), value...)
+	return nil
+}
+
+func (s *fakeAssetStorage) ReadGenerated(_ context.Context, objectKey string) (ai.ImageInput, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, ok := s.objects[objectKey]
+	if !ok {
+		return ai.ImageInput{}, errors.New("generated object not found")
+	}
+	return ai.ImageInput{Bytes: append([]byte(nil), value...)}, nil
 }
 
 func assetImageFixture(t *testing.T, width, height int, encode func(*bytes.Buffer, image.Image) error) []byte {
