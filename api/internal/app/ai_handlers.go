@@ -79,6 +79,27 @@ func (s *Server) updateOpenAIModels(c *gin.Context) {
 	c.JSON(http.StatusOK, openAISettingDTOFromView(value))
 }
 
+func (s *Server) updateOpenAIWorkers(c *gin.Context) {
+	if s.ai.ProviderSettings == nil {
+		respondAIUnavailable(c)
+		return
+	}
+	var req openAIWorkerSettingRequest
+	if err := decodeJSONStrict(c, &req); err != nil || req.MaxWorkersPerJob == nil || req.MaxWorkersGlobal == nil {
+		if err == nil {
+			err = errors.New("max_workers_per_job and max_workers_global are required")
+		}
+		respondAIBadRequest(c, err)
+		return
+	}
+	value, err := s.ai.ProviderSettings.UpdateWorkers(c.Request.Context(), currentUser(c).ID, ai.WorkerConcurrency{MaxWorkersPerJob: *req.MaxWorkersPerJob, MaxWorkersGlobal: *req.MaxWorkersGlobal})
+	if err != nil {
+		respondAIError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, openAISettingDTOFromView(value))
+}
+
 func (s *Server) putOpenAISetting(c *gin.Context) {
 	if s.ai.ProviderSettings == nil {
 		respondAIUnavailable(c)
@@ -685,6 +706,8 @@ func respondAIError(c *gin.Context, err error) {
 		c.JSON(http.StatusBadGateway, gin.H{"code": "provider_models_unavailable", "message": "OpenAI model list is unavailable"})
 	case errors.Is(err, ai.ErrProviderModelInvalid):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "provider_model_invalid", "message": "Selected OpenAI model is not available to this credential"})
+	case errors.Is(err, ai.ErrWorkerSettingInvalid):
+		respondAIBadRequest(c, err)
 	case errors.Is(err, ai.ErrTemplateNotFound), errors.Is(err, ai.ErrTemplateVersionNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
 	case errors.Is(err, ai.ErrJobNotFound), errors.Is(err, ai.ErrSKUNotFound):

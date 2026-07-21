@@ -18,7 +18,10 @@ var (
 	ErrInvalidWorkerID = errors.New("worker ID is required")
 )
 
-const sqliteLeaseAttempts = 20
+const (
+	sqliteLeaseAttempts = 100
+	sqliteLeaseBackoff  = time.Millisecond
+)
 
 type LeasedItem struct {
 	PublicID    string
@@ -64,7 +67,20 @@ func (q *Queue) LeaseNext(ctx context.Context, workerID string, now time.Time, t
 	for attempt := 0; attempt < sqliteLeaseAttempts; attempt++ {
 		leased = nil
 		err := q.runTransaction(ctx, func(tx *gorm.DB) error {
-			item, found, err := selectLeaseCandidate(tx, now)
+			limits, err := loadWorkerConcurrencyForLease(tx)
+			if err != nil {
+				return err
+			}
+			var activeGlobal int64
+			if err := tx.Model(&models.AIJobItem{}).
+				Where("status = ? AND lease_expires_at IS NOT NULL AND lease_expires_at > ?", models.AIJobItemRunning, now).
+				Count(&activeGlobal).Error; err != nil {
+				return fmt.Errorf("count active AI workers: %w", err)
+			}
+			if activeGlobal >= int64(limits.MaxWorkersGlobal) {
+				return nil
+			}
+			item, found, err := selectLeaseCandidate(tx, now, limits.MaxWorkersPerJob)
 			if err != nil || !found {
 				return err
 			}
@@ -105,15 +121,47 @@ func (q *Queue) LeaseNext(ctx context.Context, workerID string, now time.Time, t
 		if !errors.Is(err, errLeaseContended) && !isSQLiteBusy(err) {
 			return nil, fmt.Errorf("lease AI job item: %w", err)
 		}
+		if isSQLiteBusy(err) {
+			timer := time.NewTimer(sqliteLeaseBackoff)
+			select {
+			case <-ctx.Done():
+				if !timer.Stop() {
+					<-timer.C
+				}
+				return nil, ctx.Err()
+			case <-timer.C:
+			}
+		}
 	}
 	return nil, fmt.Errorf("lease AI job item: %w", errLeaseContended)
 }
 
 var errLeaseContended = errors.New("AI job item lease contention")
 
-func selectLeaseCandidate(tx *gorm.DB, now time.Time) (models.AIJobItem, bool, error) {
-	query := tx.Where("status = ? OR (status = ? AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?)", models.AIJobItemQueued, models.AIJobItemRunning, now).
-		Order("created_at ASC, id ASC")
+func loadWorkerConcurrencyForLease(tx *gorm.DB) (WorkerConcurrency, error) {
+	row := models.AIWorkerSetting{ID: workerSettingID, MaxWorkersPerJob: DefaultMaxWorkersPerJob, MaxWorkersGlobal: DefaultMaxWorkersGlobal}
+	query := tx
+	if tx.Dialector.Name() == "mysql" {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	err := query.First(&row, workerSettingID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error; err != nil {
+			return WorkerConcurrency{}, fmt.Errorf("initialize AI worker setting: %w", err)
+		}
+		err = query.First(&row, workerSettingID).Error
+	}
+	if err != nil {
+		return WorkerConcurrency{}, fmt.Errorf("lock AI worker setting: %w", err)
+	}
+	return workerConcurrency(row), nil
+}
+
+func selectLeaseCandidate(tx *gorm.DB, now time.Time, maxWorkersPerJob int) (models.AIJobItem, bool, error) {
+	query := tx.Table("ai_job_items AS candidate").
+		Where("candidate.status = ? OR (candidate.status = ? AND candidate.lease_expires_at IS NOT NULL AND candidate.lease_expires_at <= ?)", models.AIJobItemQueued, models.AIJobItemRunning, now).
+		Where("(SELECT COUNT(*) FROM ai_job_items AS active WHERE active.ai_job_id = candidate.ai_job_id AND active.status = ? AND active.lease_expires_at IS NOT NULL AND active.lease_expires_at > ?) < ?", models.AIJobItemRunning, now, maxWorkersPerJob).
+		Order("candidate.created_at ASC, candidate.id ASC")
 	if tx.Dialector.Name() == "mysql" {
 		query = query.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
 	}

@@ -70,6 +70,8 @@ type ProviderSettingView struct {
 	ImageResponsesVerifiedAt  *time.Time `json:"image_responses_verified_at"`
 	ImageGenerationVerifiedAt *time.Time `json:"image_generation_verified_at"`
 	LastUsedAt                *time.Time `json:"last_used_at"`
+	MaxWorkersPerJob          int        `json:"max_workers_per_job"`
+	MaxWorkersGlobal          int        `json:"max_workers_global"`
 }
 
 type ActiveOpenAICredential struct {
@@ -87,22 +89,34 @@ type ProviderSettingsService struct {
 	db       *gorm.DB
 	box      *secrets.AESGCM
 	verifier ProviderVerifier
+	workers  *WorkerSettingsService
 }
 
 func NewProviderSettingsService(db *gorm.DB, box *secrets.AESGCM, verifier ProviderVerifier) *ProviderSettingsService {
-	return &ProviderSettingsService{db: db, box: box, verifier: verifier}
+	return &ProviderSettingsService{db: db, box: box, verifier: verifier, workers: NewWorkerSettingsService(db)}
 }
 
 func (s *ProviderSettingsService) Get(ctx context.Context) (ProviderSettingView, error) {
+	workerSetting, err := s.workers.Get(ctx)
+	if err != nil {
+		return ProviderSettingView{}, err
+	}
 	var row models.OpenAIProviderSetting
-	err := s.db.WithContext(ctx).Where("provider = ?", openAIProvider).First(&row).Error
+	err = s.db.WithContext(ctx).Where("provider = ?", openAIProvider).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return ProviderSettingView{Provider: openAIProvider, Status: "unconfigured", TextModel: DefaultOpenAITextModel, ImageModel: DefaultOpenAIImageModel, ImageAPIMode: DefaultOpenAIImageMode, ImageResponsesModel: DefaultOpenAIImageModel, ImageGenerationModel: DefaultOpenAIImageGenerationModel}, nil
+		return withWorkerConcurrency(ProviderSettingView{Provider: openAIProvider, Status: "unconfigured", TextModel: DefaultOpenAITextModel, ImageModel: DefaultOpenAIImageModel, ImageAPIMode: DefaultOpenAIImageMode, ImageResponsesModel: DefaultOpenAIImageModel, ImageGenerationModel: DefaultOpenAIImageGenerationModel}, workerSetting), nil
 	}
 	if err != nil {
 		return ProviderSettingView{}, err
 	}
-	return providerSettingView(row), nil
+	return withWorkerConcurrency(providerSettingView(row), workerSetting), nil
+}
+
+func (s *ProviderSettingsService) UpdateWorkers(ctx context.Context, actorID uint, value WorkerConcurrency) (ProviderSettingView, error) {
+	if _, err := s.workers.Update(ctx, actorID, value); err != nil {
+		return ProviderSettingView{}, err
+	}
+	return s.Get(ctx)
 }
 
 func (s *ProviderSettingsService) ListModels(ctx context.Context) ([]ProviderModel, error) {
@@ -189,13 +203,16 @@ func (s *ProviderSettingsService) UpdateModels(ctx context.Context, actorID uint
 	if err != nil {
 		return ProviderSettingView{}, err
 	}
-	return providerSettingView(row), nil
+	return s.Get(ctx)
 }
 
 func (s *ProviderSettingsService) Configure(ctx context.Context, actorID uint, apiKey string) (ProviderSettingView, error) {
 	apiKey = strings.TrimSpace(apiKey)
 	if len(apiKey) < 20 {
 		return ProviderSettingView{}, ErrInvalidAPIKey
+	}
+	if s.box == nil || s.verifier == nil {
+		return ProviderSettingView{}, ErrCredentialVerification
 	}
 	verification, err := s.verifier.Verify(ctx, apiKey)
 	if err != nil || !verification.Authenticated {
@@ -251,7 +268,7 @@ func (s *ProviderSettingsService) Configure(ctx context.Context, actorID uint, a
 	if err != nil {
 		return ProviderSettingView{}, err
 	}
-	return providerSettingView(saved), nil
+	return s.Get(ctx)
 }
 
 func (s *ProviderSettingsService) Disable(ctx context.Context, actorID uint) (ProviderSettingView, error) {
@@ -272,7 +289,7 @@ func (s *ProviderSettingsService) Disable(ctx context.Context, actorID uint) (Pr
 	if err != nil {
 		return ProviderSettingView{}, err
 	}
-	return providerSettingView(row), nil
+	return s.Get(ctx)
 }
 
 func (s *ProviderSettingsService) DecryptActiveKey(ctx context.Context) ([]byte, error) {
@@ -369,4 +386,10 @@ func providerSettingView(row models.OpenAIProviderSetting) ProviderSettingView {
 		ImageGenerationVerifiedAt: row.ImageGenerationVerifiedAt,
 		LastUsedAt:                row.LastUsedAt,
 	}
+}
+
+func withWorkerConcurrency(view ProviderSettingView, value WorkerConcurrency) ProviderSettingView {
+	view.MaxWorkersPerJob = value.MaxWorkersPerJob
+	view.MaxWorkersGlobal = value.MaxWorkersGlobal
+	return view
 }

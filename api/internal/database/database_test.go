@@ -75,6 +75,26 @@ func TestBackfillBrandsGroupsNamesCaseInsensitivelyAndIsIdempotent(t *testing.T)
 	}
 }
 
+func TestMigrationSeedsAIWorkerConcurrencyDefaultsIdempotently(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateSchema(db); err != nil {
+		t.Fatalf("second migration: %v", err)
+	}
+	var settings []models.AIWorkerSetting
+	if err := db.Find(&settings).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(settings) != 1 || settings[0].ID != 1 || settings[0].MaxWorkersPerJob != 3 || settings[0].MaxWorkersGlobal != 9 {
+		t.Fatalf("worker settings = %#v", settings)
+	}
+}
+
 func TestUserMigrationPromotesOneOwnerAndCollapsesLegacyRoles(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {

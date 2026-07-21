@@ -22,7 +22,10 @@ func seedQueueItems(t *testing.T, count int) (*gorm.DB, models.AIJob, []models.A
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&models.AIContentTemplate{}, &models.AIContentTemplateVersion{}, &models.AIContentSlot{}, &models.AIJob{}, &models.AIJobItem{}, &models.AIExecution{}, &models.AIAuditEvent{}); err != nil {
+	if err := db.AutoMigrate(&models.AIWorkerSetting{}, &models.AIContentTemplate{}, &models.AIContentTemplateVersion{}, &models.AIContentSlot{}, &models.AIJob{}, &models.AIJobItem{}, &models.AIExecution{}, &models.AIAuditEvent{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&models.AIWorkerSetting{ID: workerSettingID, MaxWorkersPerJob: DefaultMaxWorkersPerJob, MaxWorkersGlobal: DefaultMaxWorkersGlobal}).Error; err != nil {
 		t.Fatal(err)
 	}
 	template := models.AIContentTemplate{PublicID: uuid.NewString(), NameZH: "测试模板", NameEN: "Test template", TargetPlatform: "lazada", Status: models.AIContentTemplateActive, CreatedByID: 1}
@@ -135,6 +138,131 @@ func TestConcurrentLeaseReturnsEachItemOnce(t *testing.T) {
 	}
 	if len(got) != len(items) {
 		t.Fatalf("leased %d distinct items, want %d", len(got), len(items))
+	}
+}
+
+func TestLeaseNextEnforcesPerJobAndGlobalWorkerLimits(t *testing.T) {
+	db, firstJob, firstItems := seedQueueItems(t, 5)
+	secondJob := firstJob
+	secondJob.ID = 0
+	secondJob.PublicID = uuid.NewString()
+	secondJob.Status = models.AIJobQueued
+	secondJob.StartedAt = nil
+	if err := db.Create(&secondJob).Error; err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 2; index++ {
+		item := firstItems[index]
+		item.ID = 0
+		item.PublicID = uuid.NewString()
+		item.AIJobID = secondJob.ID
+		item.Status = models.AIJobItemQueued
+		item.CreatedAt = firstItems[len(firstItems)-1].CreatedAt.Add(time.Second)
+		item.UpdatedAt = item.CreatedAt
+		item.LeaseOwner = ""
+		item.LeaseExpiresAt = nil
+		item.AttemptCount = 0
+		if err := db.Create(&item).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := NewWorkerSettingsService(db).Update(t.Context(), 1, WorkerConcurrency{MaxWorkersPerJob: 2, MaxWorkersGlobal: 3}); err != nil {
+		t.Fatal(err)
+	}
+	queue := NewQueue(db)
+	now := time.Date(2026, 7, 21, 10, 0, 0, 0, time.UTC)
+	leases := make([]*LeasedItem, 0, 3)
+	for index := 0; index < 3; index++ {
+		leased, err := queue.LeaseNext(t.Context(), fmt.Sprintf("worker-%d", index), now, time.Minute)
+		if err != nil || leased == nil {
+			t.Fatalf("lease %d = %#v, %v", index, leased, err)
+		}
+		leases = append(leases, leased)
+	}
+	if leases[0].jobID != firstJob.ID || leases[1].jobID != firstJob.ID || leases[2].jobID != secondJob.ID {
+		t.Fatalf("job lease order = %d, %d, %d", leases[0].jobID, leases[1].jobID, leases[2].jobID)
+	}
+	blocked, err := queue.LeaseNext(t.Context(), "worker-blocked", now, time.Minute)
+	if err != nil || blocked != nil {
+		t.Fatalf("global limit lease = %#v, %v", blocked, err)
+	}
+	if err := queue.completeAt(t.Context(), *leases[0], now.Add(10*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := queue.LeaseNext(t.Context(), "worker-replacement", now.Add(10*time.Second), time.Minute)
+	if err != nil || replacement == nil || replacement.jobID != firstJob.ID {
+		t.Fatalf("replacement lease = %#v, %v", replacement, err)
+	}
+}
+
+func TestExpiredLeaseDoesNotConsumeWorkerCapacity(t *testing.T) {
+	db, _, _ := seedQueueItems(t, 2)
+	if _, err := NewWorkerSettingsService(db).Update(t.Context(), 1, WorkerConcurrency{MaxWorkersPerJob: 1, MaxWorkersGlobal: 1}); err != nil {
+		t.Fatal(err)
+	}
+	queue := NewQueue(db)
+	now := time.Date(2026, 7, 21, 10, 0, 0, 0, time.UTC)
+	first, err := queue.LeaseNext(t.Context(), "worker-a", now, time.Minute)
+	if err != nil || first == nil {
+		t.Fatalf("first lease = %#v, %v", first, err)
+	}
+	recovered, err := queue.LeaseNext(t.Context(), "worker-b", now.Add(2*time.Minute), time.Minute)
+	if err != nil || recovered == nil || recovered.PublicID != first.PublicID || recovered.Attempt != first.Attempt+1 {
+		t.Fatalf("recovered lease = %#v, %v", recovered, err)
+	}
+}
+
+func TestConcurrentLeaseNeverExceedsGlobalWorkerLimit(t *testing.T) {
+	db, originalJob, items := seedQueueItems(t, 6)
+	for index := 1; index < len(items); index++ {
+		job := originalJob
+		job.ID = 0
+		job.PublicID = uuid.NewString()
+		job.Status = models.AIJobQueued
+		job.StartedAt = nil
+		if err := db.Create(&job).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Model(&items[index]).Update("ai_job_id", job.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := NewWorkerSettingsService(db).Update(t.Context(), 1, WorkerConcurrency{MaxWorkersPerJob: 3, MaxWorkersGlobal: 5}); err != nil {
+		t.Fatal(err)
+	}
+	queue := NewQueue(db)
+	now := time.Date(2026, 7, 21, 10, 0, 0, 0, time.UTC)
+	start := make(chan struct{})
+	results := make(chan *LeasedItem, len(items))
+	errorsFound := make(chan error, len(items))
+	var wg sync.WaitGroup
+	for index := range items {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			<-start
+			leased, err := queue.LeaseNext(t.Context(), fmt.Sprintf("worker-%d", worker), now, time.Minute)
+			results <- leased
+			errorsFound <- err
+		}(index)
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	close(errorsFound)
+	for err := range errorsFound {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	leasedCount := 0
+	for leased := range results {
+		if leased != nil {
+			leasedCount++
+		}
+	}
+	if leasedCount != 5 {
+		t.Fatalf("concurrent leases = %d, want 5", leasedCount)
 	}
 }
 

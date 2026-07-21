@@ -176,6 +176,34 @@ describe("OpenAI settings", () => {
     expect(fetchMock.mock.calls.filter(([input, init]) => String(input).includes("/settings/openai/models") && init?.method !== "PATCH")).toHaveLength(2);
   });
 
+  it("validates and saves dynamic worker concurrency while OpenAI is unconfigured", async () => {
+    let patchBody: unknown;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      if (String(input).includes("/settings/openai/workers") && init?.method === "PATCH") {
+        patchBody = JSON.parse(String(init.body));
+        return jsonResponse({ ...unconfigured, max_workers_per_job: 4, max_workers_global: 12 });
+      }
+      return jsonResponse({ ...unconfigured, max_workers_per_job: 3, max_workers_global: 9 });
+    });
+    render(<OpenAISettingsPage />, { wrapper: Providers });
+
+    const perJob = await screen.findByLabelText("单个任务最多 worker");
+    const global = screen.getByLabelText("全系统最多 worker");
+    expect(perJob).toHaveValue(3);
+    expect(global).toHaveValue(9);
+
+    fireEvent.change(perJob, { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存并发配置" }));
+    expect(await screen.findByText("单个任务上限不能大于全系统上限")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/settings/openai/workers"))).toHaveLength(0);
+
+    fireEvent.change(perJob, { target: { value: "4" } });
+    fireEvent.change(global, { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存并发配置" }));
+    expect(await screen.findByText(/并发配置已保存/)).toBeInTheDocument();
+    expect(patchBody).toEqual({ max_workers_per_job: 4, max_workers_global: 12 });
+  });
+
   it("shows validation, mutation failure, success status, and clears a shown secret", async () => {
     let putCount = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {

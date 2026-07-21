@@ -39,7 +39,7 @@ func providerTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&models.OpenAIProviderSetting{}); err != nil {
+	if err := db.AutoMigrate(&models.OpenAIProviderSetting{}, &models.AIWorkerSetting{}); err != nil {
 		t.Fatal(err)
 	}
 	return db

@@ -20,6 +20,11 @@ type openAIModelSelectionRequest struct {
 	ImageGenerationModel *string `json:"image_generation_model"`
 }
 
+type openAIWorkerSettingRequest struct {
+	MaxWorkersPerJob *int `json:"max_workers_per_job"`
+	MaxWorkersGlobal *int `json:"max_workers_global"`
+}
+
 type createAIJobRequest struct {
 	SKUID                     string                           `json:"sku_id"`
 	TemplateVersionPublicID   string                           `json:"template_version_id"`
@@ -52,6 +57,8 @@ type openAISettingDTO struct {
 	ImageResponsesVerifiedAt  *time.Time `json:"image_responses_verified_at"`
 	ImageGenerationVerifiedAt *time.Time `json:"image_generation_verified_at"`
 	LastUsedAt                *time.Time `json:"last_used_at"`
+	MaxWorkersPerJob          int        `json:"max_workers_per_job"`
+	MaxWorkersGlobal          int        `json:"max_workers_global"`
 }
 
 type aiContentSlotRequest struct {
