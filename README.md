@@ -303,6 +303,25 @@ unset OPENAI_API_KEY OPENAI_SMOKE_TEST
 The same opt-in harness is available through the Compose `smoke` profile after
 setting those environment values: `docker compose --profile smoke run --rm openai-smoke`.
 
+An independent paid image-prompt regression is also disabled by default and is
+never run by CI. It uses the Images API with exactly `gpt-image-2`, medium
+quality, one candidate, one authorized target-product image, and one authorized
+usage-effect reference. The latter is explicitly constrained to composition and
+fitted relationship; it cannot define the generated subject. Review the output
+manually for target identity, color, cutouts, structure, visible selected style,
+and absence of foreign branding or text:
+
+```bash
+read -rs OPENAI_API_KEY
+export OPENAI_API_KEY OPENAI_IMAGE_PROMPT_EVAL=1
+export OPENAI_IMAGE_TARGET_PATH=/absolute/path/to/authorized-target.png
+export OPENAI_IMAGE_USAGE_REFERENCE_PATH=/absolute/path/to/authorized-usage-reference.png
+export OPENAI_IMAGE_OUTPUT_PATH=/absolute/path/to/evaluation-output.png
+cd api
+go run ./cmd/openai-image-prompt-eval
+unset OPENAI_API_KEY OPENAI_IMAGE_PROMPT_EVAL OPENAI_IMAGE_TARGET_PATH OPENAI_IMAGE_USAGE_REFERENCE_PATH OPENAI_IMAGE_OUTPUT_PATH
+```
+
 The Web product-capture SOP routes are:
 
 - `/sop-templates` for lifecycle management;

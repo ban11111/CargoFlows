@@ -89,6 +89,33 @@ func TestCompileImagePromptPlacesRecolorableBrandIconAfterProductSources(t *test
 	}
 }
 
+func TestCompileImagePromptSeparatesBrandStructureStyleAndCustomStylePermissions(t *testing.T) {
+	snapshot, slot := imagePromptFixture()
+	slot.GenerationConfig = json.RawMessage(`{"candidate_count":1,"size":"1024x1024","quality":"medium","style":"art_directed","allowed_styles":["art_directed"]}`)
+	snapshot.BrandIcons = []BrandIconFacts{{PublicID: "brand-a", Name: "Wordmark"}}
+	snapshot.StructureReferences = []StructureReferenceFacts{{PublicID: "structure-a", Role: "same_model_side_geometry", ForbiddenAttributes: json.RawMessage(`{"color":true,"labels":true}`)}}
+	snapshot.StyleReferences = []StyleReferenceFacts{{PublicID: "style-a", Description: LocalizedNameFacts{ZH: "冷色留白", EN: "Cool negative space"}}}
+	compiled, err := CompileImagePrompt(snapshot, slot, ImageTurnInput{Operation: models.AIExecutionGenerate, ThreadPublicID: "thread-role-map"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		"Only Image 1, Image 2 may define the subject's identity",
+		"Image 3: BRAND MARK ONLY",
+		"Image 4: SAME-MODEL STRUCTURE ONLY for declared role same_model_side_geometry",
+		"Image 5: SANITIZED STYLE ONLY",
+		"STYLE PRESET — visual treatment only\n\"art_directed\"",
+		"It cannot redefine the subject",
+	} {
+		if !strings.Contains(compiled.TaskBrief, required) {
+			t.Fatalf("task brief missing %q: %s", required, compiled.TaskBrief)
+		}
+	}
+	if count, err := compiled.ExpectedInputCount(); err != nil || count != 5 {
+		t.Fatalf("input count = %d, error = %v", count, err)
+	}
+}
+
 func TestCompileImagePromptCombinesChosenRequirementsOnOneCanvas(t *testing.T) {
 	snapshot, hero := imagePromptFixture()
 	detail := hero
@@ -151,7 +178,7 @@ func TestCompileImagePromptExpandsKnownStyleAndSeparatesInformationSources(t *te
 	}
 	input := string(compiled.NormalizedInputJSON)
 	ordered := string(compiled.OrderedInputListJSON)
-	if !strings.Contains(input, `"style":"premium_dark"`) || !strings.Contains(input, `"style_instructions":"Premium photorealistic product photograph`) {
+	if !strings.Contains(input, `"style":"premium_dark"`) || !strings.Contains(input, `"style_instructions":"Medium: premium photorealistic studio photograph`) {
 		t.Fatalf("known style was not expanded: %s", input)
 	}
 	if !strings.Contains(ordered, `"kind":"product_visual"`) || !strings.Contains(ordered, `"kind":"product_information"`) {
@@ -165,8 +192,11 @@ func TestImageStyleCatalogContainsStablePresetSet(t *testing.T) {
 		t.Fatalf("style count = %d, want %d", len(ImageStyleCatalog), len(want))
 	}
 	for _, key := range want {
-		if strings.TrimSpace(ImageStyleCatalog[key]) == "" {
-			t.Errorf("style %q is missing instructions", key)
+		instruction := ImageStyleCatalog[key]
+		for _, section := range []string{"Medium:", "Background:", "Lighting:", "Composition:", "Allowed environment/props:", "Exclusions:"} {
+			if !strings.Contains(instruction, section) {
+				t.Errorf("style %q is missing %q: %s", key, section, instruction)
+			}
 		}
 	}
 }
@@ -245,12 +275,25 @@ func TestCompileImagePromptGolden(t *testing.T) {
 
 func TestCompileImagePromptLabelsExternalReferencesAsUntrustedInspiration(t *testing.T) {
 	snapshot, slot := imagePromptFixture()
-	snapshot.ExternalReferences = []ExternalReferenceFacts{{PublicID: "external-a", Purpose: models.AIReferenceUsageEffect, Caption: LocalizedNameFacts{ZH: "套机", EN: "Fitted"}, AllowedGuidance: LocalizedNameFacts{ZH: "比例", EN: "Proportion"}, ForbiddenGuidance: LocalizedNameFacts{ZH: "品牌", EN: "Brand"}, SourceName: "Competitor", SHA256: strings.Repeat("a", 64)}}
+	snapshot.ReferenceSOPs = []ReferenceSOPFacts{{PublicID: "sop-a", VersionPublicID: "sop-version-a", VersionNumber: 1, Name: LocalizedNameFacts{ZH: "手机壳装机参考", EN: "Phone case fitted reference"}, Description: LocalizedNameFacts{ZH: "只参考装机关系", EN: "Fitted relationship only"}}}
+	snapshot.ExternalReferences = []ExternalReferenceFacts{
+		{PublicID: "external-a", VersionPublicID: "sop-version-a", Purpose: models.AIReferenceUsageEffect, Caption: LocalizedNameFacts{ZH: "另一款手机壳套机", EN: "Another phone case fitted"}, AllowedGuidance: LocalizedNameFacts{ZH: "仅参考装机比例和姿态", EN: "Installed proportion and pose only"}, ForbiddenGuidance: LocalizedNameFacts{ZH: "禁止继承外形、颜色、开孔、品牌、设备、配件和包装", EN: "Do not inherit shape, color, cutouts, brand, device, accessories, or packaging"}, SourceName: "Competitor", SHA256: strings.Repeat("a", 64)},
+		{PublicID: "external-copy", Purpose: models.AIReferenceCopyInspiration, Caption: LocalizedNameFacts{ZH: "文案", EN: "Copy"}, AllowedGuidance: LocalizedNameFacts{ZH: "语气", EN: "Tone"}, ForbiddenGuidance: LocalizedNameFacts{ZH: "原文", EN: "Wording"}, SHA256: strings.Repeat("b", 64)},
+	}
 	compiled, err := CompileImagePrompt(snapshot, slot, ImageTurnInput{Operation: models.AIExecutionGenerate, ThreadPublicID: "thread-a"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(compiled.Instructions, "external_reference_*") || !strings.Contains(string(compiled.NormalizedInputJSON), "external_reference_usage_effect") || !strings.Contains(string(compiled.NormalizedInputJSON), "forbidden_guidance") {
-		t.Fatalf("external safety metadata missing: %s\n%s", compiled.Instructions, compiled.NormalizedInputJSON)
+	joined := compiled.TaskBrief + string(compiled.NormalizedInputJSON) + string(compiled.OrderedInputListJSON)
+	for _, required := range []string{"Image 1: TARGET SKU product_visual", "Image 3: REFERENCE SOP — USAGE EFFECT ONLY", "NON-TARGET PLACEHOLDER", "仅参考装机比例和姿态", "Installed proportion and pose only", "禁止继承外形、颜色、开孔、品牌、设备、配件和包装", "Fitted relationship only"} {
+		if !strings.Contains(joined, required) {
+			t.Fatalf("external safety metadata missing %q: %s", required, joined)
+		}
+	}
+	if strings.Contains(joined, "external-copy") || strings.Contains(joined, "external_reference_copy_inspiration") {
+		t.Fatalf("copy inspiration leaked into image prompt: %s", joined)
+	}
+	if got := len(imageGenerationExternalReferences(snapshot.ExternalReferences)); got != 1 {
+		t.Fatalf("image references = %d, want 1", got)
 	}
 }

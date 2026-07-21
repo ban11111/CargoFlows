@@ -28,7 +28,11 @@ func responsesImageRequest(t *testing.T, operation models.AIExecutionOperation) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ImageRequest{Prompt: prompt, Inputs: []ImageInput{{MIMEType: "image/png", Bytes: []byte("parent-or-source")}, {MIMEType: "image/jpeg", Bytes: []byte("original")}}, Metadata: map[string]string{"job_id": "job-public", "execution_id": "execution-public"}}
+	inputs := []ImageInput{{MIMEType: "image/png", Bytes: []byte("source-one")}, {MIMEType: "image/jpeg", Bytes: []byte("source-two")}}
+	if operation == models.AIExecutionEdit {
+		inputs = append([]ImageInput{{MIMEType: "image/png", Bytes: []byte("parent")}}, inputs...)
+	}
+	return ImageRequest{Prompt: prompt, Inputs: inputs, Metadata: map[string]string{"job_id": "job-public", "execution_id": "execution-public"}}
 }
 
 func TestResponsesImageClientSendsStoredFalseToolRequestAndParsesImage(t *testing.T) {
@@ -75,14 +79,23 @@ func TestResponsesImageClientSendsStoredFalseToolRequestAndParsesImage(t *testin
 	}
 	input := captured["input"].([]any)
 	content := input[0].(map[string]any)["content"].([]any)
-	if len(content) != 3 || content[0].(map[string]any)["type"] != "input_text" {
+	if len(content) != 4 || content[0].(map[string]any)["type"] != "input_text" {
 		t.Fatalf("input content = %#v", content)
 	}
-	if got := content[1].(map[string]any)["image_url"]; got != "data:image/png;base64,"+base64.StdEncoding.EncodeToString([]byte("parent-or-source")) {
+	inputText := content[0].(map[string]any)["text"].(string)
+	for _, required := range []string{"[IMAGE GENERATION TASK BRIEF", "PRIMARY SUBJECT", "Image 1: EDIT BASE", "<normalized_input_json>", "<ordered_input_list_json>"} {
+		if !strings.Contains(inputText, required) {
+			t.Fatalf("Responses input text missing %q: %s", required, inputText)
+		}
+	}
+	if got := content[1].(map[string]any)["image_url"]; got != "data:image/png;base64,"+base64.StdEncoding.EncodeToString([]byte("parent")) {
 		t.Fatalf("first image = %q", got)
 	}
-	if got := content[2].(map[string]any)["image_url"]; got != "data:image/jpeg;base64,"+base64.StdEncoding.EncodeToString([]byte("original")) {
+	if got := content[2].(map[string]any)["image_url"]; got != "data:image/png;base64,"+base64.StdEncoding.EncodeToString([]byte("source-one")) {
 		t.Fatalf("second image = %q", got)
+	}
+	if got := content[3].(map[string]any)["image_url"]; got != "data:image/jpeg;base64,"+base64.StdEncoding.EncodeToString([]byte("source-two")) {
+		t.Fatalf("third image = %q", got)
 	}
 }
 

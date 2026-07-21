@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"cargoflows/api/internal/models"
@@ -27,6 +28,8 @@ func TestImagesAPIClientUsesGenerationWithoutSources(t *testing.T) {
 
 	request := responsesImageRequest(t, models.AIExecutionGenerate)
 	request.Model, request.APIMode, request.Inputs = "gpt-image-2", "images", nil
+	request.Prompt.OrderedInputListJSON = json.RawMessage(`[]`)
+	request.Prompt.TaskBrief = "Generate the specified product image from structured facts without binary references."
 	result, err := NewOpenAIImagesClient(server.URL+"/v1", server.Client(), OpenAIImagesConfig{MaxAttempts: 1}).Generate(t.Context(), []byte("sk-images-test"), request)
 	if err != nil {
 		t.Fatal(err)
@@ -36,6 +39,12 @@ func TestImagesAPIClientUsesGenerationWithoutSources(t *testing.T) {
 	}
 	if payload["model"] != "gpt-image-2" || payload["size"] != "1024x1024" || payload["quality"] != "medium" {
 		t.Fatalf("payload = %#v", payload)
+	}
+	prompt, _ := payload["prompt"].(string)
+	for _, required := range []string{"[L0 ", "structured facts without binary references", "CASE-17-PRO", "<normalized_input_json>", "<ordered_input_list_json>"} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("Images API prompt missing %q: %s", required, prompt)
+		}
 	}
 }
 
@@ -47,8 +56,13 @@ func TestImagesAPIClientUsesMultipartEditWithSources(t *testing.T) {
 		if err := r.ParseMultipartForm(1 << 20); err != nil {
 			t.Fatal(err)
 		}
-		if r.FormValue("model") != "gpt-image-2" || len(r.MultipartForm.File["image[]"]) != 2 || len(r.MultipartForm.File["mask"]) != 1 {
+		if r.FormValue("model") != "gpt-image-2" || len(r.MultipartForm.File["image[]"]) != 3 || len(r.MultipartForm.File["mask"]) != 1 {
 			t.Fatalf("form model=%q files=%d masks=%d", r.FormValue("model"), len(r.MultipartForm.File["image[]"]), len(r.MultipartForm.File["mask"]))
+		}
+		for _, required := range []string{"Edit Image 1 only as requested", "Image 1: EDIT BASE", "change only the requested content", "<ordered_input_list_json>"} {
+			if !strings.Contains(r.FormValue("prompt"), required) {
+				t.Fatalf("multipart prompt missing %q: %s", required, r.FormValue("prompt"))
+			}
 		}
 		w.Header().Set("x-request-id", "req_edit")
 		_, _ = io.WriteString(w, `{"data":[{"b64_json":"YQ=="}]}`)
