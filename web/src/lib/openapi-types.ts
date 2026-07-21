@@ -912,6 +912,23 @@ export interface paths {
         patch: operations["updateOpenAIModels"];
         trace?: never;
     };
+    "/settings/openai/workers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** @description Updates the deployment-wide AI job-item concurrency limits. Changes are picked up by workers without a restart. */
+        patch: operations["updateOpenAIWorkers"];
+        trace?: never;
+    };
     "/ai-content-templates": {
         parameters: {
             query?: never;
@@ -1643,6 +1660,10 @@ export interface components {
             image_generation_verified_at: string | null;
             /** Format: date-time */
             last_used_at: string | null;
+            /** @description Maximum concurrently running AIJobItems belonging to one AIJob. */
+            max_workers_per_job: number;
+            /** @description Maximum concurrently running AIJobItems across all jobs and worker instances. */
+            max_workers_global: number;
         };
         OpenAISettingRequest: {
             /** Format: password */
@@ -1655,6 +1676,10 @@ export interface components {
             supports_image_tool: boolean;
             supports_images_api: boolean;
             compatibility_reason?: string;
+        };
+        OpenAIWorkerSettingRequest: {
+            max_workers_per_job: number;
+            max_workers_global: number;
         };
         OpenAIModelSelectionRequest: {
             text_model: string;
@@ -5193,6 +5218,35 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateOpenAIWorkers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenAIWorkerSettingRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated worker concurrency settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenAISetting"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalServerError"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };

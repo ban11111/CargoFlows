@@ -201,6 +201,7 @@ func registerAIRoutes(protected *gin.RouterGroup, server *Server) {
 	aiSettings.GET("/settings/openai", server.getOpenAISetting)
 	aiSettings.GET("/settings/openai/models", server.listOpenAIModels)
 	aiSettings.PATCH("/settings/openai/models", server.updateOpenAIModels)
+	aiSettings.PATCH("/settings/openai/workers", server.updateOpenAIWorkers)
 	aiSettings.PUT("/settings/openai", server.putOpenAISetting)
 	aiSettings.DELETE("/settings/openai", server.disableOpenAISetting)
 	aiAdmin := protected.Group("")
@@ -231,7 +232,7 @@ func registerAIRoutes(protected *gin.RouterGroup, server *Server) {
 }
 
 func newAIDependencies(cfg config.Config, db *gorm.DB) (AIDependencies, error) {
-	deps := AIDependencies{Templates: ai.NewTemplateService(db), Jobs: ai.NewJobService(db), TextResults: ai.NewTextResultService(db), ImageResults: ai.NewImageResultService(db)}
+	deps := AIDependencies{ProviderSettings: ai.NewProviderSettingsService(db, nil, nil), Templates: ai.NewTemplateService(db), Jobs: ai.NewJobService(db), TextResults: ai.NewTextResultService(db), ImageResults: ai.NewImageResultService(db)}
 	key, err := validateSecretsMasterKey(cfg)
 	if err != nil {
 		return AIDependencies{}, err

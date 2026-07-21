@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -36,20 +37,23 @@ func main() {
 	if _, err := buildImageStorage(cfg); err != nil {
 		log.Fatalf("configure AI image storage: %v", err)
 	}
-	workerID := newWorkerID()
 	executor, err := buildExecutor(cfg, db)
 	if err != nil {
 		log.Fatalf("configure AI worker: %v", err)
 	}
-	worker := ai.NewWorker(ai.NewQueue(db), workerID, leaseTTL, ai.SystemClock{}, executor)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	mode := "real text"
 	if cfg.AIWorkerDryRun {
 		mode = "dry-run"
 	}
-	log.Printf("AI %s worker %s started", mode, workerID)
-	if err := run(ctx, worker, cfg.AIWorkerPollInterval); err != nil && !errors.Is(err, context.Canceled) {
+	processID := newWorkerID()
+	queue := ai.NewQueue(db)
+	settings := ai.NewWorkerSettingsService(db)
+	log.Printf("AI %s worker pool %s started", mode, processID)
+	if err := runPool(ctx, settings, func(slot int) runOnceWorker {
+		return ai.NewWorker(queue, fmt.Sprintf("%s-slot-%d", processID, slot), leaseTTL, ai.SystemClock{}, executor)
+	}, cfg.AIWorkerPollInterval); err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatalf("run AI worker: %v", err)
 	}
 }
@@ -101,6 +105,109 @@ func buildExecutor(cfg config.Config, db *gorm.DB) (ai.ItemExecutor, error) {
 
 type runOnceWorker interface {
 	RunOnce(context.Context) (bool, error)
+}
+
+type workerSettingsReader interface {
+	Get(context.Context) (ai.WorkerConcurrency, error)
+}
+
+type poolSlot struct {
+	retire   chan struct{}
+	retiring bool
+}
+
+func runPool(ctx context.Context, settings workerSettingsReader, factory func(int) runOnceWorker, pollInterval time.Duration) error {
+	if pollInterval <= 0 {
+		return errors.New("worker poll interval must be positive")
+	}
+	current, err := settings.Get(ctx)
+	if err != nil {
+		return fmt.Errorf("load AI worker concurrency: %w", err)
+	}
+	target := current.MaxWorkersGlobal
+	slots := map[int]*poolSlot{}
+	done := make(chan int, ai.MaxWorkerLimit)
+	var wg sync.WaitGroup
+	startSlot := func(index int) {
+		slot := &poolSlot{retire: make(chan struct{})}
+		slots[index] = slot
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			runWorkerSlot(ctx, factory(index), pollInterval, slot.retire)
+			done <- index
+		}()
+	}
+	reconcile := func() {
+		for index := 1; index <= target; index++ {
+			if _, exists := slots[index]; !exists {
+				startSlot(index)
+			}
+		}
+		for index, slot := range slots {
+			if index > target && !slot.retiring {
+				slot.retiring = true
+				close(slot.retire)
+			}
+		}
+	}
+	reconcile()
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			wg.Wait()
+			return ctx.Err()
+		case index := <-done:
+			delete(slots, index)
+			reconcile()
+		case <-ticker.C:
+			next, refreshErr := settings.Get(ctx)
+			if refreshErr != nil {
+				log.Printf("refresh AI worker concurrency failed: %v", refreshErr)
+				continue
+			}
+			target = next.MaxWorkersGlobal
+			reconcile()
+		}
+	}
+}
+
+func runWorkerSlot(ctx context.Context, worker runOnceWorker, pollInterval time.Duration, retire <-chan struct{}) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-retire:
+			return
+		default:
+		}
+		worked, err := worker.RunOnce(ctx)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			log.Printf("AI worker cycle failed: %v", err)
+		}
+		if worked {
+			continue
+		}
+		timer := time.NewTimer(pollInterval)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return
+		case <-retire:
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return
+		case <-timer.C:
+		}
+	}
 }
 
 func run(ctx context.Context, worker runOnceWorker, pollInterval time.Duration) error {

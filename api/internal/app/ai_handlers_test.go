@@ -130,6 +130,34 @@ func TestOpenAISettingIsAdminOnlyAndNeverEchoesKey(t *testing.T) {
 	}
 }
 
+func TestOpenAIWorkerSettingsValidatePersistAndRemainSuperAdminOnly(t *testing.T) {
+	db := newTestDB(t)
+	server, admin, operator := authenticatedAIRouter(t, db, &handlerVerifier{authenticated: true})
+	get := aiRequest(t, server, server.token(t, admin), http.MethodGet, "/api/v1/settings/openai", "")
+	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"max_workers_per_job":3`) || !strings.Contains(get.Body.String(), `"max_workers_global":9`) {
+		t.Fatalf("GET defaults status/body = %d %s", get.Code, get.Body.String())
+	}
+	updated := aiRequest(t, server, server.token(t, admin), http.MethodPatch, "/api/v1/settings/openai/workers", `{"max_workers_per_job":4,"max_workers_global":12}`)
+	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"max_workers_per_job":4`) || !strings.Contains(updated.Body.String(), `"max_workers_global":12`) {
+		t.Fatalf("PATCH status/body = %d %s", updated.Code, updated.Body.String())
+	}
+	for _, body := range []string{
+		`{"max_workers_per_job":0,"max_workers_global":9}`,
+		`{"max_workers_per_job":10,"max_workers_global":9}`,
+		`{"max_workers_per_job":3}`,
+		`{"max_workers_per_job":3.5,"max_workers_global":9}`,
+	} {
+		response := aiRequest(t, server, server.token(t, admin), http.MethodPatch, "/api/v1/settings/openai/workers", body)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("invalid PATCH %s status/body = %d %s", body, response.Code, response.Body.String())
+		}
+	}
+	forbidden := aiRequest(t, server, server.token(t, operator), http.MethodPatch, "/api/v1/settings/openai/workers", `{"max_workers_per_job":2,"max_workers_global":4}`)
+	if forbidden.Code != http.StatusForbidden {
+		t.Fatalf("operator PATCH status/body = %d %s", forbidden.Code, forbidden.Body.String())
+	}
+}
+
 func TestOpenAIModelsAreFetchedForSuperAdminWithActiveCredential(t *testing.T) {
 	db := newTestDB(t)
 	verifier := &handlerVerifier{authenticated: true, models: []ai.ProviderModel{{ID: "gpt-5.6", OwnedBy: "openai"}}}
@@ -628,6 +656,7 @@ func TestAIOpenAPIHasExactAdminPathsAndNeverExposesCredentialMaterial(t *testing
 			"get":   {"200", "401", "403", "409", "502", "503"},
 			"patch": {"200", "400", "401", "403", "409", "422", "502", "503"},
 		},
+		"/settings/openai/workers": {"patch": {"200", "400", "401", "403", "500", "503"}},
 		"/ai-content-templates": {
 			"get":  {"200", "400", "401", "403", "500"},
 			"post": {"201", "400", "401", "403", "500"},

@@ -15,6 +15,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 )
 
@@ -126,6 +127,7 @@ func migrateSchema(db *gorm.DB) error {
 		&models.Asset{},
 		&models.AssetReview{},
 		&models.OpenAIProviderSetting{},
+		&models.AIWorkerSetting{},
 		&models.AIContentTemplate{},
 		&models.AIContentTemplateVersion{},
 		&models.AIContentSlot{},
@@ -146,7 +148,15 @@ func migrateSchema(db *gorm.DB) error {
 	if err := backfillBrands(db); err != nil {
 		return err
 	}
+	if err := seedAIWorkerSetting(db); err != nil {
+		return err
+	}
 	return backfillAIModelConfiguration(db)
+}
+
+func seedAIWorkerSetting(db *gorm.DB) error {
+	setting := models.AIWorkerSetting{ID: 1, MaxWorkersPerJob: 3, MaxWorkersGlobal: 9}
+	return db.Clauses(clause.OnConflict{DoNothing: true}).Create(&setting).Error
 }
 
 func backfillBrands(db *gorm.DB) error {

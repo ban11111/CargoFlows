@@ -7,6 +7,7 @@ import {
   CircleDashed,
   Eye,
   EyeOff,
+  Gauge,
   KeyRound,
   LoaderCircle,
   LockKeyhole,
@@ -44,6 +45,8 @@ const emptySetting: OpenAISetting = {
   image_responses_verified_at: null,
   image_generation_verified_at: null,
   last_used_at: null,
+  max_workers_per_job: 3,
+  max_workers_global: 9,
 };
 
 async function getSetting() {
@@ -64,6 +67,8 @@ function normalizeSetting(value: OpenAISetting): OpenAISetting {
     image_api_mode: value.image_api_mode ?? (legacyDirect ? "images" : "responses"),
     image_responses_model: value.image_responses_model ?? (legacyDirect ? emptySetting.image_responses_model : legacyImage),
     image_generation_model: value.image_generation_model ?? (legacyDirect ? legacyImage : emptySetting.image_generation_model),
+    max_workers_per_job: Number.isInteger(value.max_workers_per_job) ? value.max_workers_per_job : emptySetting.max_workers_per_job,
+    max_workers_global: Number.isInteger(value.max_workers_global) ? value.max_workers_global : emptySetting.max_workers_global,
   };
 }
 
@@ -239,6 +244,7 @@ export default function OpenAISettingsPage() {
             </CardContent>
           </Card>
 
+          <WorkerSettingsCard setting={setting} />
           {verified ? <ModelSettingsCard key={setting.key_fingerprint} setting={setting} /> : null}
           {configured && setting.status !== "disabled" ? <section className="rounded-lg border border-danger/30 bg-card p-5" aria-labelledby="openai-danger-title"><div className="flex items-start gap-3"><ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-danger" /><div className="min-w-0 flex-1"><h2 className="font-semibold text-danger" id="openai-danger-title">{t("openAIDangerZone")}</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">{t("openAIDangerDescription")}</p><Button className="mt-4 min-h-11" disabled={disableMutation.isPending || saveMutation.isPending} onClick={disable} variant="danger">{disableMutation.isPending ? <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <ShieldAlert className="h-4 w-4" />}{disableMutation.isPending ? t("openAIDisabling") : t("openAIDisable")}</Button>{disableMutation.isError ? <p className="mt-3 text-sm text-danger" role="alert">{t("openAIDisableError")}</p> : null}</div></div></section> : null}
         </div>
@@ -250,6 +256,86 @@ export default function OpenAISettingsPage() {
       ) : null}
     </div>
   );
+}
+
+function WorkerSettingsCard({ setting }: { setting: OpenAISetting }) {
+  const { t } = useLanguage();
+  const queryClient = useQueryClient();
+  const [perJob, setPerJob] = useState(String(setting.max_workers_per_job));
+  const [global, setGlobal] = useState(String(setting.max_workers_global));
+  const [perJobError, setPerJobError] = useState<MessageKey | null>(null);
+  const [globalError, setGlobalError] = useState<MessageKey | null>(null);
+  const [saved, setSaved] = useState(false);
+  const changed = perJob !== String(setting.max_workers_per_job) || global !== String(setting.max_workers_global);
+
+  function validate() {
+    const nextPerJob = parseWorkerLimit(perJob);
+    const nextGlobal = parseWorkerLimit(global);
+    const nextPerJobError: MessageKey | null = nextPerJob === null
+      ? "openAIWorkersRangeError"
+      : nextGlobal !== null && nextPerJob > nextGlobal
+        ? "openAIWorkersRelationError"
+        : null;
+    const nextGlobalError: MessageKey | null = nextGlobal === null ? "openAIWorkersRangeError" : null;
+    setPerJobError(nextPerJobError);
+    setGlobalError(nextGlobalError);
+    return nextPerJobError === null && nextGlobalError === null && nextPerJob !== null && nextGlobal !== null
+      ? { max_workers_per_job: nextPerJob, max_workers_global: nextGlobal }
+      : null;
+  }
+
+  const saveWorkers = useMutation({
+    mutationFn: (body: { max_workers_per_job: number; max_workers_global: number }) => safeOpenAIRequest<OpenAISetting>("/settings/openai/workers", {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+    onSuccess(next) {
+      queryClient.setQueryData(["openai-setting"], normalizeSetting(next));
+      setSaved(true);
+    },
+  });
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaved(false);
+    saveWorkers.reset();
+    const value = validate();
+    if (value) saveWorkers.mutate(value);
+  }
+
+  return <Card>
+    <CardHeader><CardTitle className="flex items-center gap-2"><Gauge className="h-4 w-4 text-primary" />{t("openAIWorkersTitle")}</CardTitle></CardHeader>
+    <CardContent>
+      <form className="space-y-5" onSubmit={submit}>
+        <p className="text-sm leading-6 text-muted-foreground">{t("openAIWorkersIntro")}</p>
+        <div className="grid gap-5 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="openai-workers-per-job">{t("openAIWorkersPerJobLabel")}</Label>
+            <Input aria-describedby="openai-workers-per-job-help openai-workers-per-job-error" aria-invalid={Boolean(perJobError)} className="h-11 tabular-nums" id="openai-workers-per-job" inputMode="numeric" max={32} min={1} onBlur={validate} onChange={(event) => { setPerJob(event.target.value); setPerJobError(null); setSaved(false); }} step={1} type="number" value={perJob} />
+            <p className="text-sm leading-5 text-muted-foreground" id="openai-workers-per-job-help">{t("openAIWorkersPerJobHelp")}</p>
+            {perJobError ? <p className="text-sm text-danger" id="openai-workers-per-job-error" role="alert">{t(perJobError)}</p> : null}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="openai-workers-global">{t("openAIWorkersGlobalLabel")}</Label>
+            <Input aria-describedby="openai-workers-global-help openai-workers-global-error" aria-invalid={Boolean(globalError)} className="h-11 tabular-nums" id="openai-workers-global" inputMode="numeric" max={32} min={1} onBlur={validate} onChange={(event) => { setGlobal(event.target.value); setGlobalError(null); setSaved(false); }} step={1} type="number" value={global} />
+            <p className="text-sm leading-5 text-muted-foreground" id="openai-workers-global-help">{t("openAIWorkersGlobalHelp")}</p>
+            {globalError ? <p className="text-sm text-danger" id="openai-workers-global-error" role="alert">{t(globalError)}</p> : null}
+          </div>
+        </div>
+        {saveWorkers.isError ? <p className="rounded-md border border-danger/30 bg-danger/5 p-3 text-sm text-danger" role="alert">{t("openAIWorkersSaveError")}</p> : null}
+        {saved ? <p className="flex items-center gap-2 text-sm text-success" role="status"><CheckCircle2 className="h-4 w-4" />{t("openAIWorkersSaveSuccess")}</p> : null}
+        <div className="flex justify-end border-t border-border pt-4">
+          <Button className="min-h-11" disabled={!changed || saveWorkers.isPending} type="submit">{saveWorkers.isPending ? <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <Check className="h-4 w-4" />}{saveWorkers.isPending ? t("openAIWorkersSaving") : t("openAIWorkersSave")}</Button>
+        </div>
+      </form>
+    </CardContent>
+  </Card>;
+}
+
+function parseWorkerLimit(value: string) {
+  if (!/^\d+$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 32 ? parsed : null;
 }
 
 function ModelSettingsCard({ setting }: { setting: OpenAISetting }) {

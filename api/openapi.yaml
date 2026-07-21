@@ -789,6 +789,20 @@ paths:
         '422': { description: A selected model is not visible to the active OpenAI project, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
         '502': { description: OpenAI model list is unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /settings/openai/workers:
+    patch:
+      operationId: updateOpenAIWorkers
+      description: Updates the deployment-wide AI job-item concurrency limits. Changes are picked up by workers without a restart.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/OpenAIWorkerSettingRequest' } } }
+      responses:
+        '200': { description: Updated worker concurrency settings, content: { application/json: { schema: { $ref: '#/components/schemas/OpenAISetting' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /ai-content-templates:
     get:
       operationId: listAIContentTemplates
@@ -1364,7 +1378,7 @@ components:
     OpenAISetting:
       type: object
       additionalProperties: false
-      required: [provider, status, key_fingerprint, text_model, image_model, image_api_mode, image_responses_model, image_generation_model, verified_at, image_capability_verified_at, image_responses_verified_at, image_generation_verified_at, last_used_at]
+      required: [provider, status, key_fingerprint, text_model, image_model, image_api_mode, image_responses_model, image_generation_model, verified_at, image_capability_verified_at, image_responses_verified_at, image_generation_verified_at, last_used_at, max_workers_per_job, max_workers_global]
       properties:
         provider: { type: string, enum: [openai] }
         status: { type: string, enum: [unconfigured, active, invalid, disabled] }
@@ -1379,6 +1393,8 @@ components:
         image_responses_verified_at: { type: string, format: date-time, nullable: true }
         image_generation_verified_at: { type: string, format: date-time, nullable: true }
         last_used_at: { type: string, format: date-time, nullable: true }
+        max_workers_per_job: { type: integer, minimum: 1, maximum: 32, description: Maximum concurrently running AIJobItems belonging to one AIJob. }
+        max_workers_global: { type: integer, minimum: 1, maximum: 32, description: Maximum concurrently running AIJobItems across all jobs and worker instances. }
     OpenAISettingRequest:
       type: object
       additionalProperties: false
@@ -1396,6 +1412,13 @@ components:
         supports_image_tool: { type: boolean }
         supports_images_api: { type: boolean }
         compatibility_reason: { type: string }
+    OpenAIWorkerSettingRequest:
+      type: object
+      additionalProperties: false
+      required: [max_workers_per_job, max_workers_global]
+      properties:
+        max_workers_per_job: { type: integer, minimum: 1, maximum: 32 }
+        max_workers_global: { type: integer, minimum: 1, maximum: 32 }
     OpenAIModelSelectionRequest:
       type: object
       additionalProperties: false

@@ -109,6 +109,15 @@ type OpenAIProviderSetting struct {
 	UpdatedAt                 time.Time  `json:"updated_at"`
 }
 
+type AIWorkerSetting struct {
+	ID               uint      `gorm:"primaryKey" json:"-"`
+	MaxWorkersPerJob int       `gorm:"not null;default:3" json:"max_workers_per_job"`
+	MaxWorkersGlobal int       `gorm:"not null;default:9" json:"max_workers_global"`
+	UpdatedByID      uint      `gorm:"not null;default:0" json:"-"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
 type AIContentTemplate struct {
 	ID             uint                       `gorm:"primaryKey" json:"-"`
 	PublicID       string                     `gorm:"size:36;uniqueIndex;not null" json:"public_id"`
