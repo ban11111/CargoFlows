@@ -83,27 +83,23 @@ recovery.
 
 ## Cloudflare Tunnel
 
-Create a remotely managed Tunnel named `cargoflows-prod-sg` with this public
-hostname:
+Reuse the remotely managed `shared-prod-sg` Tunnel and add this published
+application without changing its existing routes:
 
 ```text
-www.cargoflows.cc -> http://localhost:4015
+www.cargoflows.cc -> http://127.0.0.1:4015
 ```
 
-Create a Cloudflare redirect rule from the root hostname to
-`https://www.cargoflows.cc${uri}` with a permanent status while preserving its
-query string. Do not reuse the development or Spy the Game Tunnel.
+Create the `apex-to-www` Cloudflare redirect rule from
+`https://cargoflows.cc/*` to `https://www.cargoflows.cc/${1}` with a 301 status
+and query-string preservation. The existing
+`cloudflared-shared-prod.service` remains the only Tunnel connector and starts
+automatically after a reboot; CargoFlows does not install or store another
+Tunnel token.
 
-Install the new Tunnel token interactively so it never appears in command
-history or logs:
-
-```bash
-ops/vps/configure-tunnel-vps
-```
-
-The token is stored at `/etc/cloudflared/cargoflows-prod.token` with mode 0600,
-and the dedicated `cloudflared-cargoflows.service` starts automatically after a
-reboot.
+`remote-verify` checks `cloudflared-shared-prod.service` by default. Set
+`CARGOFLOWS_TUNNEL_SERVICE` only when validating a host that intentionally uses
+a different Tunnel unit.
 
 ## Acceptance
 
