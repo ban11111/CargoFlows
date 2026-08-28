@@ -27,4 +27,11 @@ describe("LineItemDetails", () => {
     expect(screen.getByText("—")).toBeInTheDocument();
     expect(document.querySelector("details")).not.toBeInTheDocument();
   });
+
+  it("renders a compact placeholder for a legacy null bucket collection", () => {
+    render(<LineItemDetails buckets={null} />);
+
+    expect(screen.getByText("—")).toBeInTheDocument();
+    expect(document.querySelector("details")).not.toBeInTheDocument();
+  });
 });

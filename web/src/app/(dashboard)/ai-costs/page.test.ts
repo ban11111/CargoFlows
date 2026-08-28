@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ApiError } from "@/lib/api";
 
-import { costErrorMessage, unpricedUsageDetail } from "./page";
+import { costErrorMessage, rowsOrEmpty, unpricedUsageDetail } from "./page";
 
 describe("AI cost errors", () => {
   it("turns structured synchronization failures into actionable Chinese guidance", () => {
@@ -19,5 +19,17 @@ describe("AI cost errors", () => {
 describe("AI cost reconciliation copy", () => {
   it("documents that unpriced usage is excluded instead of blocking allocation", () => {
     expect(unpricedUsageDetail).toBe("仅统计，不参与任务级分摊");
+  });
+});
+
+describe("AI cost collection responses", () => {
+  it("treats null and missing data as an empty collection", () => {
+    expect(rowsOrEmpty({ data: null })).toEqual([]);
+    expect(rowsOrEmpty({})).toEqual([]);
+    expect(rowsOrEmpty(undefined)).toEqual([]);
+  });
+
+  it("preserves array responses", () => {
+    expect(rowsOrEmpty({ data: ["rate"] })).toEqual(["rate"]);
   });
 });

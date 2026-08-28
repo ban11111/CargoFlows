@@ -89,7 +89,7 @@ func (s *Server) listOpenAICostScopes(c *gin.Context) {
 }
 
 func (s *Server) listAICostRates(c *gin.Context) {
-	var rows []models.AIRateCard
+	rows := make([]models.AIRateCard, 0)
 	if err := s.db.Order("version DESC, model, api_mode, service_tier, metric").Find(&rows).Error; err != nil {
 		respondAIError(c, err)
 		return
@@ -250,12 +250,12 @@ func (s *Server) listAICostAnalytics(c *gin.Context) {
 		respondAIBadRequest(c, errors.New("group_by must be date, sku, user, model, template, or platform"))
 		return
 	}
-	var rows []struct {
+	rows := make([]struct {
 		DimensionValue     string `json:"dimension_value"`
 		TotalTokens        int64  `json:"total_tokens"`
 		EstimatedAmountUSD string `json:"estimated_amount_usd"`
 		UnpricedCount      int64  `json:"unpriced_count"`
-	}
+	}, 0)
 	err = s.db.Table("ai_usage_ledgers AS ledger").
 		Select(expression+" AS dimension_value, COALESCE(SUM(ledger.total_tokens),0) AS total_tokens, COALESCE(SUM(CASE WHEN ledger.pricing_status = 'priced' THEN ledger.estimated_amount_usd ELSE 0 END),0) AS estimated_amount_usd, SUM(CASE WHEN ledger.pricing_status IN ('unpriced','partial') THEN 1 ELSE 0 END) AS unpriced_count").
 		Joins("JOIN ai_executions AS execution ON execution.id = ledger.ai_execution_id").

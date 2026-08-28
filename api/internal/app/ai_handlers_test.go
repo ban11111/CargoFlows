@@ -356,6 +356,31 @@ func TestRespondAIErrorMapsOpenAICostFailures(t *testing.T) {
 	}
 }
 
+func TestAICostCollectionEndpointsReturnEmptyArrays(t *testing.T) {
+	db := newTestDB(t)
+	server, admin, _ := authenticatedAIRouter(t, db, &handlerVerifier{authenticated: true})
+	token := server.token(t, admin)
+
+	for _, path := range []string{
+		"/api/v1/ai-cost/rates",
+		"/api/v1/ai-cost/analytics?start_date=2026-08-01&end_date=2026-08-07&group_by=date",
+	} {
+		response := aiRequest(t, server, token, http.MethodGet, path, "")
+		if response.Code != http.StatusOK {
+			t.Fatalf("GET %s status/body = %d %s", path, response.Code, response.Body.String())
+		}
+		var document struct {
+			Data []json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &document); err != nil {
+			t.Fatalf("GET %s returned invalid JSON: %v", path, err)
+		}
+		if document.Data == nil || len(document.Data) != 0 {
+			t.Fatalf("GET %s data must be [], body = %s", path, response.Body.String())
+		}
+	}
+}
+
 func TestAIContentTemplateAdminLifecycleUsesPublicDTOs(t *testing.T) {
 	db := newTestDB(t)
 	server, admin, operator := authenticatedAIRouter(t, db, &handlerVerifier{authenticated: true})
