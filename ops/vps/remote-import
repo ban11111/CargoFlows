@@ -98,15 +98,32 @@ gzip -dc "$stage/database.sql.gz" | compose exec -T mysql sh -ec \
   'exec mysql -uroot --password="$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"'
 mkdir -p "$stage/object-data"
 tar -xzf "$stage/objects.tar.gz" -C "$stage/object-data"
-docker run --rm --network "$network" --env-file "$app_dir/.env.production" \
+object_root="$stage/object-data/objects"
+if [[ ! -d $object_root ]]; then
+  echo "Migration archive is missing the objects directory" >&2
+  exit 1
+fi
+archive_objects=$(find "$object_root" -type f | wc -l | tr -d ' ')
+if [[ $archive_objects != "$object_count" ]]; then
+  echo "Migration archive contains $archive_objects files, expected $object_count" >&2
+  exit 1
+fi
+(cd "$object_root" && find . -type f -print0) | docker run --rm -i --network "$network" --env-file "$app_dir/.env.production" \
   -v "$stage/object-data/objects:/import:ro" \
   --entrypoint /bin/sh minio/mc -ec '
     mc alias set target http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null
     for bucket in "$MINIO_BUCKET" "$MINIO_AI_BUCKET"; do
       mc mb --ignore-existing "target/$bucket" >/dev/null
-      if [ -d "/import/$bucket" ]; then
-        mc mirror --overwrite "/import/$bucket" "target/$bucket" >/dev/null
+    done
+    while IFS= read -r -d "" relative; do
+      relative=${relative#./}
+      bucket=${relative%%/*}
+      object=${relative#*/}
+      if { [ "$bucket" != "$MINIO_BUCKET" ] && [ "$bucket" != "$MINIO_AI_BUCKET" ]; } || [ "$object" = "$relative" ] || [ -z "$object" ]; then
+        echo "Migration archive contains an object outside the configured buckets" >&2
+        exit 1
       fi
+      mc cp --quiet "/import/$relative" "target/$bucket/$object" >/dev/null
     done
   '
 imported_objects=$(docker run --rm --network "$network" --env-file "$app_dir/.env.production" \
