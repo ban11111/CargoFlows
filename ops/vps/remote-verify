@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+app_dir=${VPS_APP_DIR:-/opt/cargoflows}
+if [[ ! -s $app_dir/release.env || ! -s $app_dir/.env.production ]]; then
+  echo "CargoFlows production has not been deployed" >&2
+  exit 1
+fi
+
+compose() {
+  docker compose --env-file "$app_dir/.env.production" --env-file "$app_dir/release.env" -f "$app_dir/compose.production.yml" "$@"
+}
+
+compose config --quiet
+compose ps
+curl --fail --silent --show-error http://127.0.0.1:4015/api/healthz >/dev/null
+
+for service in mysql minio api worker web; do
+  container=$(compose ps -q "$service")
+  if [[ -z $container || $(docker inspect --format '{{.State.Status}}' "$container") != running ]]; then
+    echo "$service is not running" >&2
+    exit 1
+  fi
+done
+for service in api web; do
+  container=$(compose ps -q "$service")
+  if [[ $(docker inspect --format '{{.State.Health.Status}}' "$container") != healthy ]]; then
+    echo "$service is not healthy" >&2
+    exit 1
+  fi
+  architecture=$(docker image inspect --format '{{.Architecture}}' "$(docker inspect --format '{{.Image}}' "$container")")
+  if [[ $architecture != amd64 ]]; then
+    echo "$service image architecture is $architecture, expected amd64" >&2
+    exit 1
+  fi
+done
+
+if ! ss -lntH | awk '$4 == "127.0.0.1:4015" { found=1 } END { exit !found }'; then
+  echo "CargoFlows origin is not bound to 127.0.0.1:4015" >&2
+  exit 1
+fi
+if ss -lntH | awk '$4 ~ /(^|:|\])(3306|8080|9000|9001)$/ && $4 !~ /^127\.0\.0\.1:/ { found=1 } END { exit !found }'; then
+  echo "A CargoFlows internal service port is publicly bound" >&2
+  exit 1
+fi
+if ss -lntH | awk '$4 ~ /(^|:|\])(80|443)$/ { found=1 } END { exit !found }'; then
+  echo "A process is unexpectedly listening on public HTTP/HTTPS ports" >&2
+  exit 1
+fi
+
+ufw status | grep -q '^Status: active$'
+if ufw status | awk '/ALLOW IN/ && $1 !~ /^22(\/tcp)?$/ { found=1 } END { exit !found }'; then
+  echo "UFW has an unexpected inbound allow rule" >&2
+  ufw status >&2
+  exit 1
+fi
+systemctl is-active --quiet docker
+systemctl is-active --quiet fail2ban
+systemctl is-enabled --quiet cloudflared-cargoflows.service
+systemctl is-active --quiet cloudflared-cargoflows.service
+test -s "$app_dir/state/data-imported"
+test -s "$app_dir/state/cutover-complete"
+echo "CargoFlows VPS production checks passed"

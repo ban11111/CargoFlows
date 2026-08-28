@@ -169,6 +169,60 @@ func TestTextExecutorPersistsCandidatesUsageAuditAndClearsCredential(t *testing.
 	}
 }
 
+func TestTextExecutorRunsV2BilingualSnapshot(t *testing.T) {
+	db, leased, setting := prepareTextExecutorLease(t, 1)
+	var job models.AIJob
+	if err := db.First(&job, leased.jobID).Error; err != nil {
+		t.Fatal(err)
+	}
+	var snapshot ProductSnapshotV1
+	if err := json.Unmarshal(job.InputSnapshotJSON, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	snapshot.Schema = ProductSnapshotSchemaV2
+	snapshot.Locale = "en"
+	snapshot.OutputLocales = []string{"en", "zh-CN"}
+	snapshotJSON, _ := json.Marshal(snapshot)
+	localesJSON, _ := json.Marshal(snapshot.OutputLocales)
+	if err := db.Model(&models.AIJob{}).Where("id = ?", job.ID).Updates(map[string]any{
+		"snapshot_schema":     ProductSnapshotSchemaV2,
+		"locale":              snapshot.Locale,
+		"output_locales_json": localesJSON,
+		"input_snapshot_json": snapshotJSON,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	key := []byte("temporary-fake-api-key")
+	source := &fakeActiveCredentialSource{credential: ActiveOpenAICredential{SettingID: setting.ID, KeyFingerprint: setting.KeyFingerprint, APIKey: key}}
+	var providerCalls atomic.Int32
+	provider := textProviderFunc(func(_ context.Context, _ []byte, request TextRequest) (TextResponse, error) {
+		providerCalls.Add(1)
+		if request.Prompt.CompilerVersion != TextPromptCompilerVersion || !bytes.Contains(request.Prompt.InputJSON, []byte(`"output_locales":["en","zh-CN"]`)) {
+			t.Fatalf("v2 bilingual prompt = %#v", request.Prompt)
+		}
+		return TextResponse{
+			ResponseID: "resp_v2_bilingual", RequestID: "req_v2_bilingual", Model: "fake-model",
+			OutputJSON: json.RawMessage(`{"candidates":[{"localizations":{"en":{"title":"Protective phone case","keywords":["case"]},"zh-CN":{"title":"轻薄防护手机壳","keywords":["手机壳"]}},"source_fields":["product.name"]}]}`),
+			Usage:      TextUsage{InputTextTokens: 50, OutputTextTokens: 20, TotalTokens: 70},
+		}, nil
+	})
+	executor := newTextExecutorWithClock(db, source, provider, TextExecutorConfig{Model: "fake-model"}, fixedClock{now: time.Date(2026, 7, 17, 10, 0, 10, 0, time.UTC)})
+	if err := executor.Execute(t.Context(), leased); err != nil {
+		t.Fatal(err)
+	}
+	if providerCalls.Load() != 1 {
+		t.Fatalf("provider calls = %d", providerCalls.Load())
+	}
+	var result models.AITextResult
+	if err := db.First(&result).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(result.RawStructuredJSON, []byte(`"en"`)) || !bytes.Contains(result.RawStructuredJSON, []byte(`"zh-CN"`)) {
+		t.Fatalf("stored bilingual result = %s", result.RawStructuredJSON)
+	}
+}
+
 func TestTextExecutorCreatesANewExecutionForRegeneratedAttempt(t *testing.T) {
 	db, firstLease, setting := prepareTextExecutorLease(t, 1)
 	base := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)

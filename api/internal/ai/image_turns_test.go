@@ -19,6 +19,33 @@ func TestAIAssetsCannotBecomeImageIdentityEvidence(t *testing.T) {
 	}
 }
 
+func TestNextImageTurnSequenceAdvancesAfterFailedGeneration(t *testing.T) {
+	db, fixture := seedAIJobFixture(t)
+	if err := db.AutoMigrate(&models.AIImageThread{}, &models.AIImageTurn{}); err != nil {
+		t.Fatal(err)
+	}
+	job, err := NewJobService(db).Create(t.Context(), CreateJobInput{SKUID: fixture.SKU.PublicID, TemplateVersionPublicID: fixture.PublishedVersion.PublicID, SelectedSlotKeys: []string{"hero"}, SelectedAssetIDs: []string{fixture.ApprovedAsset.PublicID}, Locale: "zh-CN", CreatedByID: fixture.Operator.ID, IdempotencyKey: "image-retry-turn-sequence"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var item models.AIJobItem
+	if err := db.Where("public_id = ?", job.Items[0].PublicID).First(&item).Error; err != nil {
+		t.Fatal(err)
+	}
+	thread := models.AIImageThread{PublicID: uuid.NewString(), AIJobItemID: item.ID}
+	if err := db.Create(&thread).Error; err != nil {
+		t.Fatal(err)
+	}
+	turn := models.AIImageTurn{PublicID: uuid.NewString(), AIImageThreadID: thread.ID, Sequence: 1, Operation: models.AIExecutionGenerate, ActorID: fixture.Operator.ID, Status: models.AIImageTurnFailed}
+	if err := db.Create(&turn).Error; err != nil {
+		t.Fatal(err)
+	}
+	sequence, err := nextImageTurnSequence(db, thread.ID)
+	if err != nil || sequence != 2 {
+		t.Fatalf("next sequence = %d, %v", sequence, err)
+	}
+}
+
 func TestImageTurnEditIsAuditedAndRequeuesExactlyOneThread(t *testing.T) {
 	db, fixture := seedAIJobFixture(t)
 	if err := db.AutoMigrate(&models.AIImageThread{}, &models.AIImageTurn{}, &models.AIImageResult{}); err != nil {

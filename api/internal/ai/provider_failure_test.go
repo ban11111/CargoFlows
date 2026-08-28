@@ -18,11 +18,16 @@ func TestImageProviderFailureStateExplainsAmbiguousCause(t *testing.T) {
 		{"timeout", &ImageProviderError{Kind: ErrImageProviderAmbiguousTimeout}, "OpenAI image request timed out after it was sent; no response was received", "openai_timeout_ambiguous"},
 		{"transport", &ImageProviderError{Kind: ErrImageProviderAmbiguousTransport}, "Connection to OpenAI was interrupted after the image request was sent; no response was received", "openai_transport_ambiguous"},
 		{"server", &ImageProviderError{Kind: ErrImageProviderAmbiguousTransport, StatusCode: http.StatusBadGateway}, "OpenAI image API returned HTTP 502 before a result was confirmed", "openai_server_error_ambiguous"},
+		{"prompt too long", &ImageProviderError{Kind: ErrImageProviderPromptTooLong}, "Image prompt exceeds OpenAI's 32,000-character limit", "openai_prompt_too_long"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			status, message := imageProviderFailureState(tc.err)
-			if status != models.AIExecutionNeedsAttention || message != tc.want || failureCodeForSafeError(message) != tc.code {
+			wantStatus := models.AIExecutionNeedsAttention
+			if tc.name == "prompt too long" {
+				wantStatus = models.AIExecutionFailed
+			}
+			if status != wantStatus || message != tc.want || failureCodeForSafeError(message) != tc.code {
 				t.Fatalf("status=%q message=%q code=%q", status, message, failureCodeForSafeError(message))
 			}
 		})

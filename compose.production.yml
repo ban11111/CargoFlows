@@ -1,0 +1,152 @@
+name: cargoflows-prod
+
+services:
+  mysql:
+    image: "${MYSQL_IMAGE:-mysql:8.4}"
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: "${MYSQL_DATABASE:?set MYSQL_DATABASE in .env.production}"
+      MYSQL_USER: "${MYSQL_USER:?set MYSQL_USER in .env.production}"
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env.production}"
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env.production}"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot --password=\"$${MYSQL_ROOT_PASSWORD}\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  minio:
+    image: "${MINIO_IMAGE:-minio/minio:latest}"
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env.production}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env.production}"
+    volumes:
+      - minio_data:/data
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  migrate:
+    image: "${API_IMAGE:?set API_IMAGE in release.env}"
+    platform: linux/amd64
+    profiles: ["operations"]
+    entrypoint: ["/app/cargoflows-migrate"]
+    environment: &api_environment
+      API_PORT: "8080"
+      DB_DSN: "${MYSQL_USER}:${MYSQL_PASSWORD}@tcp(mysql:3306)/${MYSQL_DATABASE}?charset=utf8mb4&parseTime=True&loc=Local"
+      JWT_SECRET: "${JWT_SECRET:?set JWT_SECRET in .env.production}"
+      APP_ENV: production
+      MINIO_ENDPOINT: minio:9000
+      MINIO_PUBLIC_ENDPOINT: minio:9000
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD}"
+      MINIO_BUCKET: "${MINIO_BUCKET:-cargoflows}"
+      MINIO_AI_BUCKET: "${MINIO_AI_BUCKET:-cargoflows-ai-private}"
+      CARGOFLOWS_SECRETS_MASTER_KEY: "${CARGOFLOWS_SECRETS_MASTER_KEY:?set CARGOFLOWS_SECRETS_MASTER_KEY in .env.production}"
+      OPENAI_BASE_URL: "${OPENAI_BASE_URL:-https://api.openai.com/v1}"
+      OPENAI_TEXT_MODEL: "${OPENAI_TEXT_MODEL:-gpt-5.6-terra}"
+      OPENAI_IMAGE_TOOL_MODEL: "${OPENAI_IMAGE_TOOL_MODEL:-gpt-5.6}"
+      OPENAI_REASONING_EFFORT: "${OPENAI_REASONING_EFFORT:-low}"
+      OPENAI_REQUEST_TIMEOUT: "${OPENAI_REQUEST_TIMEOUT:-300s}"
+      OPENAI_IMAGE_REQUEST_TIMEOUT: "${OPENAI_IMAGE_REQUEST_TIMEOUT:-600s}"
+      AI_WORKER_DRY_RUN: "${AI_WORKER_DRY_RUN:-false}"
+      AI_WORKER_POLL_INTERVAL: "${AI_WORKER_POLL_INTERVAL:-1s}"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+
+  cutover:
+    image: "${API_IMAGE:?set API_IMAGE in release.env}"
+    platform: linux/amd64
+    profiles: ["operations"]
+    entrypoint: ["/app/cargoflows-production-cutover"]
+    environment: *api_environment
+    depends_on:
+      mysql:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+
+  api:
+    image: "${API_IMAGE:?set API_IMAGE in release.env}"
+    platform: linux/amd64
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    environment: *api_environment
+    expose:
+      - "8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    image: "${API_IMAGE:?set API_IMAGE in release.env}"
+    platform: linux/amd64
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 90s
+    entrypoint: ["/app/cargoflows-worker"]
+    environment: *api_environment
+    depends_on:
+      api:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+
+  web:
+    image: "${WEB_IMAGE:?set WEB_IMAGE in release.env}"
+    platform: linux/amd64
+    restart: unless-stopped
+    init: true
+    environment:
+      API_BASE_URL: http://api:8080
+      MINIO_UPLOAD_BASE_URL: http://minio:9000
+      MINIO_SOURCE_BUCKET: "${MINIO_BUCKET:-cargoflows}"
+    ports:
+      - "127.0.0.1:4015:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3000/api/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  mysql_data:
+    name: "${MYSQL_VOLUME_NAME:-cargoflows-prod-mysql}"
+    external: true
+  minio_data:
+    name: "${MINIO_VOLUME_NAME:-cargoflows-prod-minio}"
+    external: true

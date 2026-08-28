@@ -45,16 +45,18 @@ describe("AIJobDetailPage", () => {
   });
 
   it("shows a structured failure reason, recovery action, attempted model, and request ID", async () => {
-    const failed = { ...job, status: "failed", items: [{ ...job.items[0], status: "failed", safe_error: "Selected OpenAI model is incompatible with this image API mode", failure: { code: "openai_model_incompatible", safe_message: "Selected OpenAI model is incompatible with this image API mode", recovery_action: "review_openai_settings", model: "gpt-image-2", api_mode: "responses", provider_request_id: "req_incompatible" }, executions: [{ ...job.items[0].executions[0], status: "failed", requested_model: "gpt-image-2", actual_model: "", provider_request_id: "req_incompatible", failure_code: "openai_model_incompatible", safe_error: "Selected OpenAI model is incompatible with this image API mode" }] }] };
+    const failed = { ...job, status: "failed", items: [{ ...job.items[0], status: "failed", safe_error: "Selected OpenAI model is incompatible with this image API mode", failure: { code: "openai_model_incompatible", stage: "provider_configuration", safe_message: "Selected OpenAI model is incompatible with this image API mode", recovery_action: "review_openai_settings", model: "gpt-image-2", api_mode: "responses", provider_request_id: "req_incompatible" }, executions: [{ ...job.items[0].executions[0], status: "failed", requested_model: "gpt-image-2", actual_model: "", provider_request_id: "req_incompatible", failure_code: "openai_model_incompatible", safe_error: "Selected OpenAI model is incompatible with this image API mode" }] }] };
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(failed), { status: 200 }));
     render(<AIJobDetailPage />, { wrapper: Providers });
     expect(await screen.findByText("失败原因")).toBeInTheDocument();
-    expect(screen.getByText("Selected OpenAI model is incompatible with this image API mode")).toBeInTheDocument();
+    expect(screen.getAllByText("OpenAI 配置").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/具体原因/).length).toBeGreaterThan(0);
+    expect(screen.getByText("OpenAI 拒绝了图片请求。此历史记录未保留具体无效参数，不能据此断定模型不兼容。")).toBeInTheDocument();
     expect(screen.getByText("Code: openai_model_incompatible")).toBeInTheDocument();
-    expect(screen.getByText(/检查模型与 API 路径是否兼容/)).toBeInTheDocument();
+    expect(screen.getAllByText(/检查模型与 API 路径是否兼容/).length).toBeGreaterThan(0);
     expect(screen.getAllByText("gpt-image-2").length).toBeGreaterThan(0);
     expect(screen.getByText("ID: req_incompatible")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "重新生成" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "重新生成" })).toHaveLength(1);
   });
 
   it("offers regeneration for a failed text slot and requeues it", async () => {
@@ -66,7 +68,7 @@ describe("AIJobDetailPage", () => {
       const path = String(input);
       const method = init?.method ?? "GET";
       requests.push({ path, method });
-      if (path.endsWith("/ai-jobs/job-1/items/item-title-failed/regenerate-text") && method === "POST") return new Response(JSON.stringify(queuedJob), { status: 202 });
+      if (path.endsWith("/ai-jobs/job-1/items/item-title-failed/regenerate") && method === "POST") return new Response(JSON.stringify(queuedJob), { status: 202 });
       if (path.endsWith("/ai-jobs/job-1/text-results")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
       if (path.endsWith("/ai-jobs/job-1")) return new Response(JSON.stringify(failedJob), { status: 200 });
       return new Response("not found", { status: 404 });
@@ -74,8 +76,26 @@ describe("AIJobDetailPage", () => {
     render(<AIJobDetailPage />, { wrapper: Providers });
 
     fireEvent.click(await screen.findByRole("button", { name: "重新生成" }));
-    await waitFor(() => expect(requests.some((request) => request.path.endsWith("/ai-jobs/job-1/items/item-title-failed/regenerate-text") && request.method === "POST")).toBe(true));
+    await waitFor(() => expect(requests.some((request) => request.path.endsWith("/ai-jobs/job-1/items/item-title-failed/regenerate") && request.method === "POST")).toBe(true));
     await waitFor(() => expect(screen.queryByRole("button", { name: "重新生成" })).not.toBeInTheDocument());
+  });
+
+  it("shows the regenerate API error instead of a generic retry message", async () => {
+    const failedTitle = { ...job.items[0], public_id: "item-title-api-error", slot_key: "title", kind: "title", status: "failed", safe_error: "Text generation failed", failure: { code: "internal_execution_error", stage: "task_execution", safe_message: "Text generation failed", recovery_action: "create_new_job", model: "", api_mode: "", provider_request_id: "" }, slot_snapshot: { ...job.items[0].slot_snapshot, public_id: "slot-title-error", slot_key: "title", kind: "title", name: { zh: "商品标题", en: "Product title" } } };
+    const failedJob = { ...job, status: "failed", items: [failedTitle] };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path.endsWith("/regenerate") && init?.method === "POST") return new Response(JSON.stringify({ code: "lifecycle_conflict", message: "AI job item is not failed" }), { status: 409 });
+      if (path.endsWith("/text-results")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      if (path.endsWith("/image-results")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      if (path.endsWith("/image-threads")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      return new Response(JSON.stringify(failedJob), { status: 200 });
+    });
+    render(<AIJobDetailPage />, { wrapper: Providers });
+
+    fireEvent.click(await screen.findByRole("button", { name: "重新生成" }));
+    expect(await screen.findByText(/AI job item is not failed.*lifecycle_conflict/)).toBeInTheDocument();
+    expect(screen.queryByText("重新生成请求失败，请稍后重试。")).not.toBeInTheDocument();
   });
 
   it("edits, approves, previews, and explicitly applies a text candidate", async () => {

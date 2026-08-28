@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+app_dir=${VPS_APP_DIR:-/opt/cargoflows}
+mysql_volume=${MYSQL_VOLUME_NAME:-cargoflows-prod-mysql}
+minio_volume=${MINIO_VOLUME_NAME:-cargoflows-prod-minio}
+lock_file=${CARGOFLOWS_LOCK_FILE:-/run/lock/cargoflows-deploy.lock}
+archive_name=${1:-}
+archive="$app_dir/imports/$archive_name"
+
+if [[ ! $archive_name =~ ^[0-9]{8}T[0-9]{6}Z-production-seed\.tar\.gz$ || ! -s $archive || ! -s $archive.sha256 ]]; then
+  echo "A valid uploaded production seed archive and checksum are required" >&2
+  exit 2
+fi
+if [[ ! -s $app_dir/.env.production ]]; then
+  echo "$app_dir/.env.production is missing" >&2
+  exit 1
+fi
+if [[ -e $app_dir/state/data-imported ]]; then
+  echo "Production data was already imported; refusing to overwrite it" >&2
+  exit 1
+fi
+
+exec 9>"$lock_file"
+if ! flock -n 9; then
+  echo "Another CargoFlows production operation is already running" >&2
+  exit 1
+fi
+
+(cd "$app_dir/imports" && sha256sum -c "$archive_name.sha256")
+if tar -tzf "$archive" | awk '$0 ~ /^\// || $0 ~ /(^|\/)\.\.(\/|$)/ { bad=1 } END { exit !bad }'; then
+  echo "Migration archive contains an unsafe path" >&2
+  exit 1
+fi
+
+stage=$(mktemp -d "$app_dir/imports/import.XXXXXX")
+release_tmp=""
+cleanup() {
+  rm -rf "$stage"
+  if [[ -n $release_tmp ]]; then rm -f "$release_tmp"; fi
+}
+trap cleanup EXIT
+tar -xzf "$archive" -C "$stage"
+for required in database.sql.gz objects.tar.gz MANIFEST SHA256SUMS; do
+  if [[ ! -s $stage/$required ]]; then
+    echo "Migration archive is missing $required" >&2
+    exit 1
+  fi
+done
+(cd "$stage" && sha256sum -c SHA256SUMS)
+grep -qx 'FORMAT=cargoflows-production-seed-v1' "$stage/MANIFEST"
+object_count=$(awk -F= '$1 == "OBJECT_COUNT" {print $2}' "$stage/MANIFEST")
+if [[ ! $object_count =~ ^[0-9]+$ ]]; then
+  echo "Migration manifest has an invalid object count" >&2
+  exit 1
+fi
+
+release_file=$app_dir/release.env
+if [[ ! -s $release_file ]]; then
+  release_tmp=$(mktemp "$app_dir/release.import.XXXXXX")
+  chmod 0600 "$release_tmp"
+  printf 'API_IMAGE=alpine:3.22\nWEB_IMAGE=alpine:3.22\nRELEASE_TAG=import-only\n' > "$release_tmp"
+  release_file=$release_tmp
+fi
+compose() {
+  docker compose --env-file "$app_dir/.env.production" --env-file "$release_file" -f "$app_dir/compose.production.yml" "$@"
+}
+
+docker volume create "$mysql_volume" >/dev/null
+docker volume create "$minio_volume" >/dev/null
+compose up -d --wait --wait-timeout 180 mysql minio
+table_count=$(compose exec -T mysql sh -ec \
+  'mysql -N -uroot --password="$MYSQL_ROOT_PASSWORD" -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=\"$MYSQL_DATABASE\""')
+if [[ $table_count != 0 ]]; then
+  echo "Production MySQL database is not empty; refusing to overwrite it" >&2
+  exit 1
+fi
+
+minio_container=$(compose ps -q minio)
+network=$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}' "$minio_container")
+existing_objects=$(docker run --rm --network "$network" --env-file "$app_dir/.env.production" \
+  --entrypoint /bin/sh minio/mc -ec '
+    mc alias set target http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null
+    mc find target --print "{url}" > /tmp/object-list
+    count=0
+    while IFS= read -r object; do
+      if [ -n "$object" ]; then count=$((count + 1)); fi
+    done < /tmp/object-list
+    printf "%s\n" "$count"
+  ' | tr -d ' ')
+if [[ $existing_objects != 0 ]]; then
+  echo "Production MinIO is not empty; refusing to overwrite it" >&2
+  exit 1
+fi
+
+gzip -dc "$stage/database.sql.gz" | compose exec -T mysql sh -ec \
+  'exec mysql -uroot --password="$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"'
+mkdir -p "$stage/object-data"
+tar -xzf "$stage/objects.tar.gz" -C "$stage/object-data"
+docker run --rm --network "$network" --env-file "$app_dir/.env.production" \
+  -v "$stage/object-data/objects:/import:ro" \
+  --entrypoint /bin/sh minio/mc -ec '
+    mc alias set target http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null
+    for bucket in "$MINIO_BUCKET" "$MINIO_AI_BUCKET"; do
+      mc mb --ignore-existing "target/$bucket" >/dev/null
+      if [ -d "/import/$bucket" ]; then
+        mc mirror --overwrite "/import/$bucket" "target/$bucket" >/dev/null
+      fi
+    done
+  '
+imported_objects=$(docker run --rm --network "$network" --env-file "$app_dir/.env.production" \
+  --entrypoint /bin/sh minio/mc -ec '
+    mc alias set target http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null
+    mc find target --print "{url}" > /tmp/object-list
+    count=0
+    while IFS= read -r object; do
+      if [ -n "$object" ]; then count=$((count + 1)); fi
+    done < /tmp/object-list
+    printf "%s\n" "$count"
+  ' | tr -d ' ')
+if [[ $imported_objects != "$object_count" ]]; then
+  echo "Imported MinIO object count $imported_objects does not match manifest $object_count" >&2
+  exit 1
+fi
+
+printf '%s\n' "$archive_name" > "$app_dir/state/data-imported"
+chmod 0600 "$app_dir/state/data-imported"
+echo "Imported CargoFlows production seed: objects=$imported_objects"

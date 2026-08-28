@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+repo_root=$(cd -- "$script_dir/../.." && pwd)
+ssh_target=${VPS_SSH_TARGET:-vps}
+remote_dir=${VPS_REMOTE_DIR:-/opt/cargoflows}
+
+if [[ $remote_dir != /opt/* || $remote_dir == /opt/ ]]; then
+  echo "VPS_REMOTE_DIR must be a dedicated directory below /opt" >&2
+  exit 1
+fi
+
+ssh "$ssh_target" "install -m 0700 -d '$remote_dir' '$remote_dir/bin' '$remote_dir/imports' '$remote_dir/rollback' '$remote_dir/state'"
+scp "$repo_root/compose.production.yml" "$ssh_target:$remote_dir/compose.production.yml.next"
+ssh "$ssh_target" "install -m 0600 '$remote_dir/compose.production.yml.next' '$remote_dir/compose.production.yml' && rm -f '$remote_dir/compose.production.yml.next'"
+
+for name in remote-deploy remote-import remote-rollback remote-verify remote-configure-tunnel; do
+  scp "$script_dir/$name" "$ssh_target:$remote_dir/bin/$name.next"
+  ssh "$ssh_target" "install -m 0700 '$remote_dir/bin/$name.next' '$remote_dir/bin/$name' && rm -f '$remote_dir/bin/$name.next'"
+done
+
+echo "Synced CargoFlows production operations files to $ssh_target:$remote_dir"

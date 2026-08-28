@@ -281,7 +281,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CARGOFLOWS_API_BASE_URL = "https://dev.cargoflows.cc/api/proxy/";
+				CARGOFLOWS_API_BASE_URL = "https://www.cargoflows.cc/api/proxy/";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;

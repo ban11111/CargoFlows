@@ -7,9 +7,10 @@ const signature =
 describe("storage upload proxy", () => {
   it("rewrites a signed loopback MinIO upload to the public app origin", () => {
     const result = proxyUploadURL(
-      `http://127.0.0.1:9000/cargoflows/photo-sessions/session/capture.jpg?${signature}`,
-      "https://dev.cargoflows.cc",
-      "cargoflows",
+		`http://127.0.0.1:9000/cargoflows/photo-sessions/session/capture.jpg?${signature}`,
+		"https://dev.cargoflows.cc",
+		"cargoflows",
+		"http://127.0.0.1:9000",
     );
 
     expect(result).toBe(
@@ -22,10 +23,19 @@ describe("storage upload proxy", () => {
     const wrongBucket = `http://127.0.0.1:9000/private/file.jpg?${signature}`;
     const publicURL = `https://uploads.example.test/cargoflows/file.jpg?${signature}`;
 
-    expect(proxyUploadURL(unsigned, "https://dev.cargoflows.cc", "cargoflows")).toBe(unsigned);
-    expect(proxyUploadURL(wrongBucket, "https://dev.cargoflows.cc", "cargoflows")).toBe(wrongBucket);
-    expect(proxyUploadURL(publicURL, "https://dev.cargoflows.cc", "cargoflows")).toBe(publicURL);
-  });
+		expect(proxyUploadURL(unsigned, "https://dev.cargoflows.cc", "cargoflows", "http://127.0.0.1:9000")).toBe(unsigned);
+		expect(proxyUploadURL(wrongBucket, "https://dev.cargoflows.cc", "cargoflows", "http://127.0.0.1:9000")).toBe(wrongBucket);
+		expect(proxyUploadURL(publicURL, "https://dev.cargoflows.cc", "cargoflows", "http://127.0.0.1:9000")).toBe(publicURL);
+	});
+
+	it("rewrites the exact configured Compose MinIO origin and rejects lookalike hosts", () => {
+		const internal = `http://minio:9000/cargoflows/file.jpg?${signature}`;
+		const lookalike = `http://minio.attacker.test:9000/cargoflows/file.jpg?${signature}`;
+		expect(proxyUploadURL(internal, "https://www.cargoflows.cc", "cargoflows", "http://minio:9000")).toBe(
+			`https://www.cargoflows.cc/api/storage/cargoflows/file.jpg?${signature}`,
+		);
+		expect(proxyUploadURL(lookalike, "https://www.cargoflows.cc", "cargoflows", "http://minio:9000")).toBe(lookalike);
+	});
 
   it("builds only signed upstream URLs in the configured source bucket", () => {
     const search = new URLSearchParams(signature);
@@ -38,7 +48,8 @@ describe("storage upload proxy", () => {
 
     expect(result?.pathname).toBe("/cargoflows/photo%20sessions/capture.jpg");
     expect(result?.host).toBe("127.0.0.1:9000");
-    expect(storageUpstreamURL(["private", "file.jpg"], search, "http://127.0.0.1:9000", "cargoflows")).toBeNull();
+		expect(storageUpstreamURL(["private", "file.jpg"], search, "http://127.0.0.1:9000", "cargoflows")).toBeNull();
+		expect(storageUpstreamURL(["cargoflows", "file.jpg"], search, "http://user:pass@minio:9000", "cargoflows")).toBeNull();
   });
 
   it("uses Cloudflare forwarded origin headers", () => {

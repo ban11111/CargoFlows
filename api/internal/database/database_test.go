@@ -602,3 +602,52 @@ func TestSeedCreatesPublishedPhoneCaseCaptureSOPFromExactPresets(t *testing.T) {
 		t.Fatal("seed required flags do not match presets")
 	}
 }
+
+func TestProductionSeedRefusesEmptyUserDatabase(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := SeedForEnvironment(db, "production"); err == nil || !strings.Contains(err.Error(), "no users") {
+		t.Fatalf("production seed error = %v, want no-users refusal", err)
+	}
+	var users int64
+	if err := db.Model(&models.User{}).Count(&users).Error; err != nil || users != 0 {
+		t.Fatalf("production seed created %d users, err=%v", users, err)
+	}
+}
+
+func TestProductionSeedRequiresSuperAdministrator(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	operator := models.User{Name: "Operator", Email: "operator@example.test", PasswordHash: "not-used", Role: models.RoleOperator, Status: "active"}
+	if err := db.Create(&operator).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := SeedForEnvironment(db, "production"); err == nil || !strings.Contains(err.Error(), "no super administrator") {
+		t.Fatalf("production seed error = %v, want missing-super-admin refusal", err)
+	}
+}
+
+func TestProductionSeedPreservesExistingUsers(t *testing.T) {
+	db := openTestDB(t)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	admin := models.User{Name: "Owner", Email: "owner@example.test", PasswordHash: "preserved", Role: models.RoleSuperAdmin, Status: "active"}
+	if err := db.Create(&admin).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := SeedForEnvironment(db, "production"); err != nil {
+		t.Fatal(err)
+	}
+	var users []models.User
+	if err := db.Find(&users).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(users) != 1 || users[0].Email != admin.Email || users[0].PasswordHash != "preserved" {
+		t.Fatalf("production users = %#v", users)
+	}
+}

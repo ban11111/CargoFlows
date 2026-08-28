@@ -201,19 +201,22 @@ func (q *Queue) Fail(ctx context.Context, item LeasedItem, safeError string) err
 }
 
 func (q *Queue) completeAt(ctx context.Context, item LeasedItem, now time.Time) error {
-	return q.finish(ctx, item, models.AIJobItemCompleted, "", now)
+	return q.finish(ctx, item, models.AIJobItemCompleted, "", "", now)
 }
 
 func (q *Queue) failAt(ctx context.Context, item LeasedItem, safeError string, now time.Time) error {
-	return q.finish(ctx, item, models.AIJobItemFailed, safeError, now)
+	return q.failAtWithCode(ctx, item, safeError, "", now)
 }
 
-func (q *Queue) finish(ctx context.Context, leased LeasedItem, status models.AIJobItemStatus, safeError string, now time.Time) error {
+func (q *Queue) failAtWithCode(ctx context.Context, item LeasedItem, safeError, failureCode string, now time.Time) error {
+	return q.finish(ctx, item, models.AIJobItemFailed, safeError, failureCode, now)
+}
+
+func (q *Queue) finish(ctx context.Context, leased LeasedItem, status models.AIJobItemStatus, safeError, failureCode string, now time.Time) error {
 	if leased.itemID == 0 || leased.LeaseOwner == "" {
 		return ErrInvalidLease
 	}
 	return q.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		failureCode := ""
 		if status == models.AIJobItemFailed {
 			var latest models.AIExecution
 			executionQuery := tx.Where("ai_job_item_id = ?", leased.itemID).Order("attempt_number DESC, id DESC")
@@ -310,7 +313,10 @@ func aggregateJob(tx *gorm.DB, jobID uint, now time.Time) error {
 	default:
 		status, completedAt = models.AIJobFailed, now
 	}
-	updates := map[string]any{"status": status, "completed_at": completedAt}
+	updates := map[string]any{"status": status, "completed_at": completedAt, "cancelled_at": nil}
+	if status == models.AIJobCancelled {
+		updates["cancelled_at"] = now
+	}
 	if status != models.AIJobQueued {
 		updates["started_at"] = gorm.Expr("COALESCE(started_at, ?)", now)
 	}

@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+token_file=/etc/cloudflared/cargoflows-prod.token
+unit_file=/etc/systemd/system/cloudflared-cargoflows.service
+
+if [[ ! -s $token_file ]]; then
+  echo "$token_file is missing or empty" >&2
+  exit 1
+fi
+if ! cloudflared tunnel run --help 2>&1 | grep -q -- '--token-file'; then
+  echo "Installed cloudflared does not support --token-file" >&2
+  exit 1
+fi
+
+chmod 0600 "$token_file"
+tmp_unit=$(mktemp)
+trap 'rm -f "$tmp_unit"' EXIT
+cat > "$tmp_unit" <<'UNIT'
+[Unit]
+Description=Cloudflare Tunnel for CargoFlows production
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate --protocol auto run --token-file /etc/cloudflared/cargoflows-prod.token
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+install -m 0644 "$tmp_unit" "$unit_file"
+systemctl daemon-reload
+systemctl enable --now cloudflared-cargoflows.service
+systemctl restart cloudflared-cargoflows.service
+systemctl --no-pager --full status cloudflared-cargoflows.service

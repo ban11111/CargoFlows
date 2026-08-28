@@ -20,7 +20,14 @@ import (
 
 var ErrExecutionInputInvalid = errors.New("AI execution input invalid")
 
-const defaultSafeExecutionError = "AI task execution failed"
+const (
+	defaultSafeExecutionError = "AI task execution failed"
+)
+
+type executionInputError struct{ reason string }
+
+func (e executionInputError) Error() string { return "AI execution input invalid: " + e.reason }
+func (e executionInputError) Unwrap() error { return ErrExecutionInputInvalid }
 
 type heartbeatTicker interface {
 	C() <-chan time.Time
@@ -87,7 +94,17 @@ func (w *Worker) RunOnce(ctx context.Context) (bool, error) {
 				if errors.Is(executionErr, ErrLeaseLost) {
 					return true, ErrLeaseLost
 				}
-				return true, w.queue.failAt(ctx, *item, defaultSafeExecutionError, w.clock.Now())
+				safeError := defaultSafeExecutionError
+				failureCode := ""
+				var inputError executionInputError
+				if errors.As(executionErr, &inputError) {
+					safeError = inputError.reason
+					failureCode = "invalid_input"
+				} else if errors.Is(executionErr, ErrExecutionInputInvalid) {
+					safeError = "AI task execution input is invalid"
+					failureCode = "invalid_input"
+				}
+				return true, w.queue.failAtWithCode(ctx, *item, safeError, failureCode, w.clock.Now())
 			}
 			return true, w.queue.completeAt(ctx, *item, w.clock.Now())
 		case <-ticker.C():
@@ -167,7 +184,7 @@ func (e *DryRunExecutor) Execute(ctx context.Context, leased LeasedItem) error {
 			}
 			return fmt.Errorf("load dry-run content slot: %w", err)
 		}
-		provenance, err := validateDryRunProvenance(job, item, version, relationalSlot)
+		provenance, err := validateExecutionProvenance(job, item, version, relationalSlot)
 		if err != nil {
 			return err
 		}
@@ -210,7 +227,7 @@ type dryRunProvenance struct {
 	slotPublicID      string
 }
 
-func validateDryRunProvenance(job models.AIJob, item models.AIJobItem, version models.AIContentTemplateVersion, relationalSlot models.AIContentSlot) (dryRunProvenance, error) {
+func validateExecutionProvenance(job models.AIJob, item models.AIJobItem, version models.AIContentTemplateVersion, relationalSlot models.AIContentSlot) (dryRunProvenance, error) {
 	operation := models.AIExecutionTextGenerate
 	switch item.Kind {
 	case models.AIContentSlotImage:
@@ -220,15 +237,18 @@ func validateDryRunProvenance(job models.AIJob, item models.AIJobItem, version m
 	default:
 		return dryRunProvenance{}, invalidExecutionInput("unsupported slot kind")
 	}
-	if job.SnapshotSchema != ProductSnapshotSchemaV1 {
+	if job.SnapshotSchema != ProductSnapshotSchemaV1 && job.SnapshotSchema != ProductSnapshotSchemaV2 {
 		return dryRunProvenance{}, invalidExecutionInput("unsupported job snapshot schema")
 	}
 	var snapshot ProductSnapshotV1
 	if err := decodeStrictJSON(job.InputSnapshotJSON, &snapshot); err != nil {
 		return dryRunProvenance{}, invalidExecutionInput("malformed job snapshot")
 	}
-	if snapshot.Schema != ProductSnapshotSchemaV1 {
+	if snapshot.Schema != job.SnapshotSchema {
 		return dryRunProvenance{}, invalidExecutionInput("job snapshot schema mismatch")
+	}
+	if snapshot.Schema == ProductSnapshotSchemaV2 && (!validOutputLocales(snapshot.OutputLocales) || snapshot.Locale != snapshot.OutputLocales[0]) {
+		return dryRunProvenance{}, invalidExecutionInput("invalid job output locales")
 	}
 	templateVersionID, err := uuid.Parse(snapshot.Template.VersionPublicID)
 	if err != nil || templateVersionID == uuid.Nil {
@@ -368,7 +388,7 @@ func equalJSONValue(left, right any) bool {
 }
 
 func invalidExecutionInput(reason string) error {
-	return fmt.Errorf("%w: %s", ErrExecutionInputInvalid, reason)
+	return executionInputError{reason: reason}
 }
 
 func decodeStrictJSON(data []byte, destination any) error {

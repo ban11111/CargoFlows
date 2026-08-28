@@ -157,7 +157,7 @@ func (e *ImageExecutor) prepare(ctx context.Context, leased LeasedItem) (prepare
 		if item.Kind != models.AIContentSlotImage {
 			return ErrRealImageGenerationUnsupported
 		}
-		if _, err := validateDryRunProvenance(job, item, version, relationalSlot); err != nil {
+		if _, err := validateExecutionProvenance(job, item, version, relationalSlot); err != nil {
 			return err
 		}
 		var snapshot ProductSnapshotV1
@@ -187,7 +187,11 @@ func (e *ImageExecutor) prepare(ctx context.Context, leased LeasedItem) (prepare
 		var turn models.AIImageTurn
 		turnErr := tx.Where("ai_image_thread_id = ? AND status = ?", thread.ID, models.AIImageTurnQueued).Order("sequence ASC").First(&turn).Error
 		if errors.Is(turnErr, gorm.ErrRecordNotFound) {
-			turn = models.AIImageTurn{PublicID: uuid.NewString(), AIImageThreadID: thread.ID, Sequence: 1, Operation: models.AIExecutionGenerate, RequestedCandidateCount: 1, Status: models.AIImageTurnQueued, ActorID: job.CreatedByID, ActorSnapshotJSON: job.CreatedBySnapshotJSON}
+			sequence, sequenceErr := nextImageTurnSequence(tx, thread.ID)
+			if sequenceErr != nil {
+				return sequenceErr
+			}
+			turn = models.AIImageTurn{PublicID: uuid.NewString(), AIImageThreadID: thread.ID, Sequence: sequence, Operation: models.AIExecutionGenerate, RequestedCandidateCount: 1, Status: models.AIImageTurnQueued, ActorID: job.CreatedByID, ActorSnapshotJSON: job.CreatedBySnapshotJSON}
 		} else if turnErr != nil {
 			return turnErr
 		}
@@ -239,9 +243,10 @@ func (e *ImageExecutor) prepare(ctx context.Context, leased LeasedItem) (prepare
 		for _, asset := range assets {
 			byID[asset.PublicID] = asset
 		}
-		keys := make([]string, 0, len(ids))
-		for _, id := range ids {
-			asset, ok := byID[id]
+		productAssets := ImageGenerationProductAssets(snapshot, slot)
+		keys := make([]string, 0, len(productAssets))
+		for _, fact := range productAssets {
+			asset, ok := byID[fact.PublicID]
 			if !ok {
 				return invalidExecutionInput("selected source asset mismatch")
 			}
@@ -268,7 +273,7 @@ func (e *ImageExecutor) prepare(ctx context.Context, leased LeasedItem) (prepare
 			}
 			keys = append(keys, stored.DerivativeObjectKey)
 		}
-		for _, reference := range imageGenerationExternalReferences(snapshot.ExternalReferences) {
+		for _, reference := range imageGenerationBinaryExternalReferences(snapshot.ExternalReferences) {
 			var stored models.AIReferenceItem
 			if err := tx.Where("public_id = ? AND sha256 = ?", reference.PublicID, reference.SHA256).First(&stored).Error; err != nil || stored.ObjectKey == "" {
 				return invalidExecutionInput("frozen external reference is unavailable")
@@ -279,6 +284,18 @@ func (e *ImageExecutor) prepare(ctx context.Context, leased LeasedItem) (prepare
 		return nil
 	})
 	return result, err
+}
+
+func nextImageTurnSequence(tx *gorm.DB, threadID uint) (int, error) {
+	var lastTurn models.AIImageTurn
+	err := tx.Where("ai_image_thread_id = ?", threadID).Order("sequence DESC").First(&lastTurn).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 1, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return lastTurn.Sequence + 1, nil
 }
 
 func imagePromptStyle(prompt CompiledImagePrompt) string {
@@ -405,8 +422,10 @@ func imageProviderFailureState(err error) (models.AIExecutionStatus, string) {
 		return models.AIExecutionFailed, "OpenAI authentication failed"
 	case errors.Is(err, ErrImageProviderRateLimit):
 		return models.AIExecutionFailed, "OpenAI rate limit was reached"
+	case errors.Is(err, ErrImageProviderPromptTooLong):
+		return models.AIExecutionFailed, "Image prompt exceeds OpenAI's 32,000-character limit"
 	case errors.Is(err, ErrImageProviderInvalidRequest):
-		return models.AIExecutionFailed, "Selected OpenAI model is incompatible with this image API mode"
+		return models.AIExecutionFailed, "OpenAI rejected one or more image request parameters"
 	case errors.Is(err, ErrImageProviderModeration):
 		return models.AIExecutionFailed, "OpenAI blocked the image request"
 	case errors.Is(err, ErrImageProviderRefusal):

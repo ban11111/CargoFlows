@@ -1443,6 +1443,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ai-jobs/{job_id}/items/{item_id}/regenerate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+                item_id: components["parameters"]["AIJobItemID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["regenerateAIJobItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ai-jobs/{job_id}/image-results": {
         parameters: {
             query?: never;
@@ -2782,6 +2801,8 @@ export interface components {
         };
         AIJobFailure: {
             code: string;
+            /** @enum {string} */
+            stage: "input_validation" | "snapshot_validation" | "source_assets" | "prompt_compilation" | "provider_configuration" | "provider_request" | "content_safety" | "result_storage" | "task_execution";
             safe_message: string;
             /** @enum {string} */
             recovery_action: "review_openai_settings" | "retry_later" | "adjust_input" | "contact_support" | "create_new_job";
@@ -7050,6 +7071,35 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalServerError"];
+        };
+    };
+    regenerateAIJobItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: components["parameters"]["AIJobID"];
+                item_id: components["parameters"]["AIJobItemID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Failed text or image slot queued for a new generation attempt while preserving execution history */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIJob"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             500: components["responses"]["InternalServerError"];
         };
     };

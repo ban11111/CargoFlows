@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+ssh_target=${VPS_SSH_TARGET:-vps}
+remote_dir=${VPS_REMOTE_DIR:-/opt/cargoflows}
+archive=${1:-}
+
+if [[ -z $archive || ! -s $archive || ! -s $archive.sha256 ]]; then
+  echo "Usage: ops/vps/import-vps PATH_TO_PRODUCTION_SEED.tar.gz" >&2
+  exit 2
+fi
+archive_name=$(basename -- "$archive")
+if [[ ! $archive_name =~ ^[0-9]{8}T[0-9]{6}Z-production-seed\.tar\.gz$ ]]; then
+  echo "Unexpected migration archive name: $archive_name" >&2
+  exit 1
+fi
+
+"$script_dir/sync-vps-files"
+scp "$archive" "$archive.sha256" "$ssh_target:$remote_dir/imports/"
+ssh "$ssh_target" "chmod 0600 '$remote_dir/imports/$archive_name' '$remote_dir/imports/$archive_name.sha256' && '$remote_dir/bin/remote-import' '$archive_name'"

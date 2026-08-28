@@ -7,6 +7,7 @@ COPY . .
 RUN go build -o /out/cargoflows-api ./cmd/server
 RUN go build -o /out/cargoflows-worker ./cmd/worker
 RUN go build -o /out/cargoflows-migrate ./cmd/migrate
+RUN go build -o /out/cargoflows-production-cutover ./cmd/production-cutover
 RUN go build -o /out/cargoflows-openai-smoke ./cmd/openai-smoke
 RUN go build -o /out/cargoflows-fake-openai ./cmd/fake-openai
 
@@ -18,6 +19,7 @@ WORKDIR /app
 COPY --from=build /out/cargoflows-api /app/cargoflows-api
 COPY --from=build /out/cargoflows-worker /app/cargoflows-worker
 COPY --from=build /out/cargoflows-migrate /app/cargoflows-migrate
+COPY --from=build /out/cargoflows-production-cutover /app/cargoflows-production-cutover
 COPY --from=build /out/cargoflows-openai-smoke /app/cargoflows-openai-smoke
 COPY --from=build /out/cargoflows-fake-openai /app/cargoflows-fake-openai
 EXPOSE 8080

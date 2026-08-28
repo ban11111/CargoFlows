@@ -168,7 +168,7 @@ func (executor *TextExecutor) prepare(ctx context.Context, leased LeasedItem) (p
 		if item.Kind != models.AIContentSlotTitle && item.Kind != models.AIContentSlotSEODescription {
 			return ErrRealImageGenerationUnsupported
 		}
-		if _, err := validateDryRunProvenance(job, item, version, relationalSlot); err != nil {
+		if _, err := validateExecutionProvenance(job, item, version, relationalSlot); err != nil {
 			return err
 		}
 		modelSnapshot := decodeJobModelSnapshot(job.ModelSnapshotJSON)
@@ -625,6 +625,8 @@ func failureCodeForSafeError(safe string) string {
 		return "openai_moderation_blocked"
 	case strings.Contains(value, "refused"):
 		return "openai_refused"
+	case strings.Contains(value, "prompt exceeds"), strings.Contains(value, "character limit"):
+		return "openai_prompt_too_long"
 	case strings.Contains(value, "model"):
 		return "openai_model_incompatible"
 	case strings.Contains(value, "stored"), strings.Contains(value, "storage"):

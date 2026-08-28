@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+output=${1:-.env.production}
+source_env=${SOURCE_ENV:-.env}
+
+if [[ -e $output ]]; then
+  echo "Refusing to overwrite existing file: $output" >&2
+  exit 1
+fi
+if [[ ! -r $source_env ]]; then
+  echo "Source environment is not readable: $source_env" >&2
+  exit 1
+fi
+
+master_key=$(awk -F= '$1 == "CARGOFLOWS_SECRETS_MASTER_KEY" {sub(/^[^=]*=/, ""); print; exit}' "$source_env")
+if [[ $master_key == \"*\" && $master_key == *\" ]]; then
+  master_key=${master_key:1:${#master_key}-2}
+elif [[ $master_key == \'*\' && $master_key == *\' ]]; then
+  master_key=${master_key:1:${#master_key}-2}
+fi
+if [[ -z $master_key ]]; then
+  echo "CARGOFLOWS_SECRETS_MASTER_KEY is missing from $source_env" >&2
+  exit 1
+fi
+decoded_key=$(mktemp)
+trap 'rm -f "$decoded_key"' EXIT
+if ! printf '%s' "$master_key" | openssl base64 -d -A > "$decoded_key" 2>/dev/null || [[ $(wc -c < "$decoded_key" | tr -d ' ') -ne 32 ]]; then
+  echo "CARGOFLOWS_SECRETS_MASTER_KEY must encode exactly 32 bytes" >&2
+  exit 1
+fi
+
+mysql_password=$(openssl rand -hex 32)
+mysql_root_password=$(openssl rand -hex 32)
+minio_password=$(openssl rand -hex 32)
+jwt_secret=$(openssl rand -base64 48 | tr -d '\n')
+
+umask 077
+printf '%s\n' \
+  'MYSQL_IMAGE=mysql:8.4' \
+  'MINIO_IMAGE=minio/minio:latest' \
+  'MYSQL_VOLUME_NAME=cargoflows-prod-mysql' \
+  'MINIO_VOLUME_NAME=cargoflows-prod-minio' \
+  'MYSQL_DATABASE=cargoflows' \
+  'MYSQL_USER=cargoflows' \
+  "MYSQL_PASSWORD=$mysql_password" \
+  "MYSQL_ROOT_PASSWORD=$mysql_root_password" \
+  'MINIO_ROOT_USER=cargoflows-prod' \
+  "MINIO_ROOT_PASSWORD=$minio_password" \
+  'MINIO_BUCKET=cargoflows' \
+  'MINIO_AI_BUCKET=cargoflows-ai-private' \
+  "JWT_SECRET=$jwt_secret" \
+  "CARGOFLOWS_SECRETS_MASTER_KEY=$master_key" \
+  'AI_WORKER_DRY_RUN=false' \
+  'AI_WORKER_POLL_INTERVAL=1s' \
+  'OPENAI_BASE_URL=https://api.openai.com/v1' \
+  'OPENAI_TEXT_MODEL=gpt-5.6-terra' \
+  'OPENAI_IMAGE_TOOL_MODEL=gpt-5.6' \
+  'OPENAI_REASONING_EFFORT=low' \
+  'OPENAI_REQUEST_TIMEOUT=300s' \
+  'OPENAI_IMAGE_REQUEST_TIMEOUT=600s' > "$output"
+chmod 0600 "$output"
+unset master_key mysql_password mysql_root_password minio_password jwt_secret
+echo "Created $output with new production-only credentials and the existing encryption master key"

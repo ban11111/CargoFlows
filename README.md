@@ -2,6 +2,9 @@
 
 CargoFlows is an internal SKU inventory, product-content, product-capture SOP, and AI asset workflow system.
 
+Production release, VPS migration, Cloudflare Tunnel, verification, and
+rollback procedures are documented in [`docs/vps-production.md`](docs/vps-production.md).
+
 ## Modules
 
 - `api/`: Go + Gin + GORM + MySQL backend.

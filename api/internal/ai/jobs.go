@@ -52,6 +52,7 @@ var (
 	ErrExternalReferenceNotEligible   = errors.New("external references must belong to a published same-category AI reference SOP")
 	ErrCompatibleDeviceModelRequired  = errors.New("compatible device model is required for the selected output")
 	ErrJobItemNotFound                = errors.New("AI job item not found")
+	ErrJobItemRegenerationConflict    = errors.New("AI job item is not failed")
 	ErrTextItemRegenerationInvalid    = errors.New("only failed text items can be regenerated")
 	ErrTextItemRegenerationConflict   = errors.New("AI text item is not failed")
 )
@@ -314,6 +315,7 @@ type JobExecutionDocument struct {
 
 type JobFailureDocument struct {
 	Code              string `json:"code"`
+	Stage             string `json:"stage"`
 	SafeMessage       string `json:"safe_message"`
 	RecoveryAction    string `json:"recovery_action"`
 	Model             string `json:"model"`
@@ -377,6 +379,16 @@ func NewJobService(db *gorm.DB) *JobService { return &JobService{db: db} }
 // RegenerateTextItem requeues one failed text slot while preserving every
 // previous execution and result as immutable job history.
 func (s *JobService) RegenerateTextItem(ctx context.Context, jobPublicID, itemPublicID string, actorID uint) (JobDocument, error) {
+	return s.regenerateItem(ctx, jobPublicID, itemPublicID, actorID, true)
+}
+
+// RegenerateItem requeues any failed output slot while preserving every
+// previous execution, image turn, and result as immutable job history.
+func (s *JobService) RegenerateItem(ctx context.Context, jobPublicID, itemPublicID string, actorID uint) (JobDocument, error) {
+	return s.regenerateItem(ctx, jobPublicID, itemPublicID, actorID, false)
+}
+
+func (s *JobService) regenerateItem(ctx context.Context, jobPublicID, itemPublicID string, actorID uint, textOnly bool) (JobDocument, error) {
 	var document JobDocument
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		query := tx
@@ -390,18 +402,25 @@ func (s *JobService) RegenerateTextItem(ctx context.Context, jobPublicID, itemPu
 			}
 			return err
 		}
+		itemQuery := tx
+		if tx.Dialector.Name() == "mysql" {
+			itemQuery = itemQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
 		var item models.AIJobItem
-		if err := query.Where("public_id = ? AND ai_job_id = ?", itemPublicID, job.ID).First(&item).Error; err != nil {
+		if err := itemQuery.Where("public_id = ? AND ai_job_id = ?", itemPublicID, job.ID).First(&item).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrJobItemNotFound
 			}
 			return err
 		}
-		if item.Kind != models.AIContentSlotTitle && item.Kind != models.AIContentSlotSEODescription {
+		if textOnly && item.Kind != models.AIContentSlotTitle && item.Kind != models.AIContentSlotSEODescription {
 			return ErrTextItemRegenerationInvalid
 		}
 		if item.Status != models.AIJobItemFailed {
-			return ErrTextItemRegenerationConflict
+			if textOnly {
+				return ErrTextItemRegenerationConflict
+			}
+			return ErrJobItemRegenerationConflict
 		}
 		updated := tx.Model(&models.AIJobItem{}).
 			Where("id = ? AND status = ?", item.ID, models.AIJobItemFailed).
@@ -413,7 +432,10 @@ func (s *JobService) RegenerateTextItem(ctx context.Context, jobPublicID, itemPu
 			return updated.Error
 		}
 		if updated.RowsAffected != 1 {
-			return ErrTextItemRegenerationConflict
+			if textOnly {
+				return ErrTextItemRegenerationConflict
+			}
+			return ErrJobItemRegenerationConflict
 		}
 		now := time.Now().UTC()
 		if err := aggregateJob(tx, job.ID, now); err != nil {
@@ -424,7 +446,11 @@ func (s *JobService) RegenerateTextItem(ctx context.Context, jobPublicID, itemPu
 			return err
 		}
 		jobID, itemID := job.ID, item.ID
-		audit := models.AIAuditEvent{PublicID: uuid.NewString(), EventType: "ai_job_item.text_regeneration_requested", EntityType: "ai_job_item", EntityPublicID: item.PublicID, ActorID: &actorID, AIJobID: &jobID, AIJobItemID: &itemID, MetadataJSON: metadata}
+		eventType := "ai_job_item.image_regeneration_requested"
+		if item.Kind == models.AIContentSlotTitle || item.Kind == models.AIContentSlotSEODescription {
+			eventType = "ai_job_item.text_regeneration_requested"
+		}
+		audit := models.AIAuditEvent{PublicID: uuid.NewString(), EventType: eventType, EntityType: "ai_job_item", EntityPublicID: item.PublicID, ActorID: &actorID, AIJobID: &jobID, AIJobItemID: &itemID, MetadataJSON: metadata}
 		if err := tx.Create(&audit).Error; err != nil {
 			return fmt.Errorf("audit AI text regeneration: %w", err)
 		}
@@ -1594,7 +1620,8 @@ func jobDocument(job models.AIJob, versionPublicID string) JobDocument {
 		}
 		var failure *JobFailureDocument
 		if item.SafeError != "" || item.FailureCode != "" {
-			failure = &JobFailureDocument{Code: defaultString(item.FailureCode, "internal_execution_error"), SafeMessage: item.SafeError, RecoveryAction: recoveryActionForFailure(item.FailureCode)}
+			code := defaultString(item.FailureCode, "internal_execution_error")
+			failure = &JobFailureDocument{Code: code, Stage: failureStage(code, item.SafeError), SafeMessage: item.SafeError, RecoveryAction: recoveryActionForFailure(item.FailureCode)}
 			if len(executions) > 0 {
 				latest := executions[len(executions)-1]
 				failure.Model = defaultString(latest.ActualModel, latest.RequestedModel)
@@ -1609,6 +1636,38 @@ func jobDocument(job models.AIJob, versionPublicID string) JobDocument {
 		reconciliationStatus = "pending"
 	}
 	return JobDocument{PublicID: job.PublicID, SKUID: job.SKU.PublicID, TemplateVersionPublicID: versionPublicID, TargetPlatform: job.TargetPlatform, Locale: job.Locale, OutputLocales: outputLocalesForJob(job), Status: job.Status, SnapshotSchema: job.SnapshotSchema, InputSnapshot: append(json.RawMessage(nil), job.InputSnapshotJSON...), CreatedBy: creator, CreatedBySnapshot: creator, ModelSnapshot: modelSnapshot, StartedAt: job.StartedAt, CompletedAt: job.CompletedAt, CancelledAt: job.CancelledAt, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt, Items: items, TotalTokens: totalTokens, EstimatedAmountUSD: money.Format(estimatedTotal), ReconciledAmountUSD: "0.00000000", ReconciliationStatus: reconciliationStatus}
+}
+
+func failureStage(code, safeMessage string) string {
+	message := strings.ToLower(safeMessage)
+	if code == "openai_prompt_too_long" {
+		return "prompt_compilation"
+	}
+	if code == "invalid_input" {
+		switch {
+		case strings.Contains(message, "prompt"):
+			return "prompt_compilation"
+		case strings.Contains(message, "asset") || strings.Contains(message, "reference"):
+			return "source_assets"
+		case strings.Contains(message, "snapshot") || strings.Contains(message, "provenance") || strings.Contains(message, "binding") || strings.Contains(message, "canvas") || strings.Contains(message, "slot"):
+			return "snapshot_validation"
+		default:
+			return "input_validation"
+		}
+	}
+	if strings.Contains(code, "auth") || strings.Contains(code, "model") || strings.Contains(code, "credential") {
+		return "provider_configuration"
+	}
+	if strings.Contains(code, "moderation") || strings.Contains(code, "refusal") || strings.Contains(code, "safety") {
+		return "content_safety"
+	}
+	if strings.Contains(code, "storage") || strings.Contains(code, "upload") {
+		return "result_storage"
+	}
+	if strings.HasPrefix(code, "openai_") {
+		return "provider_request"
+	}
+	return "task_execution"
 }
 
 func outputLocalesForJob(job models.AIJob) []string {
@@ -1648,6 +1707,8 @@ func recoveryActionForFailure(code string) string {
 	case "openai_rate_limited", "openai_timeout_ambiguous", "openai_transport_ambiguous", "openai_server_error_ambiguous":
 		return "retry_later"
 	case "openai_moderation_blocked", "openai_refused", "invalid_input":
+		return "adjust_input"
+	case "openai_prompt_too_long":
 		return "adjust_input"
 	case "storage_unavailable":
 		return "contact_support"

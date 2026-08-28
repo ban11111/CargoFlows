@@ -244,6 +244,22 @@ func TestRegenerateTextItemRequeuesOnlyFailedTextAndAuditsActor(t *testing.T) {
 	}
 }
 
+func TestFailureStageExplainsWhereExecutionFailed(t *testing.T) {
+	tests := []struct{ code, message, want string }{
+		{"invalid_input", "unsupported job snapshot schema", "snapshot_validation"},
+		{"invalid_input", "image prompt compilation failed", "prompt_compilation"},
+		{"invalid_input", "selected source asset is unavailable", "source_assets"},
+		{"openai_model_incompatible", "model mismatch", "provider_configuration"},
+		{"openai_timeout_ambiguous", "timed out", "provider_request"},
+		{"storage_failed", "upload failed", "result_storage"},
+	}
+	for _, test := range tests {
+		if got := failureStage(test.code, test.message); got != test.want {
+			t.Errorf("failureStage(%q, %q) = %q, want %q", test.code, test.message, got, test.want)
+		}
+	}
+}
+
 func TestRegenerateTextItemRejectsFailedImage(t *testing.T) {
 	db, fixture := seedAIJobFixture(t)
 	service := NewJobService(db)
@@ -260,6 +276,17 @@ func TestRegenerateTextItemRejectsFailedImage(t *testing.T) {
 	}
 	if _, err := service.RegenerateTextItem(t.Context(), job.PublicID, job.Items[0].PublicID, fixture.Operator.ID); !errors.Is(err, ErrTextItemRegenerationInvalid) {
 		t.Fatalf("failed image regeneration error = %v", err)
+	}
+	regenerated, err := service.RegenerateItem(t.Context(), job.PublicID, job.Items[0].PublicID, fixture.Operator.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if regenerated.Status != models.AIJobQueued || regenerated.Items[0].Status != models.AIJobItemQueued || regenerated.Items[0].SafeError != "" {
+		t.Fatalf("regenerated image job = %#v", regenerated)
+	}
+	var audit models.AIAuditEvent
+	if err := db.Where("event_type = ? AND entity_public_id = ?", "ai_job_item.image_regeneration_requested", job.Items[0].PublicID).First(&audit).Error; err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -781,12 +808,18 @@ func TestCreateJobRejectsInvalidRuntimeConfiguration(t *testing.T) {
 	bilingual.Locale = ""
 	bilingual.OutputLocales = []string{"en", "zh-CN"}
 	normalized, _, err = normalizeCreateJobInput(bilingual)
-	if err != nil || normalized.Locale != "en" || !reflect.DeepEqual(normalized.OutputLocales, []string{"en", "zh-CN"}) { t.Fatalf("bilingual normalization = %#v/%v", normalized, err) }
+	if err != nil || normalized.Locale != "en" || !reflect.DeepEqual(normalized.OutputLocales, []string{"en", "zh-CN"}) {
+		t.Fatalf("bilingual normalization = %#v/%v", normalized, err)
+	}
 	for _, invalid := range [][]string{{}, {"zh-CN", "en"}, {"en", "en"}, {"fr"}} {
 		candidate := bilingual
 		candidate.OutputLocales = invalid
-		if len(invalid) == 0 { candidate.Locale = "" }
-		if _, _, err := normalizeCreateJobInput(candidate); !errors.Is(err, ErrOutputLocalesInvalid) && !(len(invalid) == 0 && errors.Is(err, ErrLocaleInvalid)) { t.Fatalf("output locales %v error = %v", invalid, err) }
+		if len(invalid) == 0 {
+			candidate.Locale = ""
+		}
+		if _, _, err := normalizeCreateJobInput(candidate); !errors.Is(err, ErrOutputLocalesInvalid) && !(len(invalid) == 0 && errors.Is(err, ErrLocaleInvalid)) {
+			t.Fatalf("output locales %v error = %v", invalid, err)
+		}
 	}
 	base.Locale = strings.Repeat("x", 33)
 	if _, err := service.Create(t.Context(), base); !errors.Is(err, ErrLocaleInvalid) {

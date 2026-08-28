@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type OpenAIImagesConfig struct {
@@ -103,6 +104,9 @@ func (client *OpenAIImagesClient) Generate(ctx context.Context, apiKey []byte, r
 
 func imagesRequestBody(model string, request ImageRequest) ([]byte, string, string, error) {
 	providerPrompt := request.Prompt.ImagesAPIPrompt()
+	if utf8.RuneCountInString(providerPrompt) > maxImagesAPIPromptCharacters {
+		return nil, "", "", &ImageProviderError{Kind: ErrImageProviderPromptTooLong}
+	}
 	expectedInputs, err := request.Prompt.ExpectedInputCount()
 	if strings.TrimSpace(request.Prompt.TaskBrief) == "" || len(request.Prompt.NormalizedInputJSON) == 0 || len(request.Prompt.OrderedInputListJSON) == 0 || err != nil || expectedInputs != len(request.Inputs) {
 		return nil, "", "", &ImageProviderError{Kind: ErrImageProviderInvalidRequest}

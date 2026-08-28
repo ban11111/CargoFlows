@@ -13,6 +13,7 @@ var (
 	ErrImageProviderInvalidResponse    = errors.New("image provider response is invalid")
 	ErrImageProviderRefusal            = errors.New("image provider refused the request")
 	ErrImageProviderModeration         = errors.New("image provider blocked the request for moderation")
+	ErrImageProviderPromptTooLong      = errors.New("image provider prompt exceeds the supported character limit")
 	ErrImageProviderAmbiguousTimeout   = errors.New("image provider request timed out after it may have been sent")
 	ErrImageProviderAmbiguousTransport = errors.New("image provider transport failed after the request may have been sent")
 )

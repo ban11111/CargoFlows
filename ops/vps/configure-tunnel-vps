@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+ssh_target=${VPS_SSH_TARGET:-vps}
+remote_dir=${VPS_REMOTE_DIR:-/opt/cargoflows}
+
+if [[ ! -t 0 ]]; then
+  echo "Run this command from an interactive terminal" >&2
+  exit 1
+fi
+
+read -r -s -p "Cloudflare CargoFlows Tunnel token: " tunnel_token
+printf '\n'
+if [[ -z $tunnel_token ]]; then
+  echo "Tunnel token cannot be empty" >&2
+  exit 1
+fi
+
+"$script_dir/sync-vps-files"
+printf '%s' "$tunnel_token" | ssh "$ssh_target" \
+  "umask 077; install -m 0755 -d /etc/cloudflared; install -m 0600 /dev/stdin /etc/cloudflared/cargoflows-prod.token"
+unset tunnel_token
+ssh "$ssh_target" "$remote_dir/bin/remote-configure-tunnel"

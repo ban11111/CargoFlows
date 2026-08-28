@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+repo_root=$(cd -- "$script_dir/../.." && pwd)
+source_dir=${SOURCE_COMPOSE_DIR:-$repo_root}
+artifact_dir=${MIGRATION_ARTIFACT_DIR:-$repo_root/migration-artifacts}
+
+mysql_was_running=$(docker compose --project-directory "$source_dir" -f "$source_dir/docker-compose.yml" ps --status running -q mysql)
+minio_was_running=$(docker compose --project-directory "$source_dir" -f "$source_dir/docker-compose.yml" ps --status running -q minio)
+stage=$(mktemp -d)
+cleanup() {
+  rm -rf "$stage"
+  if [[ -z $mysql_was_running ]]; then
+    docker compose --project-directory "$source_dir" -f "$source_dir/docker-compose.yml" stop mysql >/dev/null 2>&1 || true
+  fi
+  if [[ -z $minio_was_running ]]; then
+    docker compose --project-directory "$source_dir" -f "$source_dir/docker-compose.yml" stop minio >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
+
+docker compose --project-directory "$source_dir" -f "$source_dir/docker-compose.yml" up -d --wait mysql minio
+docker compose --project-directory "$source_dir" -f "$source_dir/docker-compose.yml" exec -T mysql sh -ec \
+  'exec mysqldump --single-transaction --quick --routines --triggers --events -uroot --password="$MYSQL_ROOT_PASSWORD" cargoflows' \
+  | gzip -9 > "$stage/database.sql.gz"
+
+mkdir -p "$stage/objects"
+minio_container=$(docker compose --project-directory "$source_dir" -f "$source_dir/docker-compose.yml" ps -q minio)
+network=$(docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}' "$minio_container")
+if [[ -z $network ]]; then
+  echo "Could not discover the local MinIO Docker network" >&2
+  exit 1
+fi
+docker run --rm --network "$network" \
+  -v "$stage/objects:/export" \
+  --entrypoint /bin/sh minio/mc -ec '
+    mc alias set source http://minio:9000 cargoflows cargoflows123 >/dev/null
+    for bucket in cargoflows cargoflows-ai-private; do
+      mkdir -p "/export/$bucket"
+      if mc stat "source/$bucket" >/dev/null 2>&1; then
+        mc mirror --overwrite "source/$bucket" "/export/$bucket" >/dev/null
+      fi
+    done
+  '
+
+object_count=$(find "$stage/objects" -type f | wc -l | tr -d ' ')
+tar -C "$stage" -czf "$stage/objects.tar.gz" objects
+rm -rf "$stage/objects"
+printf 'FORMAT=cargoflows-production-seed-v1\nOBJECT_COUNT=%s\nSOURCE=local-compose\n' "$object_count" > "$stage/MANIFEST"
+(cd "$stage" && shasum -a 256 database.sql.gz objects.tar.gz MANIFEST > SHA256SUMS)
+
+mkdir -p "$artifact_dir"
+timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+archive="$artifact_dir/$timestamp-production-seed.tar.gz"
+tar -C "$stage" -czf "$archive" database.sql.gz objects.tar.gz MANIFEST SHA256SUMS
+(cd "$artifact_dir" && shasum -a 256 "$(basename -- "$archive")" > "$(basename -- "$archive").sha256")
+chmod 0600 "$archive" "$archive.sha256"
+echo "Created $archive with $object_count MinIO objects; no secrets were included"

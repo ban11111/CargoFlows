@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+ssh_target=${VPS_SSH_TARGET:-vps}
+remote_dir=${VPS_REMOTE_DIR:-/opt/cargoflows}
+env_file=${1:-}
+
+if [[ -z $env_file || ! -s $env_file ]]; then
+  echo "Usage: ops/vps/install-production-env PATH_TO_ENV" >&2
+  exit 2
+fi
+
+"$script_dir/sync-vps-files"
+scp "$env_file" "$ssh_target:$remote_dir/.env.production.next"
+ssh "$ssh_target" "install -m 0600 '$remote_dir/.env.production.next' '$remote_dir/.env.production' && rm -f '$remote_dir/.env.production.next'"
+echo "Installed production environment on $ssh_target without displaying secrets"

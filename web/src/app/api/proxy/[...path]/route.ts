@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { proxyUploadURL, publicRequestOrigin } from "@/lib/storage-upload";
 
 const API_BASE_URL = process.env.API_BASE_URL ?? "http://localhost:8080";
+const MINIO_UPLOAD_BASE_URL = process.env.MINIO_UPLOAD_BASE_URL ?? "http://127.0.0.1:9000";
 const MINIO_SOURCE_BUCKET = process.env.MINIO_SOURCE_BUCKET ?? "cargoflows";
 
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
@@ -37,11 +38,12 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
   if (upstream.ok && path.at(-1) === "upload-url" && responseHeaders.get("content-type")?.includes("application/json")) {
     const payload = (await upstream.json()) as Record<string, unknown>;
     if (typeof payload.upload_url === "string") {
-      payload.upload_url = proxyUploadURL(
-        payload.upload_url,
-        publicRequestOrigin(request.nextUrl, request.headers),
-        MINIO_SOURCE_BUCKET,
-      );
+		payload.upload_url = proxyUploadURL(
+			payload.upload_url,
+			publicRequestOrigin(request.nextUrl, request.headers),
+			MINIO_SOURCE_BUCKET,
+			MINIO_UPLOAD_BASE_URL,
+		);
     }
     responseHeaders.delete("content-length");
     return NextResponse.json(payload, { status: upstream.status, headers: responseHeaders });

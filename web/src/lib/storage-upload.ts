@@ -23,21 +23,26 @@ export function publicRequestOrigin(requestURL: URL, headers: Headers): string {
   return `${protocol}://${host}`;
 }
 
-export function proxyUploadURL(rawURL: string, origin: string, bucket: string): string {
-  let uploadURL: URL;
-  try {
-    uploadURL = new URL(rawURL);
-  } catch {
-    return rawURL;
-  }
+export function proxyUploadURL(rawURL: string, origin: string, bucket: string, upstreamEndpoint: string): string {
+	let uploadURL: URL;
+	let trustedUpstream: URL;
+	try {
+		uploadURL = new URL(rawURL);
+		trustedUpstream = new URL(upstreamEndpoint);
+	} catch {
+		return rawURL;
+	}
 
-  const loopbackHosts = new Set(["127.0.0.1", "localhost", "[::1]"]);
-  if (
-    uploadURL.protocol !== "http:" ||
-    !loopbackHosts.has(uploadURL.hostname) ||
-    uploadURL.port !== "9000" ||
-    !uploadURL.pathname.startsWith(`/${bucket}/`) ||
-    !hasPresignedUploadSignature(uploadURL)
+	if (
+		trustedUpstream.protocol !== "http:" ||
+		trustedUpstream.username !== "" ||
+		trustedUpstream.password !== "" ||
+		trustedUpstream.pathname !== "/" ||
+		trustedUpstream.search !== "" ||
+		trustedUpstream.hash !== "" ||
+		uploadURL.origin !== trustedUpstream.origin ||
+		!uploadURL.pathname.startsWith(`/${bucket}/`) ||
+		!hasPresignedUploadSignature(uploadURL)
   ) {
     return rawURL;
   }
@@ -53,9 +58,23 @@ export function storageUpstreamURL(
   endpoint: string,
   bucket: string,
 ): URL | null {
-  if (path[0] !== bucket || !path[1]) return null;
+	if (path[0] !== bucket || !path[1]) return null;
+	let configured: URL;
+	try {
+		configured = new URL(endpoint);
+	} catch {
+		return null;
+	}
+	if (
+		configured.protocol !== "http:" ||
+		configured.username !== "" ||
+		configured.password !== "" ||
+		configured.pathname !== "/" ||
+		configured.search !== "" ||
+		configured.hash !== ""
+	) return null;
 
-  const upstream = new URL(path.map(encodeURIComponent).join("/"), `${endpoint.replace(/\/$/, "")}/`);
+	const upstream = new URL(path.map(encodeURIComponent).join("/"), configured);
   searchParams.forEach((value, key) => upstream.searchParams.append(key, value));
   return hasPresignedUploadSignature(upstream) ? upstream : null;
 }

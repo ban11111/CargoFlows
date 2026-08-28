@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+app_dir=${VPS_APP_DIR:-/opt/cargoflows}
+minio_volume=${MINIO_VOLUME_NAME:-cargoflows-prod-minio}
+lock_file=${CARGOFLOWS_LOCK_FILE:-/run/lock/cargoflows-deploy.lock}
+last_backup_file="$app_dir/state/last-backup"
+
+if [[ ! -s $last_backup_file ]]; then
+  echo "No deployment backup is available" >&2
+  exit 1
+fi
+backup_dir=$(<"$last_backup_file")
+if [[ $backup_dir != "$app_dir"/rollback/* || ! -s $backup_dir/database.sql.gz || ! -s $backup_dir/minio-data.tar.gz ]]; then
+  echo "The recorded rollback directory is invalid" >&2
+  exit 1
+fi
+(cd "$backup_dir" && sha256sum -c SHA256SUMS)
+
+exec 9>"$lock_file"
+if ! flock -n 9; then
+  echo "Another CargoFlows production operation is already running" >&2
+  exit 1
+fi
+
+release_file=$app_dir/release.env
+if [[ ! -s $release_file ]]; then
+  release_file=$backup_dir/release.env
+fi
+if [[ ! -s $release_file ]]; then
+  echo "No release metadata is available for restore" >&2
+  exit 1
+fi
+
+compose() {
+  docker compose --env-file "$app_dir/.env.production" --env-file "$release_file" -f "$app_dir/compose.production.yml" "$@"
+}
+
+compose stop -t 90 web worker api || true
+compose up -d mysql minio
+compose exec -T mysql sh -ec \
+  'mysql -uroot --password="$MYSQL_ROOT_PASSWORD" -e "DROP DATABASE IF EXISTS \`$MYSQL_DATABASE\`; CREATE DATABASE \`$MYSQL_DATABASE\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; GRANT ALL ON \`$MYSQL_DATABASE\`.* TO \`$MYSQL_USER\`@\`%\`;"'
+gzip -dc "$backup_dir/database.sql.gz" | compose exec -T mysql sh -ec \
+  'exec mysql -uroot --password="$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"'
+
+compose stop minio
+docker run --rm --user 0 \
+  -v "$minio_volume:/data" \
+  -v "$backup_dir:/backup:ro" \
+  alpine:3.22 sh -ec 'find /data -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +; cd /data; tar -xzf /backup/minio-data.tar.gz'
+compose up -d minio
+
+if [[ -s $backup_dir/cutover-complete ]]; then
+  install -m 0600 "$backup_dir/cutover-complete" "$app_dir/state/cutover-complete"
+else
+  rm -f "$app_dir/state/cutover-complete"
+fi
+
+if [[ ! -s $backup_dir/release.env ]]; then
+  echo "Restored imported data from the failed first release; application services remain stopped"
+  exit 0
+fi
+install -m 0600 "$backup_dir/release.env" "$app_dir/release.env"
+release_file=$app_dir/release.env
+compose up -d --no-deps api
+for _ in $(seq 1 60); do
+  if compose exec -T api wget -q -O - http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
+    compose up -d --no-deps worker web
+    echo "Rollback completed; writes after the deployment snapshot were discarded"
+    exit 0
+  fi
+  sleep 2
+done
+echo "Rollback data was restored, but the previous API did not become healthy" >&2
+exit 1

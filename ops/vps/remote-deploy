@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+app_dir=${VPS_APP_DIR:-/opt/cargoflows}
+tag=${1:-}
+registry=${GHCR_REGISTRY:-ghcr.io}
+namespace=${GHCR_NAMESPACE:-ban11111}
+mysql_volume=${MYSQL_VOLUME_NAME:-cargoflows-prod-mysql}
+minio_volume=${MINIO_VOLUME_NAME:-cargoflows-prod-minio}
+lock_file=${CARGOFLOWS_LOCK_FILE:-/run/lock/cargoflows-deploy.lock}
+
+if [[ ! $tag =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+  echo "Usage: remote-deploy vMAJOR.MINOR.PATCH" >&2
+  exit 2
+fi
+if [[ ! -s $app_dir/.env.production ]]; then
+  echo "$app_dir/.env.production is missing or empty" >&2
+  exit 1
+fi
+if [[ ! -s $app_dir/state/data-imported ]]; then
+  echo "Production data has not been imported; run import-vps before the first deployment" >&2
+  exit 1
+fi
+
+exec 9>"$lock_file"
+if ! flock -n 9; then
+  echo "Another CargoFlows production operation is already running" >&2
+  exit 1
+fi
+
+api_tagged="$registry/$namespace/cargoflows-api:$tag"
+web_tagged="$registry/$namespace/cargoflows-web:$tag"
+docker pull --platform linux/amd64 "$api_tagged"
+docker pull --platform linux/amd64 "$web_tagged"
+
+resolve_digest() {
+  local image=$1
+  docker image inspect --format '{{index .RepoDigests 0}}' "$image"
+}
+
+new_release=$(mktemp "$app_dir/release.env.XXXXXX")
+trap 'rm -f "$new_release"' EXIT
+chmod 0600 "$new_release"
+printf 'API_IMAGE=%s\nWEB_IMAGE=%s\nRELEASE_TAG=%s\n' \
+  "$(resolve_digest "$api_tagged")" "$(resolve_digest "$web_tagged")" "$tag" > "$new_release"
+
+compose_with() {
+  local release_file=$1
+  shift
+  docker compose \
+    --env-file "$app_dir/.env.production" \
+    --env-file "$release_file" \
+    -f "$app_dir/compose.production.yml" \
+    "$@"
+}
+
+compose_with "$new_release" config --quiet
+docker volume create "$mysql_volume" >/dev/null
+docker volume create "$minio_volume" >/dev/null
+compose_with "$new_release" up -d mysql minio
+
+if [[ -s $app_dir/release.env ]]; then
+  compose_with "$app_dir/release.env" stop -t 90 web worker api || true
+else
+  docker ps -q --filter label=com.docker.compose.project=cargoflows-prod | xargs -r docker stop --time 90
+  compose_with "$new_release" up -d mysql minio
+fi
+
+timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+backup_dir="$app_dir/rollback/$timestamp-before-$tag"
+mkdir -m 0700 "$backup_dir"
+if [[ -s $app_dir/release.env ]]; then
+  install -m 0600 "$app_dir/release.env" "$backup_dir/release.env"
+  install -m 0600 "$app_dir/release.env" "$app_dir/state/previous-release.env"
+fi
+if [[ -s $app_dir/state/cutover-complete ]]; then
+  install -m 0600 "$app_dir/state/cutover-complete" "$backup_dir/cutover-complete"
+fi
+
+compose_with "$new_release" exec -T mysql sh -ec \
+  'exec mysqldump --single-transaction --quick --routines --triggers --events -uroot --password="$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"' \
+  | gzip -9 > "$backup_dir/database.sql.gz"
+docker run --rm --user 0 \
+  -v "$minio_volume:/data:ro" \
+  -v "$backup_dir:/backup" \
+  alpine:3.22 sh -ec 'cd /data && tar -czf /backup/minio-data.tar.gz .'
+sha256sum "$backup_dir/database.sql.gz" "$backup_dir/minio-data.tar.gz" > "$backup_dir/SHA256SUMS"
+printf '%s\n' "$backup_dir" > "$app_dir/state/last-backup"
+
+install -m 0600 "$new_release" "$app_dir/release.env"
+if ! compose_with "$app_dir/release.env" run --rm migrate; then
+  echo "Schema migration failed. Application services remain stopped." >&2
+  exit 1
+fi
+if [[ ! -s $app_dir/state/cutover-complete ]]; then
+  if ! compose_with "$app_dir/release.env" run --rm cutover; then
+    echo "AI queue cutover failed. Application services remain stopped." >&2
+    exit 1
+  fi
+  printf '%s\n' "$tag" > "$app_dir/state/cutover-complete"
+  chmod 0600 "$app_dir/state/cutover-complete"
+fi
+
+compose_with "$app_dir/release.env" up -d --no-deps api
+api_container=$(compose_with "$app_dir/release.env" ps -q api)
+healthy=false
+for _ in $(seq 1 60); do
+  status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$api_container")
+  if [[ $status == healthy ]]; then
+    healthy=true
+    break
+  fi
+  if [[ $status == exited || $status == dead ]]; then
+    break
+  fi
+  sleep 2
+done
+if [[ $healthy != true ]]; then
+  docker logs --tail 150 "$api_container" >&2 || true
+  echo "API did not become healthy. Worker and Web remain stopped." >&2
+  exit 1
+fi
+
+compose_with "$app_dir/release.env" up -d --no-deps worker web
+for _ in $(seq 1 30); do
+  if curl --fail --silent --show-error http://127.0.0.1:4015/api/healthz >/dev/null; then
+    install -m 0600 "$app_dir/release.env" "$app_dir/state/current-release.env"
+    echo "Deployed $tag using immutable image digests"
+    exit 0
+  fi
+  sleep 2
+done
+
+echo "Web origin did not become healthy; inspect Compose logs before rollback" >&2
+exit 1

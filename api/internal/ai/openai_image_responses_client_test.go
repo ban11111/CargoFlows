@@ -83,7 +83,7 @@ func TestResponsesImageClientSendsStoredFalseToolRequestAndParsesImage(t *testin
 		t.Fatalf("input content = %#v", content)
 	}
 	inputText := content[0].(map[string]any)["text"].(string)
-	for _, required := range []string{"[IMAGE GENERATION TASK BRIEF", "PRIMARY SUBJECT", "Image 1: EDIT BASE", "<normalized_input_json>", "<ordered_input_list_json>"} {
+	for _, required := range []string{"[图片生成任务摘要", "主商品——最高视觉权威", "图片 1: 编辑底图", "<normalized_input_json>", "<ordered_input_list_json>"} {
 		if !strings.Contains(inputText, required) {
 			t.Fatalf("Responses input text missing %q: %s", required, inputText)
 		}

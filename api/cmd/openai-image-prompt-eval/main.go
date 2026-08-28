@@ -19,7 +19,7 @@ import (
 var errImageEvalDisabled = errors.New("gpt-image-2 prompt evaluation is disabled; set OPENAI_IMAGE_PROMPT_EVAL=1 explicitly")
 
 func main() {
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
 	defer cancel()
 	if err := run(ctx, os.Getenv, nil); err != nil {
 		fmt.Fprintln(os.Stderr, "gpt-image-2 prompt evaluation failed:", err)
@@ -30,6 +30,9 @@ func main() {
 func run(ctx context.Context, getenv func(string) string, client *http.Client) error {
 	if getenv("OPENAI_IMAGE_PROMPT_EVAL") != "1" {
 		return errImageEvalDisabled
+	}
+	if strings.TrimSpace(getenv("OPENAI_IMAGE_PROMPT_EVAL_JOB_ID")) != "" {
+		return runLiveEvaluation(ctx, getenv, client)
 	}
 	key := []byte(strings.TrimSpace(getenv("OPENAI_API_KEY")))
 	if len(key) == 0 {
@@ -48,11 +51,6 @@ func run(ctx context.Context, getenv func(string) string, client *http.Client) e
 		return fmt.Errorf("target image: %w", err)
 	}
 	defer clearBytes(target)
-	reference, referenceMIME, err := readImage(getenv("OPENAI_IMAGE_USAGE_REFERENCE_PATH"))
-	if err != nil {
-		return fmt.Errorf("usage reference image: %w", err)
-	}
-	defer clearBytes(reference)
 	outputPath := strings.TrimSpace(getenv("OPENAI_IMAGE_OUTPUT_PATH"))
 	if outputPath == "" {
 		return errors.New("OPENAI_IMAGE_OUTPUT_PATH is required")
@@ -62,7 +60,7 @@ func run(ctx context.Context, getenv func(string) string, client *http.Client) e
 		return err
 	}
 	provider := ai.NewOpenAIImagesClient(baseURL, client, ai.OpenAIImagesConfig{Model: "gpt-image-2", MaxAttempts: 1, RequestTimeout: 210 * time.Second})
-	response, err := provider.Generate(ctx, key, ai.ImageRequest{Model: "gpt-image-2", APIMode: "images", Prompt: prompt, Inputs: []ai.ImageInput{{MIMEType: targetMIME, Bytes: target}, {MIMEType: referenceMIME, Bytes: reference}}})
+	response, err := provider.Generate(ctx, key, ai.ImageRequest{Model: "gpt-image-2", APIMode: "images", Prompt: prompt, Inputs: []ai.ImageInput{{MIMEType: targetMIME, Bytes: target}}})
 	if err != nil {
 		return err
 	}
@@ -78,7 +76,7 @@ func evaluationPrompt() (ai.CompiledImagePrompt, error) {
 	slot := ai.SlotFacts{
 		PublicID: "20000000-0000-4000-8000-000000000004", SlotKey: "hero", Kind: models.AIContentSlotImage,
 		Name: ai.LocalizedNameFacts{ZH: "主图", EN: "Hero image"}, Description: ai.LocalizedNameFacts{ZH: "手机壳装机展示", EN: "Fitted phone-case presentation"},
-		PromptFragment: "Create a faithful ecommerce hero image of {{sku.code}}.", Constraints: json.RawMessage(`{"preserve_identity":true,"no_text":true}`),
+		PromptFragment: "为 {{sku.code}} 生成忠实的电商主图。", Constraints: json.RawMessage(`{"preserve_identity":true,"no_text":true}`),
 		GenerationConfig: json.RawMessage(`{"candidate_count":1,"size":"1024x1024","quality":"medium","style":"soft_studio","allowed_styles":["soft_studio"]}`), LayoutConfig: json.RawMessage(`{"product_dominant":true}`),
 	}
 	referenceVersionID := "20000000-0000-4000-8000-000000000009"
@@ -87,7 +85,7 @@ func evaluationPrompt() (ai.CompiledImagePrompt, error) {
 		Product:             ai.ProductFacts{Name: "目标手机壳", Brand: "测试目标品牌", Description: "以目标图为唯一外观依据", Category: ai.CategoryFacts{NameZH: "手机壳", NameEN: "Phone cases"}},
 		SKU:                 ai.SKUFacts{PublicID: "20000000-0000-4000-8000-000000000001", Code: "EVAL-TARGET-CASE", Color: "严格按目标图", CompatibleDeviceModel: "严格按目标图"},
 		SOP:                 ai.SOPFacts{PublicID: "20000000-0000-4000-8000-000000000002", VersionPublicID: "20000000-0000-4000-8000-000000000003", VersionNumber: 1, SchemaVersion: "1.0", Name: ai.LocalizedNameFacts{ZH: "提示词回归", EN: "Prompt regression"}, Description: ai.LocalizedNameFacts{ZH: "验证主体身份约束", EN: "Validate subject identity constraints"}, CoordinateSystem: "pcs_object_v1"},
-		Template:            ai.TemplateFacts{TemplatePublicID: "20000000-0000-4000-8000-000000000005", VersionPublicID: "20000000-0000-4000-8000-000000000006", VersionNumber: 1, PlatformPrompt: "Create a clean commercial product image without text.", SelectedSlots: []ai.SlotFacts{slot}},
+		Template:            ai.TemplateFacts{TemplatePublicID: "20000000-0000-4000-8000-000000000005", VersionPublicID: "20000000-0000-4000-8000-000000000006", VersionNumber: 1, PlatformPrompt: "生成干净、无文字的商业商品图。", SelectedSlots: []ai.SlotFacts{slot}},
 		SelectedAssets:      []ai.AssetFacts{{PublicID: "20000000-0000-4000-8000-000000000007", SourceType: ai.AssetSourceProductVisual}},
 		ReferenceSOPs:       []ai.ReferenceSOPFacts{{PublicID: "20000000-0000-4000-8000-000000000008", VersionPublicID: referenceVersionID, VersionNumber: 1, Name: ai.LocalizedNameFacts{ZH: "另一款手机壳使用效果", EN: "Another case usage effect"}, Description: ai.LocalizedNameFacts{ZH: "只参考装机关系和构图", EN: "Fitted relationship and composition only"}}},
 		ExternalReferences:  []ai.ExternalReferenceFacts{{PublicID: "20000000-0000-4000-8000-000000000010", VersionPublicID: referenceVersionID, Purpose: models.AIReferenceUsageEffect, Caption: ai.LocalizedNameFacts{ZH: "另一款手机壳装机图", EN: "Another phone case fitted image"}, AllowedGuidance: ai.LocalizedNameFacts{ZH: "仅参考装机比例、空间关系和构图", EN: "Installed proportion, spatial relationship, and composition only"}, ForbiddenGuidance: ai.LocalizedNameFacts{ZH: "禁止继承外形、颜色、开孔、品牌、设备、配件、包装和文字", EN: "Do not inherit shape, color, cutouts, brand, device, accessories, packaging, or text"}}},

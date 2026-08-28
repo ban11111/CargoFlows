@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+ssh_target=${VPS_SSH_TARGET:-vps}
+remote_dir=${VPS_REMOTE_DIR:-/opt/cargoflows}
+tag=${1:-}
+
+if [[ ! $tag =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+  echo "Usage: ops/vps/deploy-vps vMAJOR.MINOR.PATCH" >&2
+  exit 2
+fi
+
+"$script_dir/sync-vps-files"
+ssh "$ssh_target" "$remote_dir/bin/remote-deploy '$tag'"

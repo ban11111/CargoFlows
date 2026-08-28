@@ -230,6 +230,18 @@ func (s *Server) regenerateAITextItem(c *gin.Context) {
 	c.JSON(http.StatusAccepted, value)
 }
 
+func (s *Server) regenerateAIJobItem(c *gin.Context) {
+	if !requireAIUUIDParam(c, "job_id") || !requireAIUUIDParam(c, "item_id") {
+		return
+	}
+	value, err := s.ai.Jobs.RegenerateItem(c.Request.Context(), c.Param("job_id"), c.Param("item_id"), currentUser(c).ID)
+	if err != nil {
+		respondAIError(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, value)
+}
+
 func (s *Server) listAITextResults(c *gin.Context) {
 	if !requireAIUUIDParam(c, "job_id") {
 		return
@@ -761,6 +773,8 @@ func respondAIError(c *gin.Context, err error) {
 	case errors.Is(err, ai.ErrTextItemRegenerationInvalid):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "text_regeneration_invalid", "message": err.Error()})
 	case errors.Is(err, ai.ErrTextItemRegenerationConflict):
+		c.JSON(http.StatusConflict, gin.H{"code": "lifecycle_conflict", "message": err.Error()})
+	case errors.Is(err, ai.ErrJobItemRegenerationConflict):
 		c.JSON(http.StatusConflict, gin.H{"code": "lifecycle_conflict", "message": err.Error()})
 	case errors.Is(err, ai.ErrTextResultNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})

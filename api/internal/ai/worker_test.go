@@ -243,6 +243,49 @@ func TestDryRunExecutorCreatesOneCompletedExecutionAndAudit(t *testing.T) {
 	}
 }
 
+func TestExecutionProvenanceAcceptsV2BilingualSnapshot(t *testing.T) {
+	db, job, _ := seedQueueItems(t, 1)
+	var snapshot ProductSnapshotV1
+	if err := json.Unmarshal(job.InputSnapshotJSON, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	snapshot.Schema = ProductSnapshotSchemaV2
+	snapshot.Locale = "en"
+	snapshot.OutputLocales = []string{"en", "zh-CN"}
+	snapshotJSON, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	localesJSON, err := json.Marshal(snapshot.OutputLocales)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&models.AIJob{}).Where("id = ?", job.ID).Updates(map[string]any{
+		"snapshot_schema":     ProductSnapshotSchemaV2,
+		"locale":              snapshot.Locale,
+		"output_locales_json": localesJSON,
+		"input_snapshot_json": snapshotJSON,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2026, 7, 22, 2, 0, 0, 0, time.UTC)
+	leased, err := NewQueue(db).LeaseNext(t.Context(), "worker-v2", now, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := newDryRunExecutorWithClock(db, fixedClock{now: now.Add(time.Second)}).Execute(t.Context(), *leased); err != nil {
+		t.Fatalf("execute v2 bilingual snapshot: %v", err)
+	}
+	var execution models.AIExecution
+	if err := db.First(&execution).Error; err != nil {
+		t.Fatal(err)
+	}
+	if execution.Status != models.AIExecutionCompleted || execution.L1ProductContextVersion != ProductSnapshotSchemaV2 {
+		t.Fatalf("v2 execution = %#v", execution)
+	}
+}
+
 func TestDryRunExecutorRejectsLostLeaseWithoutWrites(t *testing.T) {
 	db, _, _ := seedQueueItems(t, 1)
 	queue := NewQueue(db)
@@ -431,7 +474,7 @@ func TestWorkerStoresFixedSafeFailureForCorruptProvenance(t *testing.T) {
 	assertJobStatus(t, db, job.ID, models.AIJobFailed)
 	var stored models.AIJobItem
 	db.First(&stored, items[0].ID)
-	if stored.SafeError != defaultSafeExecutionError || stored.InternalError != "" {
+	if stored.SafeError != "invalid slot UUID" || stored.FailureCode != "invalid_input" || stored.InternalError != "" {
 		t.Fatalf("stored errors = safe %q internal %q", stored.SafeError, stored.InternalError)
 	}
 }

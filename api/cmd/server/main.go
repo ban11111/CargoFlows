@@ -18,7 +18,7 @@ func main() {
 		log.Fatalf("open database: %v", err)
 	}
 
-	if err := database.Seed(db); err != nil {
+	if err := database.SeedForEnvironment(db, cfg.AppEnv); err != nil {
 		log.Fatalf("seed database: %v", err)
 	}
 

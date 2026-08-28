@@ -479,6 +479,10 @@ func archiveDuplicateLegacyDraftsSQL(dialect string) string {
 }
 
 func Seed(db *gorm.DB) error {
+	return SeedForEnvironment(db, "development")
+}
+
+func SeedForEnvironment(db *gorm.DB, appEnv string) error {
 	if err := seedCatalog(db); err != nil {
 		return err
 	}
@@ -488,7 +492,19 @@ func Seed(db *gorm.DB) error {
 		return err
 	}
 	if count > 0 {
+		if strings.EqualFold(strings.TrimSpace(appEnv), "production") {
+			var superAdminCount int64
+			if err := db.Model(&models.User{}).Where("role = ?", models.RoleSuperAdmin).Count(&superAdminCount).Error; err != nil {
+				return err
+			}
+			if superAdminCount == 0 {
+				return errors.New("production startup refused: database has no super administrator")
+			}
+		}
 		return nil
+	}
+	if strings.EqualFold(strings.TrimSpace(appEnv), "production") {
+		return errors.New("production startup refused: database has no users; import production data before starting the API")
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.DefaultCost)

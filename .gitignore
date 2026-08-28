@@ -8,6 +8,7 @@
 .env
 .env.*
 !.env.example
+!.env.production.example
 !**/.env.example
 
 # Go
@@ -28,5 +29,8 @@ ios/build/
 
 # Deployment
 .vercel/
+migration-artifacts/
+rollback-artifacts/
+release.env
 
 *.log

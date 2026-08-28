@@ -217,6 +217,7 @@ func registerAIRoutes(protected *gin.RouterGroup, server *Server) {
 	aiJobs.GET("/ai-jobs/:job_id/image-threads", server.listAIImageThreads)
 	aiJobs.GET("/ai-jobs/:job_id/image-results/:result_id/media", server.aiImageResultMedia)
 	aiJobs.POST("/ai-jobs/:job_id/items/:item_id/regenerate-text", server.regenerateAITextItem)
+	aiJobs.POST("/ai-jobs/:job_id/items/:item_id/regenerate", server.regenerateAIJobItem)
 	aiJobs.POST("/ai-jobs/:job_id/items/:item_id/image-turns", server.createAIImageTurn)
 	aiJobs.POST("/ai-jobs/:job_id/items/:item_id/image-results/:result_id/select", server.selectAIImageResult)
 	aiJobs.POST("/ai-jobs/:job_id/items/:item_id/image-results/:result_id/submit-to-assets", server.submitAIImageResultToAssets)
